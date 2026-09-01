@@ -13566,18 +13566,19 @@ struct MetricsTests {
         seeded = QuickAISupport.appending(assistantText: "Hi", to: seeded)
         expect(seeded.messages.last?.role == .assistant && seeded.messages.last?.content == "Hi",
                "the reply is stored as an assistant turn")
-        var full = QuickAISupport.Chat()
+        var fullChat = QuickAISupport.Chat()
         for index in 0..<QuickAISupport.maximumMessagesPerChat {
-            full.messages.append(QuickAISupport.Message(role: .user, content: "\(index)"))
+            fullChat.messages.append(QuickAISupport.Message(role: .user, content: "\(index)"))
         }
-        expect(QuickAISupport.appending(userText: "one more", to: full) == nil,
+        expect(QuickAISupport.appending(userText: "one more", to: fullChat) == nil,
                "a chat stops accepting turns at the message cap")
-        let now = Date()
-        let older = QuickAISupport.Chat(title: "old", updatedAt: now.addingTimeInterval(-10))
-        let newer = QuickAISupport.Chat(title: "new", updatedAt: now)
+        let chatNow = Date()
+        let older = QuickAISupport.Chat(title: "old", updatedAt: chatNow.addingTimeInterval(-10))
+        let newer = QuickAISupport.Chat(title: "new", updatedAt: chatNow)
         let capped = QuickAISupport.cappedChats(
             (0..<QuickAISupport.maximumSavedChats + 5).map {
-                QuickAISupport.Chat(title: "\($0)", updatedAt: now.addingTimeInterval(TimeInterval($0)))
+                QuickAISupport.Chat(title: "\($0)",
+                                    updatedAt: chatNow.addingTimeInterval(TimeInterval($0)))
             })
         expect(capped.count == QuickAISupport.maximumSavedChats
                 && QuickAISupport.cappedChats([older, newer]).first?.title == "new",
