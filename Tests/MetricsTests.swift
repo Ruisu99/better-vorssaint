@@ -13564,9 +13564,12 @@ struct MetricsTests {
                 && SettingsBackupSupport.exportKeys().contains(DefaultsKey.quickAIWebSearch)
                 && SettingsBackupSupport.exportKeys().contains(DefaultsKey.quickAICommandBarKey)
                 && SettingsBackupSupport.exportKeys().contains(DefaultsKey.panelUtilityQuickAI)
+                && SettingsBackupSupport.exportKeys().contains(DefaultsKey.dictationOpenAIModel)
                 && !SettingsBackupSupport.exportKeys().contains(where: {
-                    $0.lowercased().contains("apikey") || $0.lowercased().contains("api-key")
-                        || $0.lowercased().contains("openai")
+                    let key = $0.lowercased()
+                    // Model ids may mention OpenAI; secret material never may.
+                    return key.contains("apikey") || key.contains("api-key")
+                        || key.contains("api_key") || key.hasSuffix("openaikey")
                 }),
                "Quick AI preferences travel in backups; the API key never does")
         expect(QuickAISupport.chatURL().host == QuickAISupport.apiHost
@@ -14033,8 +14036,9 @@ struct MetricsTests {
                "the mouse page hides only with all eight mouse features off")
         expect(!pageVisible(.energy, available: allFeatures.subtracting([.keepAwake, .brightness,
                                                                          .extraBrightness,
-                                                                         .bluetoothSleep])),
-               "energy hides when all four of its features are off")
+                                                                         .bluetoothSleep,
+                                                                         .displayModes])),
+               "energy hides when all of its features are off")
         expect(pageVisible(.energy, available: [.extraBrightness]), "XDR alone keeps the energy page")
         expect(pageVisible(.energy, available: [.brightness]),
                "brightness control alone keeps the energy page")
