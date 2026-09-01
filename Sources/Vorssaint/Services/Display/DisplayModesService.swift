@@ -203,14 +203,16 @@ final class DisplayModesService: ObservableObject {
     }
 
     private static func descriptor(for mode: CGDisplayMode) -> DisplayModesSupport.ModeDescriptor {
+        // Prefer the Swift properties CoreGraphics exposes; the CGDisplayModeGet*
+        // C helpers are obsoleted on current SDKs and fail the build.
         DisplayModesSupport.ModeDescriptor(
-            ioModeID: CGDisplayModeGetIODisplayModeID(mode),
-            width: CGDisplayModeGetWidth(mode),
-            height: CGDisplayModeGetHeight(mode),
-            pixelWidth: CGDisplayModeGetPixelWidth(mode),
-            pixelHeight: CGDisplayModeGetPixelHeight(mode),
-            refreshRate: CGDisplayModeGetRefreshRate(mode),
-            usableForDesktopGUI: CGDisplayModeIsUsableForDesktopGUI(mode))
+            ioModeID: mode.ioDisplayModeID,
+            width: mode.width,
+            height: mode.height,
+            pixelWidth: mode.pixelWidth,
+            pixelHeight: mode.pixelHeight,
+            refreshRate: mode.refreshRate,
+            usableForDesktopGUI: mode.isUsableForDesktopGUI())
     }
 
     /// The display names a person sees in System Settings. `NSScreen` is
