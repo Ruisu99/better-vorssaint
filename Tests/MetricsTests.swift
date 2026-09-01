@@ -12510,7 +12510,7 @@ struct MetricsTests {
 
         // MARK: Features hub catalog
 
-        expect(AppFeature.allCases.count == 58, "feature catalog has 58 features")
+        expect(AppFeature.allCases.count == 60, "feature catalog has 60 features")
         expect(Set(AppFeature.allCases.map(\.rawValue)).count == AppFeature.allCases.count,
                "feature ids are unique")
         expect(AppFeature.allCases.map(\.rawValue) == [
@@ -12520,10 +12520,11 @@ struct MetricsTests {
             "clipboardHistory", "pastePlain", "finderCutPaste", "finderRename", "shelf", "urlCleaner",
             "diskImageInstaller",
             "mixer", "soundOutputSwitcher", "micMute", "musicBlock",
-            "keepAwake", "brightness", "extraBrightness", "bluetoothSleep",
+            "keepAwake", "brightness", "extraBrightness", "bluetoothSleep", "displayModes",
             "quickLauncher", "quickToggles", "colorPicker", "screenOCR", "cleaningMode", "mediaTools",
             "cleaner", "uninstaller", "homebrew", "appUpdates", "screenshot", "cameraPreview",
             "radialMenu", "scratchpad", "commandBar", "screenRecorder", "killProcess", "quickAI",
+            "dictation",
             "monitorCPU", "monitorGPU", "monitorMemory", "monitorNetwork", "monitorDisk", "monitorPower",
             "fanControl",
         ], "feature ids are stable (they persist inside availability keys)")
@@ -12592,9 +12593,12 @@ struct MetricsTests {
                 && (AppFeature.availabilityDefaults[AppFeature.focusFollowsMouse.availabilityKey] as? Bool) == false
                 && (AppFeature.availabilityDefaults[AppFeature.killProcess.availabilityKey] as? Bool) == false
                 && (AppFeature.availabilityDefaults[AppFeature.quickAI.availabilityKey] as? Bool) == false
+                && (AppFeature.availabilityDefaults[AppFeature.displayModes.availabilityKey] as? Bool) == false
+                && (AppFeature.availabilityDefaults[AppFeature.dictation.availabilityKey] as? Bool) == false
                 && AppFeature.allCases.filter {
                     $0 != .focusFollowsMouse && $0 != .fanControl && $0 != .diskImageInstaller
                         && $0 != .killProcess && $0 != .quickAI
+                        && $0 != .displayModes && $0 != .dictation
                 }.allSatisfy {
                     (AppFeature.availabilityDefaults[$0.availabilityKey] as? Bool) == true
                 },
@@ -13442,7 +13446,7 @@ struct MetricsTests {
                    "kill process formats keep their placeholders (\(language.rawValue))")
             let quickAIValues = Mirror(reflecting: FeatureStrings.quickAI(language)).children
                 .compactMap { $0.value as? String }
-            expect(quickAIValues.count == 37 && quickAIValues.allSatisfy { !$0.isEmpty },
+            expect(quickAIValues.count == 39 && quickAIValues.allSatisfy { !$0.isEmpty },
                    "every Quick AI string is set for \(language.rawValue)")
             expect(quickAIValues.allSatisfy { !$0.contains("—") },
                    "no em-dash in visible Quick AI strings (\(language.rawValue))")
@@ -13531,12 +13535,22 @@ struct MetricsTests {
                 && QuickAISupport.title(from: "") == "Chat"
                 && QuickAISupport.title(from: String(repeating: "x", count: 50)).count == 41,
                "chat titles come from the first user line")
-        expect(QuickAISupport.Model.sanitized(nil) == QuickAISupport.defaultModel
+        expect(QuickAISupport.defaultModel == QuickAISupport.Model.gpt56Luna.rawValue
+                && QuickAISupport.Model.sanitized(nil) == QuickAISupport.defaultModel
                 && QuickAISupport.Model.sanitized("") == QuickAISupport.defaultModel
                 && QuickAISupport.Model.sanitized(String(repeating: "m", count: 81))
                     == QuickAISupport.defaultModel
-                && QuickAISupport.Model.sanitized("gpt-4o") == "gpt-4o",
-               "unknown model names stay as typed; empty or oversized names fall back")
+                && QuickAISupport.Model.sanitized("gpt-4o-mini") == "gpt-4o-mini"
+                && QuickAISupport.Model.allCases.map(\.rawValue).contains("gpt-5.6-luna")
+                && QuickAISupport.Model.supportsReasoning("gpt-5.6-luna")
+                && !QuickAISupport.Model.supportsReasoning("gpt-4o-mini")
+                && QuickAISupport.ReasoningEffort.sanitized(nil) == .medium
+                && QuickAISupport.ReasoningEffort.options(for: "gpt-5.6-terra").count == 6
+                && QuickAISupport.ReasoningEffort.options(for: "gpt-4.1").isEmpty
+                && QuickAISupport.usesResponsesAPI(model: "gpt-5.6-luna", webSearch: false)
+                && !QuickAISupport.usesResponsesAPI(model: "gpt-4o-mini", webSearch: false)
+                && QuickAISupport.usesResponsesAPI(model: "gpt-4o-mini", webSearch: true),
+               "GPT-5.6 Luna is the default, with intensity only on those models")
         expect(QuickAISupport.CommandBarKey.sanitized(nil) == .tab
                 && QuickAISupport.CommandBarKey.sanitized("slash") == .slash
                 && QuickAISupport.CommandBarKey.sanitized("nope") == .tab
@@ -13625,6 +13639,21 @@ struct MetricsTests {
                    "web search uses the Responses API with an explicit web_search tool")
         } else {
             expect(false, "responses body is JSON with a web_search tool")
+        }
+        var lunaChat = QuickAISupport.Chat(model: "gpt-5.6-luna", webSearch: false)
+        lunaChat = QuickAISupport.appending(userText: "Hi", to: lunaChat)!
+        if let lunaData = QuickAISupport.responsesBody(chat: lunaChat,
+                                                       languageCode: "en",
+                                                       reasoningEffort: "high"),
+           let lunaObject = try? JSONSerialization.jsonObject(with: lunaData) as? [String: Any],
+           let reasoning = lunaObject["reasoning"] as? [String: Any] {
+            expect(lunaObject["model"] as? String == "gpt-5.6-luna"
+                    && lunaObject["tools"] == nil
+                    && lunaObject["temperature"] == nil
+                    && reasoning["effort"] as? String == "high",
+                   "GPT-5.6 Luna sends reasoning effort on the Responses API")
+        } else {
+            expect(false, "GPT-5.6 Luna body is JSON with reasoning.effort")
         }
         let completionJSON = """
         {"choices":[{"message":{"role":"assistant","content":"  ok  "}}]}
@@ -19582,9 +19611,10 @@ struct MetricsTests {
                 && CommandBarChrome.cornerRadius == 26
                 && CommandBarChrome.fieldFontSize == 18,
                "the bar stays the known width, with Spotlight-like corners and type")
-        expect(CommandBarChrome.appearDuration < 0.2
+        expect(CommandBarChrome.appearDuration < 0.3
                 && CommandBarChrome.disappearDuration < CommandBarChrome.appearDuration
                 && CommandBarChrome.expandDuration < 0.2
+                && CommandBarChrome.appearLift > 0
                 && CommandBarChrome.hairlineHeight < 1,
                "appear, dismiss and compact-expand stay short so they never feel like a second job")
         expect(CommandBarChrome.selectionOpacity(isDark: true)
@@ -19608,9 +19638,10 @@ struct MetricsTests {
             encoding: .utf8)) ?? ""
         expect(commandBarServiceSource.contains("CommandBarChrome.appearDuration")
                 && commandBarServiceSource.contains("CommandBarChrome.disappearDuration")
+                && commandBarServiceSource.contains("CommandBarChrome.appearLift")
                 && commandBarServiceSource.contains("animator().alphaValue")
                 && commandBarServiceSource.contains("accessibilityDisplayShouldReduceMotion"),
-               "the bar fades in and out, and Reduce Motion skips the fade")
+               "the bar fades and lifts in, and Reduce Motion skips the motion")
         expect(!commandBarServiceSource.contains("animator().alphaValue = 1")
                 || commandBarServiceSource.contains("CommandBarChrome.appearDuration"),
                "the appear fade is the same duration the chrome names")

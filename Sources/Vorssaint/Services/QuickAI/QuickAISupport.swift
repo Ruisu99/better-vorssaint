@@ -11,7 +11,8 @@ enum QuickAISupport {
     static let apiHost = "api.openai.com"
     static let chatPath = "/v1/chat/completions"
     static let responsesPath = "/v1/responses"
-    static let defaultModel = Model.gpt4oMini.rawValue
+    static let defaultModel = Model.gpt56Luna.rawValue
+    static let defaultReasoningEffort = ReasoningEffort.medium.rawValue
     static let maximumInputLength = 20_000
     static let maximumMessagesPerChat = 80
     static let maximumSavedChats = 40
@@ -25,30 +26,82 @@ enum QuickAISupport {
     private static let kVK_ANSI_Slash = 44
 
     enum Model: String, CaseIterable, Identifiable {
-        case gpt4oMini = "gpt-4o-mini"
-        case gpt4o = "gpt-4o"
+        case gpt56Luna = "gpt-5.6-luna"
+        case gpt56Terra = "gpt-5.6-terra"
+        case gpt56Sol = "gpt-5.6-sol"
         case gpt41Mini = "gpt-4.1-mini"
         case gpt41 = "gpt-4.1"
-        case o4Mini = "o4-mini"
+        case gpt4oMini = "gpt-4o-mini"
 
         var id: String { rawValue }
 
         var displayName: String {
             switch self {
-            case .gpt4oMini: return "GPT-4o mini"
-            case .gpt4o: return "GPT-4o"
+            case .gpt56Luna: return "GPT-5.6 Luna"
+            case .gpt56Terra: return "GPT-5.6 Terra"
+            case .gpt56Sol: return "GPT-5.6 Sol"
             case .gpt41Mini: return "GPT-4.1 mini"
             case .gpt41: return "GPT-4.1"
-            case .o4Mini: return "o4-mini"
+            case .gpt4oMini: return "GPT-4o mini"
             }
+        }
+
+        var supportsReasoning: Bool {
+            switch self {
+            case .gpt56Luna, .gpt56Terra, .gpt56Sol: return true
+            case .gpt41Mini, .gpt41, .gpt4oMini: return false
+            }
+        }
+
+        static func supportsReasoning(_ raw: String) -> Bool {
+            Model(rawValue: raw)?.supportsReasoning
+                ?? raw.lowercased().hasPrefix("gpt-5.6")
         }
 
         static func sanitized(_ raw: String?) -> String {
             let trimmed = (raw ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             if trimmed.isEmpty { return defaultModel }
             if trimmed.count > 80 { return defaultModel }
+            // Older defaults still work; unknown short ids stay as typed so a
+            // future OpenAI alias the person pastes is not silently replaced.
             return trimmed
         }
+    }
+
+    /// How hard a GPT-5.6 model thinks. Older chat models ignore this.
+    enum ReasoningEffort: String, CaseIterable, Identifiable {
+        case none
+        case low
+        case medium
+        case high
+        case xhigh
+        case max
+
+        var id: String { rawValue }
+
+        var displayName: String {
+            switch self {
+            case .none: return "None"
+            case .low: return "Low"
+            case .medium: return "Medium"
+            case .high: return "High"
+            case .xhigh: return "Extra high"
+            case .max: return "Max"
+            }
+        }
+
+        static func sanitized(_ raw: String?) -> ReasoningEffort {
+            ReasoningEffort(rawValue: (raw ?? "").trimmingCharacters(in: .whitespacesAndNewlines))
+                ?? .medium
+        }
+
+        static func options(for model: String) -> [ReasoningEffort] {
+            Model.supportsReasoning(model) ? allCases : []
+        }
+    }
+
+    static func usesResponsesAPI(model: String, webSearch: Bool) -> Bool {
+        webSearch || Model.supportsReasoning(model)
     }
 
     /// Single key that, while the command bar is open, enters Quick AI.
@@ -233,9 +286,13 @@ enum QuickAISupport {
         Array(chats.sorted { $0.updatedAt > $1.updatedAt }.prefix(maximumSavedChats))
     }
 
-    /// Chat Completions payload. History is the conversation without a
-    /// duplicate system row: the system prompt is prepended here once.
-    static func chatCompletionsBody(chat: Chat, languageCode: String) -> Data? {
+    /// Chat Completions payload for older non-reasoning models. History is
+    /// the conversation without a duplicate system row: the system prompt is
+    /// prepended here once.
+    static func chatCompletionsBody(chat: Chat,
+                                    languageCode: String,
+                                    reasoningEffort: String = defaultReasoningEffort) -> Data? {
+        _ = reasoningEffort
         var messages: [[String: String]] = [
             ["role": "system",
              "content": conversationSystemPrompt(webSearch: false, languageCode: languageCode)],
@@ -254,12 +311,15 @@ enum QuickAISupport {
         return try? JSONSerialization.data(withJSONObject: payload)
     }
 
-    /// Responses API payload with web_search. Same conversation, different
-    /// envelope, so search stays an explicit opt-in rather than a surprise.
-    static func responsesBody(chat: Chat, languageCode: String) -> Data? {
+    /// Responses API payload. GPT-5.6 always uses this so reasoning effort can
+    /// travel with the request. Web search stays an explicit opt-in tool.
+    static func responsesBody(chat: Chat,
+                              languageCode: String,
+                              reasoningEffort: String = defaultReasoningEffort) -> Data? {
         var input: [[String: String]] = [
             ["role": "system",
-             "content": conversationSystemPrompt(webSearch: true, languageCode: languageCode)],
+             "content": conversationSystemPrompt(webSearch: chat.webSearch,
+                                                 languageCode: languageCode)],
         ]
         if let preamble = contextPreamble(chat.contextNote) {
             input.append(["role": "system", "content": preamble])
@@ -267,12 +327,20 @@ enum QuickAISupport {
         for message in chat.messages where message.role != .system {
             input.append(["role": message.role.rawValue, "content": clipped(message.content)])
         }
-        let payload: [String: Any] = [
+        var payload: [String: Any] = [
             "model": Model.sanitized(chat.model),
             "input": input,
-            "tools": [["type": "web_search"]],
-            "temperature": 0.4,
         ]
+        if chat.webSearch {
+            payload["tools"] = [["type": "web_search"]]
+        }
+        if Model.supportsReasoning(chat.model) {
+            payload["reasoning"] = [
+                "effort": ReasoningEffort.sanitized(reasoningEffort).rawValue,
+            ]
+        } else {
+            payload["temperature"] = 0.4
+        }
         return try? JSONSerialization.data(withJSONObject: payload)
     }
 

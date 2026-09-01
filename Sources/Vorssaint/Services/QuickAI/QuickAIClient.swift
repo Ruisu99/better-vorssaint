@@ -9,15 +9,21 @@ enum QuickAIClient {
     static func send(chat: QuickAISupport.Chat,
                       apiKey: String,
                       languageCode: String,
+                      reasoningEffort: String = QuickAISupport.defaultReasoningEffort,
                       session: URLSession = .shared) async -> Result<String, QuickAISupport.SendError> {
         let key = QuickAISupport.sanitizedAPIKey(apiKey)
         guard QuickAISupport.hasAPIKey(key) else { return .failure(.noKey) }
         guard chat.messages.contains(where: { $0.role == .user }) else { return .failure(.noText) }
 
-        let url = chat.webSearch ? QuickAISupport.responsesURL() : QuickAISupport.chatURL()
-        let body = chat.webSearch
-            ? QuickAISupport.responsesBody(chat: chat, languageCode: languageCode)
-            : QuickAISupport.chatCompletionsBody(chat: chat, languageCode: languageCode)
+        let useResponses = QuickAISupport.usesResponsesAPI(model: chat.model, webSearch: chat.webSearch)
+        let url = useResponses ? QuickAISupport.responsesURL() : QuickAISupport.chatURL()
+        let body = useResponses
+            ? QuickAISupport.responsesBody(chat: chat,
+                                           languageCode: languageCode,
+                                           reasoningEffort: reasoningEffort)
+            : QuickAISupport.chatCompletionsBody(chat: chat,
+                                                 languageCode: languageCode,
+                                                 reasoningEffort: reasoningEffort)
         guard let body else { return .failure(.parse) }
 
         let request = QuickAISupport.request(url: url, apiKey: key, body: body)
@@ -28,7 +34,7 @@ enum QuickAIClient {
             if !(200...299).contains(status) {
                 return .failure(QuickAISupport.httpError(status: status, data: data))
             }
-            return chat.webSearch
+            return useResponses
                 ? QuickAISupport.parseResponses(data)
                 : QuickAISupport.parseChatCompletions(data)
         } catch is CancellationError {

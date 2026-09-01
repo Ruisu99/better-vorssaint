@@ -10,9 +10,12 @@ enum CommandBarChrome {
     static let width: CGFloat = 560
     static let cornerRadius: CGFloat = 26
     static let fieldFontSize: CGFloat = 18
-    static let appearDuration: TimeInterval = 0.16
-    static let disappearDuration: TimeInterval = 0.12
+    static let appearDuration: TimeInterval = 0.22
+    static let disappearDuration: TimeInterval = 0.16
     static let expandDuration: TimeInterval = 0.14
+    /// How far the bar rises into place on open (points). Spotlight does the
+    /// same quiet lift; Reduce Motion skips it with the fade.
+    static let appearLift: CGFloat = 12
     static let hairlineHeight: CGFloat = 0.5
 
     /// The plate over the frost. Liquid Glass already carries the blur, so

@@ -83,6 +83,14 @@ struct QuickAIChatView: View {
                 }
             }
             .frame(maxWidth: 180)
+            if !QuickAISupport.ReasoningEffort.options(for: service.model).isEmpty {
+                Picker(strings.intensityLabel, selection: $service.reasoningEffort) {
+                    ForEach(QuickAISupport.ReasoningEffort.allCases) { effort in
+                        Text(effort.displayName).tag(effort.rawValue)
+                    }
+                }
+                .frame(maxWidth: 140)
+            }
             Toggle(service.webSearch ? strings.webSearchOn : strings.webSearchOff,
                    isOn: $service.webSearch)
                 .toggleStyle(.checkbox)

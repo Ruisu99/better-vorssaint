@@ -226,6 +226,7 @@ enum DefaultsKey {
     static let killProcessSortAscending = "killProcessSortAscending"
     static let panelUtilityQuickAI = "panelUtilityQuickAI"
     static let quickAIModel = "quickAIModel"
+    static let quickAIReasoningEffort = "quickAIReasoningEffort"
     static let quickAIWebSearch = "quickAIWebSearch"
     static let quickAICommandBarKey = "quickAICommandBarKey"
     static let panelUtilityCleaner = "panelUtilityCleaner"
@@ -1003,6 +1004,7 @@ enum Defaults {
         DefaultsKey.killProcessSortAscending: false,
         DefaultsKey.panelUtilityQuickAI: true,
         DefaultsKey.quickAIModel: QuickAISupport.defaultModel,
+        DefaultsKey.quickAIReasoningEffort: QuickAISupport.defaultReasoningEffort,
         DefaultsKey.quickAIWebSearch: false,
         DefaultsKey.quickAICommandBarKey: QuickAISupport.CommandBarKey.tab.rawValue,
         DefaultsKey.panelUtilityCleaner: true,

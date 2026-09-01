@@ -342,13 +342,20 @@ final class CommandBarService: ObservableObject {
             panel.makeKey()
             return
         }
+        // Fade and a short lift into place: one surface moving, not a second
+        // layout pass. The resting frame is already set by position(_:).
+        let resting = panel.frame
+        var lifted = resting
+        lifted.origin.y -= CommandBarChrome.appearLift
         panel.alphaValue = 0
+        panel.setFrame(lifted, display: false)
         panel.orderFrontRegardless()
         panel.makeKey()
         NSAnimationContext.runAnimationGroup { context in
             context.duration = CommandBarChrome.appearDuration
             context.timingFunction = CAMediaTimingFunction(name: .easeOut)
             panel.animator().alphaValue = 1
+            panel.animator().setFrame(resting, display: true)
         }
     }
 
@@ -402,14 +409,19 @@ final class CommandBarService: ObservableObject {
             finishHideContent()
             return
         }
+        let resting = panel.frame
+        var dropped = resting
+        dropped.origin.y -= CommandBarChrome.appearLift
         NSAnimationContext.runAnimationGroup({ context in
             context.duration = CommandBarChrome.disappearDuration
             context.timingFunction = CAMediaTimingFunction(name: .easeIn)
             panel.animator().alphaValue = 0
+            panel.animator().setFrame(dropped, display: true)
         }, completionHandler: { [weak self] in
             guard let self, generation == self.appearanceGeneration else { return }
             panel.orderOut(nil)
             panel.alphaValue = 1
+            panel.setFrame(resting, display: false)
             panel.ignoresMouseEvents = false
             self.finishHideContent()
         })

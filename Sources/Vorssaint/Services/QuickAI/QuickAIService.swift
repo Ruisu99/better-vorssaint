@@ -30,6 +30,18 @@ final class QuickAIService: ObservableObject {
             if sanitized != model { model = sanitized; return }
             UserDefaults.standard.set(sanitized, forKey: DefaultsKey.quickAIModel)
             draft.model = sanitized
+            if !QuickAISupport.Model.supportsReasoning(sanitized),
+               reasoningEffort != QuickAISupport.defaultReasoningEffort {
+                reasoningEffort = QuickAISupport.defaultReasoningEffort
+            }
+        }
+    }
+    @Published var reasoningEffort = QuickAISupport.defaultReasoningEffort {
+        didSet {
+            guard reasoningEffort != oldValue else { return }
+            let sanitized = QuickAISupport.ReasoningEffort.sanitized(reasoningEffort).rawValue
+            if sanitized != reasoningEffort { reasoningEffort = sanitized; return }
+            UserDefaults.standard.set(sanitized, forKey: DefaultsKey.quickAIReasoningEffort)
         }
     }
 
@@ -42,6 +54,8 @@ final class QuickAIService: ObservableObject {
         let defaults = UserDefaults.standard
         webSearch = defaults.bool(forKey: DefaultsKey.quickAIWebSearch)
         model = QuickAISupport.Model.sanitized(defaults.string(forKey: DefaultsKey.quickAIModel))
+        reasoningEffort = QuickAISupport.ReasoningEffort.sanitized(
+            defaults.string(forKey: DefaultsKey.quickAIReasoningEffort)).rawValue
         savedChats = QuickAIStore.loadChats()
         hasAPIKey = QuickAISupport.hasAPIKey(QuickAIStore.loadAPIKey())
         resetDraft(keepingContext: false)
@@ -117,7 +131,11 @@ final class QuickAIService: ObservableObject {
         let chat = next
         sendTask?.cancel()
         sendTask = Task { [weak self] in
-            let result = await QuickAIClient.send(chat: chat, apiKey: key, languageCode: language)
+            let result = await QuickAIClient.send(chat: chat,
+                                                  apiKey: key,
+                                                  languageCode: language,
+                                                  reasoningEffort: self?.reasoningEffort
+                                                    ?? QuickAISupport.defaultReasoningEffort)
             await MainActor.run {
                 guard let self, generation == self.sendGeneration else { return }
                 self.isSending = false

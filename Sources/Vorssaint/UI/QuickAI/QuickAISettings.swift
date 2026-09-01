@@ -33,6 +33,16 @@ struct QuickAISettings: View {
                         Text(model.displayName).tag(model.rawValue)
                     }
                 }
+                if !QuickAISupport.ReasoningEffort.options(for: service.model).isEmpty {
+                    Picker(strings.intensityLabel, selection: $service.reasoningEffort) {
+                        ForEach(QuickAISupport.ReasoningEffort.allCases) { effort in
+                            Text(effort.displayName).tag(effort.rawValue)
+                        }
+                    }
+                    Text(strings.intensityCaption)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 Toggle(strings.webSearchLabel, isOn: $service.webSearch)
                 Text(strings.webSearchCaption)
                     .font(.caption)
