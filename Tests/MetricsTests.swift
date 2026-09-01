@@ -14459,6 +14459,78 @@ struct MetricsTests {
                 && BrightnessSupport.wholePercent(.infinity) == 0,
                "brightness overlay percentage rounds and clamps safely")
 
+        // MARK: Display modes (Better Display-style resolution switcher)
+
+        expect(DisplayModesSupport.isHiDPI(width: 1280, pixelWidth: 2560),
+               "a doubled pixel grid reads as HiDPI")
+        expect(!DisplayModesSupport.isHiDPI(width: 1920, pixelWidth: 1920),
+               "a 1:1 pixel grid is not HiDPI")
+        expect(DisplayModesSupport.isHiDPI(width: 1512, pixelWidth: 3024),
+               "a MacBook-style scaled resolution still counts as HiDPI")
+        expect(!DisplayModesSupport.isHiDPI(width: 0, pixelWidth: 0),
+               "a degenerate zero-width mode is never HiDPI")
+
+        let hidpiMode = DisplayModesSupport.ModeDescriptor(
+            ioModeID: 1, width: 1280, height: 800, pixelWidth: 2560, pixelHeight: 1600,
+            refreshRate: 60, usableForDesktopGUI: true)
+        expect(DisplayModesSupport.isHiDPI(hidpiMode), "the descriptor overload matches the raw one")
+
+        let native = DisplayModesSupport.ModeDescriptor(
+            ioModeID: 1, width: 2560, height: 1600, pixelWidth: 2560, pixelHeight: 1600,
+            refreshRate: 60, usableForDesktopGUI: true)
+        let duplicateOfNative = DisplayModesSupport.ModeDescriptor(
+            ioModeID: 2, width: 2560, height: 1600, pixelWidth: 2560, pixelHeight: 1600,
+            refreshRate: 60, usableForDesktopGUI: true)
+        let scaled = DisplayModesSupport.ModeDescriptor(
+            ioModeID: 3, width: 1280, height: 800, pixelWidth: 2560, pixelHeight: 1600,
+            refreshRate: 60, usableForDesktopGUI: true)
+        let unusable = DisplayModesSupport.ModeDescriptor(
+            ioModeID: 4, width: 640, height: 480, pixelWidth: 640, pixelHeight: 480,
+            refreshRate: 60, usableForDesktopGUI: false)
+        let dedupedModes = DisplayModesSupport.deduplicated(
+            [native, duplicateOfNative, scaled, unusable])
+        expect(dedupedModes.count == 2,
+               "a duplicate io mode id for the same visual mode collapses, and unusable modes are dropped")
+        expect(dedupedModes.first(where: { $0.ioModeID == duplicateOfNative.ioModeID }) == nil,
+               "the first occurrence of a repeated resolution wins, not a later one")
+
+        let lowRefresh = DisplayModesSupport.ModeDescriptor(
+            ioModeID: 5, width: 1920, height: 1080, pixelWidth: 1920, pixelHeight: 1080,
+            refreshRate: 30, usableForDesktopGUI: true)
+        let highRefresh = DisplayModesSupport.ModeDescriptor(
+            ioModeID: 6, width: 1920, height: 1080, pixelWidth: 1920, pixelHeight: 1080,
+            refreshRate: 60, usableForDesktopGUI: true)
+        let smaller = DisplayModesSupport.ModeDescriptor(
+            ioModeID: 7, width: 1280, height: 720, pixelWidth: 1280, pixelHeight: 720,
+            refreshRate: 60, usableForDesktopGUI: true)
+        let orderedModes = DisplayModesSupport.sorted([lowRefresh, smaller, highRefresh])
+        expect(orderedModes.map(\.ioModeID) == [highRefresh.ioModeID, lowRefresh.ioModeID, smaller.ioModeID],
+               "the largest pixel area sorts first, then the highest refresh rate wins ties on area")
+
+        let targetIdentity = DisplayModesSupport.identity(for: highRefresh)
+        expect(DisplayModesSupport.mode(matching: targetIdentity, in: orderedModes)?.ioModeID
+                == highRefresh.ioModeID,
+               "an identity match finds the mode regardless of a reshuffled ioModeID")
+        let goneIdentity = DisplayModesSupport.ModeIdentity(
+            width: 3840, height: 2160, pixelWidth: 3840, pixelHeight: 2160, refreshRate: 60)
+        expect(DisplayModesSupport.mode(matching: goneIdentity, in: orderedModes) == nil,
+               "a resolution the display no longer offers has no match, never a closest guess")
+
+        expect(DisplayModesSupport.formattedResolution(width: 1920, height: 1080) == "1920 × 1080",
+               "resolution formatting uses a multiplication sign, not a bare x")
+        expect(DisplayModesSupport.formattedRefreshRate(0) == "",
+               "a zero refresh rate has nothing honest to show")
+        expect(DisplayModesSupport.formattedRefreshRate(60) == "60 Hz",
+               "a whole-number refresh rate has no decimal noise")
+        expect(DisplayModesSupport.formattedRefreshRate(59.94) == "59.94 Hz",
+               "a fractional refresh rate keeps its precision")
+        expect(DisplayModesSupport.formattedMode(width: 1920, height: 1080, refreshRate: 60)
+                == "1920 × 1080 @ 60 Hz",
+               "the full label joins resolution and refresh rate")
+        expect(DisplayModesSupport.formattedMode(width: 1920, height: 1080, refreshRate: 0)
+                == "1920 × 1080",
+               "the full label drops the rate suffix entirely when there is none to show")
+
         // MARK: Text snippets engine (issue #201)
 
         expect(TextSnippetSupport.sanitizedTrigger("  ;e mail\n") == ";email", "triggers lose whitespace")

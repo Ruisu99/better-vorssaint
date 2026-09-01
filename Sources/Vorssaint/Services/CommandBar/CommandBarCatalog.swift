@@ -505,6 +505,23 @@ enum CommandBarCatalog {
                 }))
         }
 
+        if AppFeature.displayModes.isAvailable {
+            let displayModesStrings = FeatureStrings.displayModes(language)
+            let enabled = UserDefaults.standard.bool(forKey: DefaultsKey.displayModesEnabled)
+            entries.append(CommandBarEntry(
+                id: "action.displayModes",
+                title: displayModesStrings.pageTitle,
+                subtitle: enabled ? displayModesStrings.panelCaption : area(.displayModes),
+                keywords: displayModesStrings.pageTitle,
+                icon: .symbol("rectangle.arrowtriangle.2.outward"),
+                trouble: enabled ? nil
+                    : .needsSetup(featureTitle: displayModesStrings.pageTitle, page: .energy),
+                run: { _ in
+                    openSettings(at: AppFeature.displayModes.settingsDestination,
+                                 targetFeature: .displayModes)
+                }))
+        }
+
         if AppFeature.mixer.isAvailable {
             entries.append(CommandBarEntry(
             id: "action.volume",

@@ -372,6 +372,7 @@ if (( TEST )); then
         Sources/Vorssaint/Services/CleaningMode/CleaningUnlockCounter.swift \
         Sources/Vorssaint/Services/Display/ExtraBrightnessSupport.swift \
         Sources/Vorssaint/Services/Display/BrightnessSupport.swift \
+        Sources/Vorssaint/Services/Display/DisplayModesSupport.swift \
         Sources/Vorssaint/Services/Cleaner/CleanerSupport.swift \
         Sources/Vorssaint/Services/Cleaner/CleanerPolicy.swift \
         Sources/Vorssaint/Services/Cleaner/CleanerSchedule.swift \

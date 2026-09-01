@@ -636,6 +636,7 @@ struct EnergySettings: View {
     @ObservedObject private var permissions = Permissions.shared
     @ObservedObject private var extraBrightness = ExtraBrightnessService.shared
     @ObservedObject private var brightness = BrightnessService.shared
+    @ObservedObject private var displayModes = DisplayModesService.shared
     @AppStorage(DefaultsKey.brightnessControlEnabled) private var brightnessEnabled = false
     @AppStorage(DefaultsKey.brightnessKeysEnabled) private var brightnessKeysEnabled = false
     @AppStorage(DefaultsKey.brightnessOSDEnabled) private var brightnessOSDEnabled = false
@@ -643,6 +644,7 @@ struct EnergySettings: View {
     @AppStorage(DefaultsKey.extraBrightnessLevel) private var extraBrightnessLevel = 100
     @AppStorage(DefaultsKey.bluetoothSleepEnabled) private var bluetoothSleepEnabled = false
     @AppStorage(DefaultsKey.bluetoothSleepRestoreOnWake) private var bluetoothSleepRestoreOnWake = true
+    @AppStorage(DefaultsKey.displayModesEnabled) private var displayModesEnabled = false
     @AppStorage(DefaultsKey.defaultDuration) private var defaultDuration = 0
     @AppStorage(DefaultsKey.batteryLimit) private var batteryLimit = 10
     @AppStorage(DefaultsKey.keepAwakeAutoStart) private var keepAwakeAutoStart = false
@@ -821,6 +823,33 @@ struct EnergySettings: View {
                 }
                 .settingsSectionAnchor(.bluetoothSleep)
             }
+            if AppFeature.displayModes.isAvailable {
+                let strings = FeatureStrings.displayModes(l10n.language)
+                Section(strings.pageTitle) {
+                    SettingsToggleWithCaption(title: strings.enable,
+                                              caption: strings.enableCaption,
+                                              isOn: $displayModesEnabled)
+                        .onChange(of: displayModesEnabled) { _, _ in
+                            DisplayModesService.shared.syncWithPreferences()
+                        }
+                    if displayModesEnabled {
+                        if displayModes.displays.isEmpty {
+                            SettingsCaptionText(strings.noDisplays)
+                        } else {
+                            ForEach(displayModes.displays) { display in
+                                displayModeRow(display, strings: strings)
+                            }
+                            if let failedID = displayModes.lastFailedDisplayID,
+                               displayModes.displays.contains(where: { $0.id == failedID }) {
+                                Text(strings.applyFailed)
+                                    .font(.caption)
+                                    .foregroundStyle(.red)
+                            }
+                        }
+                    }
+                }
+                .settingsSectionAnchor(.displayModes)
+            }
         }
         .formStyle(.grouped)
         .onAppear {
@@ -834,6 +863,40 @@ struct EnergySettings: View {
             // re-check so the section never shows a stale availability.
             ExtraBrightnessService.shared.syncWithPreferences()
             BrightnessService.shared.refresh()
+            DisplayModesService.shared.refresh()
+        }
+    }
+
+    private func displayModeRow(_ display: DisplayModesDisplay, strings: DisplayModesFeatureStrings) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: display.isBuiltIn ? "laptopcomputer" : "display")
+                .foregroundStyle(.secondary)
+                .frame(width: 18)
+            Text(display.name)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer(minLength: 8)
+            if let current = display.currentMode, current.isHiDPI {
+                Text(strings.hidpiBadge)
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(Capsule().fill(Color.secondary.opacity(0.12)))
+            }
+            Picker("", selection: Binding(
+                get: { display.currentMode?.id ?? display.modes.first?.id },
+                set: { newID in
+                    guard let option = display.modes.first(where: { $0.id == newID }) else { return }
+                    DisplayModesService.shared.apply(option, to: display.id)
+                })) {
+                ForEach(display.modes) { mode in
+                    Text(mode.fullLabel).tag(Optional(mode.id))
+                }
+            }
+            .labelsHidden()
+            .frame(maxWidth: 220)
+            .disabled(displayModes.isDisplayPending(display.id))
         }
     }
 
