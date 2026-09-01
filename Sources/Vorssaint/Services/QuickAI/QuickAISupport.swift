@@ -134,7 +134,7 @@ enum QuickAISupport {
         }
     }
 
-    enum SendError: Equatable {
+    enum SendError: Error, Equatable {
         case noKey
         case noText
         case network

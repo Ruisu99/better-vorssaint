@@ -13545,6 +13545,12 @@ struct MetricsTests {
                 && QuickAISupport.CommandBarKey.matching(keyCode: 44) == .slash
                 && QuickAISupport.CommandBarKey.matching(keyCode: 0) == nil,
                "the Command Bar Quick AI key is Tab, grave or slash")
+        let sendFailure: Result<String, QuickAISupport.SendError> = .failure(.noKey)
+        expect({
+            if case .failure(.noKey) = sendFailure { return true }
+            return false
+        }(),
+               "SendError is an Error so Result can carry a failed send")
         expect(!QuickAISupport.conversationSystemPrompt(webSearch: false, languageCode: "en")
                     .localizedCaseInsensitiveContains("web search")
                 && QuickAISupport.conversationSystemPrompt(webSearch: true, languageCode: "en")
