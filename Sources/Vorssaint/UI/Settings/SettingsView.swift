@@ -1614,6 +1614,10 @@ struct AboutSettings: View {
             VStack(spacing: 3) {
                 Text(AppInfo.name)
                     .font(.title2.bold())
+                Text(AppInfo.forkAttribution)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
                 HStack(spacing: 6) {
                     Text("\(l10n.s.versionPrefix) \(AppInfo.version)")
                         .font(.caption)

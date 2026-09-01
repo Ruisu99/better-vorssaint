@@ -58,6 +58,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         // build, or retire a leftover old-named bundle. Returns true when we are
         // quitting to relaunch under the new name, so skip the rest of startup.
         if BundleMigration.run() { return }
+        ForkIdentityMigration.runAtLaunch()
 
         // Shape a clean install before any feature can create a listener,
         // timer or shortcut. The onboarding can replace this set after the
@@ -1361,7 +1362,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             window.delegate = self
             settingsWindow = window
         }
-        settingsWindow?.title = L10n.shared.s.settingsTitle
+            // Localizations still say "Vorssaint"; swap in the fork name so the
+            // window title matches the app the user launched.
+            settingsWindow?.title = L10n.shared.s.settingsTitle
+                .replacingOccurrences(of: "Vorssaint", with: AppInfo.name)
         if let window = settingsWindow {
             positionSettingsWindow(window, force: createdWindow)
         }

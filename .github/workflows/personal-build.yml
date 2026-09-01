@@ -29,19 +29,19 @@ jobs:
         run: ./build.sh
 
       - name: Selftest
-        run: ./build/Vorssaint --selftest
+        run: ./build/BetterVorssaint --selftest
 
       - name: Zip app
         run: |
           mkdir -p dist
-          ditto -c -k --keepParent build/stage/Vorssaint.app dist/Vorssaint.zip
-          ls -lh dist/Vorssaint.zip
+          ditto -c -k --keepParent "build/stage/Better Vorssaint.app" dist/BetterVorssaint.zip
+          ls -lh dist/BetterVorssaint.zip
 
       - name: Upload artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: Vorssaint
-          path: dist/Vorssaint.zip
+          name: BetterVorssaint
+          path: dist/BetterVorssaint.zip
           if-no-files-found: error
           retention-days: 14
 
@@ -51,7 +51,10 @@ jobs:
         run: |
           set -euo pipefail
           NOTES="$(cat <<EOF
-          Personal build from \`${GITHUB_SHA}\` on \`${GITHUB_REF_NAME}\`.
+          Better Vorssaint personal build from \`${GITHUB_SHA}\` on \`${GITHUB_REF_NAME}\`.
+
+          Personal fork of Vorssaint (GPL-3.0). Own app name and bundle id so it
+          does not fight the official app for the menu bar.
 
           On your Mac (no Xcode):
 
@@ -59,18 +62,19 @@ jobs:
           curl -fsSL https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${GITHUB_SHA}/Tools/install-latest.sh | zsh
           \`\`\`
 
-          Or download Vorssaint.zip, unzip, drag to Applications, then right-click Open.
+          Or download BetterVorssaint.zip, unzip, drag to Applications, then right-click Open.
 
-          The installer turns off automatic official updates so they cannot replace this build.
+          The installer removes older Vorssaint.app copies left by previous
+          fork installs and turns off automatic official updates.
           EOF
           )"
           if gh release view personal-latest >/dev/null 2>&1; then
             gh release delete personal-latest --yes
           fi
           gh api -X DELETE "repos/${GITHUB_REPOSITORY}/git/refs/tags/personal-latest" >/dev/null 2>&1 || true
-          gh release create personal-latest dist/Vorssaint.zip \
+          gh release create personal-latest dist/BetterVorssaint.zip \
             --target "$GITHUB_SHA" \
-            --title "Latest personal build" \
+            --title "Latest Better Vorssaint build" \
             --notes "$NOTES" \
             --prerelease \
             --latest=false

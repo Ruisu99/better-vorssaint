@@ -3219,6 +3219,11 @@ struct MetricsTests {
                "update intro navigates back without closing")
         expect(SupportUpdateIntroStep.allCases == [.discord, .social, .support],
                "update intro page indicators follow the navigation order")
+        expect(AppInfo.name == "Better Vorssaint"
+                && AppInfo.forkAttribution.contains("better-vorssaint")
+                && AppInfo.repositoryURL.absoluteString
+                    == "https://github.com/Ruisu99/better-vorssaint",
+               "this build identifies as the better-vorssaint personal fork")
         expect(AppInfo.discordURL.absoluteString == "https://discord.gg/M6BwWH4BJp",
                "the community action uses the permanent Discord invitation")
         expect(AppInfo.coffeeURL.absoluteString == "https://buymeacoffee.com/vorssaint",
@@ -3230,6 +3235,10 @@ struct MetricsTests {
         // per-release decision: this check fails on every version bump so the
         // decision above is made consciously, never by omission.
         let releasePlist = NSDictionary(contentsOfFile: "Resources/Info.plist")
+        expect(releasePlist?["CFBundleIdentifier"] as? String == "com.ruisu99.bettervorssaint"
+                && releasePlist?["CFBundleName"] as? String == "Better Vorssaint"
+                && releasePlist?["BetterVorssaintFork"] as? Bool == true,
+               "Info.plist ships the Better Vorssaint fork identity")
         let plistVersion = (releasePlist?["CFBundleShortVersionString"] as? String) ?? ""
         expect(plistVersion == "3.3.3-beta.3",
                "bumping the app version requires re-deciding the support prompt pin above")
@@ -4444,7 +4453,8 @@ struct MetricsTests {
         expect(CleanerSupport.isProtectedBundleID("com.apple.Music")
                && CleanerSupport.isProtectedBundleID("com.apple")
                && CleanerSupport.isProtectedBundleID("group.com.apple.notes")
-               && CleanerSupport.isProtectedBundleID("com.vorssaint.utils"),
+               && CleanerSupport.isProtectedBundleID("com.vorssaint.utils")
+               && CleanerSupport.isProtectedBundleID("com.ruisu99.bettervorssaint"),
                "system domains and this app can never be junk owners")
         expect(!CleanerSupport.isProtectedBundleID("com.vendor.editor"),
                "third party identifiers are eligible for the leftover check")
@@ -4458,6 +4468,7 @@ struct MetricsTests {
                && UninstallerSupport.verifiedBundleID("plain-name") == nil
                && UninstallerSupport.verifiedBundleID("com.vendor../escape") == nil
                && UninstallerSupport.verifiedBundleID("com.vorssaint.utils") == nil
+               && UninstallerSupport.verifiedBundleID("com.ruisu99.bettervorssaint") == nil
                && UninstallerSupport.verifiedBundleID("com.apple.system") == nil,
                "malformed, protected and current app identifiers never enter uninstall paths")
         let uninstallAppURL = URL(fileURLWithPath: "/Applications/Editor.app")
@@ -9923,7 +9934,9 @@ struct MetricsTests {
                "a click after hiding lets the Dock bring the app back")
         expect(DockClickSupport.repeatDecision(lastAction: .hide, elapsed: 0.1) == .swallow,
                "an accidental double-click never hides and immediately reopens the app")
-        expect(DockClickSupport.isOwnBundleIdentifier("com.vorssaint.utils")
+        expect(DockClickSupport.isOwnBundleIdentifier("com.ruisu99.bettervorssaint")
+                && DockClickSupport.isOwnBundleIdentifier("com.ruisu99.bettervorssaint.dev")
+                && DockClickSupport.isOwnBundleIdentifier("com.vorssaint.utils")
                 && DockClickSupport.isOwnBundleIdentifier("com.vorssaint.utils.dev")
                 && !DockClickSupport.isOwnBundleIdentifier("com.example.editor")
                 && !DockClickSupport.isOwnBundleIdentifier(nil),

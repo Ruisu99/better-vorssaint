@@ -220,7 +220,7 @@ final class ShelfService: ObservableObject {
     private var edgePeekEndWork: DispatchWorkItem?
 
     private let tempDir: URL = {
-        let id = Bundle.main.bundleIdentifier ?? "com.vorssaint.utils"
+        let id = Bundle.main.bundleIdentifier ?? AppInfo.releaseBundleID
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("VorssaintShelf", isDirectory: true)
             .appendingPathComponent(id, isDirectory: true)

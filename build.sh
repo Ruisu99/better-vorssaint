@@ -26,8 +26,8 @@ trap cleanup EXIT
 # into the build sweeps like any other ending.
 trap 'exit 1' INT TERM HUP
 
-# Flags: --dev builds the local-only "Vorssaint (Developer)" variant (its own
-# bundle id, so it coexists with the official app); --install puts it in /Applications.
+# Flags: --dev builds the local-only "Better Vorssaint (Developer)" variant
+# (its own bundle id); --install puts it in /Applications.
 DEV=0
 INSTALL=0
 TEST=0
@@ -40,16 +40,16 @@ for arg in "$@"; do
 done
 
 if (( DEV )); then
-    APP_NAME="Vorssaint (Developer)"
-    EXECUTABLE="VorssaintDeveloper"
-    APP_BUNDLE_ID="com.vorssaint.utils.dev"
+    APP_NAME="Better Vorssaint (Developer)"
+    EXECUTABLE="BetterVorssaintDeveloper"
+    APP_BUNDLE_ID="com.ruisu99.bettervorssaint.dev"
     BUILD_VARIANT_FLAGS=(-D VORSSAINT_DEVELOPMENT)
     APP_OPTIMIZATION_FLAGS=(-Onone)
     BUILD_CONFIGURATION="debug"
 else
-    APP_NAME="Vorssaint"
-    EXECUTABLE="Vorssaint"
-    APP_BUNDLE_ID="com.vorssaint.utils"
+    APP_NAME="Better Vorssaint"
+    EXECUTABLE="BetterVorssaint"
+    APP_BUNDLE_ID="com.ruisu99.bettervorssaint"
     BUILD_VARIANT_FLAGS=()
     APP_OPTIMIZATION_FLAGS=(-O)
     BUILD_CONFIGURATION="release"
@@ -467,24 +467,27 @@ cp CHANGELOG.md "$STAGE/Contents/Resources/CHANGELOG.md"
 for lproj in Resources/*.lproj(N); do
     cp -R "$lproj" "$STAGE/Contents/Resources/"
 done
+# Release builds keep Info.plist as Better Vorssaint. Developer builds get a
+# distinct identity so they can sit next to a release install.
+FAN_PLIST="$STAGE/Contents/Library/LaunchDaemons/$FAN_HELPER_ID.plist"
+/usr/libexec/PlistBuddy -c "Set :Label $FAN_HELPER_ID" "$FAN_PLIST" 2>/dev/null \
+    || /usr/libexec/PlistBuddy -c "Add :Label string $FAN_HELPER_ID" "$FAN_PLIST"
+/usr/libexec/PlistBuddy -c "Set :BundleProgram Contents/Library/LaunchServices/$FAN_HELPER_ID" "$FAN_PLIST" 2>/dev/null \
+    || /usr/libexec/PlistBuddy -c "Add :BundleProgram string Contents/Library/LaunchServices/$FAN_HELPER_ID" "$FAN_PLIST"
+# Template plist still uses the upstream MachServices key name.
+/usr/libexec/PlistBuddy -c "Delete :MachServices:com.vorssaint.utils.fan-control" "$FAN_PLIST" 2>/dev/null || true
+/usr/libexec/PlistBuddy -c "Delete :MachServices:$FAN_HELPER_ID" "$FAN_PLIST" 2>/dev/null || true
+/usr/libexec/PlistBuddy -c "Add :MachServices:$FAN_HELPER_ID bool true" "$FAN_PLIST"
 if (( DEV )); then
-    # A distinct identity so the Developer build installs and runs next to the
-    # official app, with its own permissions, preferences and login item.
-    /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier com.vorssaint.utils.dev" "$STAGE/Contents/Info.plist"
-    /usr/libexec/PlistBuddy -c "Set :CFBundleName Vorssaint (Developer)" "$STAGE/Contents/Info.plist"
-    /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName Vorssaint (Developer)" "$STAGE/Contents/Info.plist"
-    /usr/libexec/PlistBuddy -c "Set :CFBundleExecutable $EXECUTABLE" "$STAGE/Contents/Info.plist"
-    FAN_PLIST="$STAGE/Contents/Library/LaunchDaemons/$FAN_HELPER_ID.plist"
-    /usr/libexec/PlistBuddy -c "Set :Label $FAN_HELPER_ID" "$FAN_PLIST"
-    /usr/libexec/PlistBuddy -c "Set :BundleProgram Contents/Library/LaunchServices/$FAN_HELPER_ID" "$FAN_PLIST"
-    /usr/libexec/PlistBuddy -c "Delete :MachServices:com.vorssaint.utils.fan-control" "$FAN_PLIST"
-    /usr/libexec/PlistBuddy -c "Add :MachServices:$FAN_HELPER_ID bool true" "$FAN_PLIST"
-    # Stamp the source commit + build time so the running dev app shows (in About)
-    # exactly which code it was compiled from. Lets you verify it matches HEAD before
-    # testing, instead of unknowingly running a stale build. Dev-only; never shipped.
+    /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier ${APP_BUNDLE_ID}" "$STAGE/Contents/Info.plist"
+    /usr/libexec/PlistBuddy -c "Set :CFBundleName '${APP_NAME}'" "$STAGE/Contents/Info.plist"
+    /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName '${APP_NAME}'" "$STAGE/Contents/Info.plist"
+    /usr/libexec/PlistBuddy -c "Set :CFBundleExecutable ${EXECUTABLE}" "$STAGE/Contents/Info.plist"
     SHA="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
     [[ -n "$(git status --porcelain 2>/dev/null)" ]] && SHA="$SHA-dirty"
-    /usr/libexec/PlistBuddy -c "Add :VorssaintBuildCommit string '$SHA · $(date '+%Y-%m-%d %H:%M')'" "$STAGE/Contents/Info.plist"
+    STAMP="$SHA · $(date '+%Y-%m-%d %H:%M')"
+    /usr/libexec/PlistBuddy -c "Add :BetterVorssaintBuildCommit string '${STAMP}'" "$STAGE/Contents/Info.plist" 2>/dev/null \
+        || /usr/libexec/PlistBuddy -c "Set :BetterVorssaintBuildCommit '${STAMP}'" "$STAGE/Contents/Info.plist"
     echo "  stamped dev build: $SHA"
 fi
 FAN_HELPER_VERSION="$(
@@ -646,12 +649,19 @@ echo "✓ Bundle ready: $BUILD_STAGE"
 if (( INSTALL )); then
     echo "▸ Installing into /Applications…"
     stop_process "$EXECUTABLE"
-    # Remove the pre-rename apps so two menu bar items never coexist. Same bundle
-    # id, so macOS keeps the granted permissions for the new bundle.
-    for legacy in "Vorss:Vorss" "Vorssaint Utils:VorssaintUtils"; do
+    # Retire every prior name this fork (and its upstream) has used so two
+    # menu-bar icons never coexist.
+    for legacy in \
+        "Vorss:Vorss" \
+        "Vorssaint Utils:VorssaintUtils" \
+        "Vorssaint:Vorssaint" \
+        "Vorssaint (Developer):VorssaintDeveloper" \
+        "Better Vorssaint:BetterVorssaint" \
+        "Better Vorssaint (Developer):BetterVorssaintDeveloper"
+    do
         name="${legacy%%:*}"; proc="${legacy##*:}"
         if [[ -d "/Applications/$name.app" ]]; then
-            stop_process "$proc"
+            stop_process "$proc" || true
             rm -rf "/Applications/$name.app"
             echo "  (legacy $name.app removed)"
         fi

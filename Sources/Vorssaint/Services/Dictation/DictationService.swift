@@ -99,11 +99,12 @@ final class DictationService: ObservableObject {
                 tapThread = nil
             }
         }
-        let cancel = { [weak self] in self?.cancelRecording() }
         if synchronously, Thread.isMainThread {
-            cancel()
+            cancelRecording()
         } else {
-            DispatchQueue.main.async(execute: cancel)
+            DispatchQueue.main.async { [weak self] in
+                self?.cancelRecording()
+            }
         }
     }
 
@@ -290,7 +291,7 @@ final class DictationService: ObservableObject {
             defer { try? FileManager.default.removeItem(at: url) }
             let result = await Self.runTranscription(engine: engine, wavURL: url, language: language,
                                                       openAIModel: openAIModel, openAIKey: openAIKey)
-            await MainActor.run {
+            await MainActor.run { [weak self] in
                 guard let self else { return }
                 self.isTranscribing = false
                 self.transcriptionTask = nil
