@@ -3,6 +3,7 @@
 
 import AppKit
 import Carbon.HIToolbox
+import QuartzCore
 import SwiftUI
 
 /// The command bar: one floating field, summoned by a global shortcut, that
@@ -99,6 +100,8 @@ final class CommandBarService: ObservableObject {
     private let hotkey = QuickToolHotkey(id: 20)
     private var rowHotkeys: [QuickToolHotkey] = []
     private var panel: NSPanel?
+    private var appearanceGeneration = 0
+    private var lastLaidOutCompact: Bool?
     private var keyMonitor: Any?
     private var outsideClickMonitor: Any?
     private var localClickMonitor: Any?
@@ -276,6 +279,8 @@ final class CommandBarService: ObservableObject {
         deferredRowShortcut.cancel()
         scriptRunner.reset()
         fileSearch.reset()
+        lastLaidOutCompact = nil
+        isTearingDown = false
         let id = UUID()
         presentationID = id
         presentationLifecycle.beginHome(id)
@@ -326,11 +331,25 @@ final class CommandBarService: ObservableObject {
     }
 
     private func present(_ panel: NSPanel) {
+        appearanceGeneration += 1
         position(panel)
         installMonitors(for: panel)
-        panel.alphaValue = 1
+        let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        panel.ignoresMouseEvents = false
+        if reduceMotion {
+            panel.alphaValue = 1
+            panel.orderFrontRegardless()
+            panel.makeKey()
+            return
+        }
+        panel.alphaValue = 0
         panel.orderFrontRegardless()
         panel.makeKey()
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = CommandBarChrome.appearDuration
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            panel.animator().alphaValue = 1
+        }
     }
 
     func hide() {
@@ -347,13 +366,7 @@ final class CommandBarService: ObservableObject {
         // Clearing the field on the way out would otherwise rebuild the whole
         // browse list for a panel nobody can see.
         isTearingDown = true
-        defer {
-            isTearingDown = false
-            rows = []
-            sectionTitles = [:]
-        }
         removeMonitors()
-        panel?.orderOut(nil)
         mode = .search
         // A selection belongs to the moment the bar was opened. Keeping it
         // would offer to act on text the person may have replaced since.
@@ -374,6 +387,39 @@ final class CommandBarService: ObservableObject {
         query = ""
         presentationLifecycle.hide()
         clearIndex()
+        appearanceGeneration += 1
+        let generation = appearanceGeneration
+        guard let panel else {
+            finishHideContent()
+            return
+        }
+        panel.ignoresMouseEvents = true
+        let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        if reduceMotion {
+            panel.orderOut(nil)
+            panel.alphaValue = 1
+            panel.ignoresMouseEvents = false
+            finishHideContent()
+            return
+        }
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = CommandBarChrome.disappearDuration
+            context.timingFunction = CAMediaTimingFunction(name: .easeIn)
+            panel.animator().alphaValue = 0
+        }, completionHandler: { [weak self] in
+            guard let self, generation == self.appearanceGeneration else { return }
+            panel.orderOut(nil)
+            panel.alphaValue = 1
+            panel.ignoresMouseEvents = false
+            self.finishHideContent()
+        })
+    }
+
+    private func finishHideContent() {
+        isTearingDown = false
+        rows = []
+        sectionTitles = [:]
+        lastLaidOutCompact = nil
     }
 
     /// Re-fits the panel to its content as the result list grows and
@@ -393,7 +439,20 @@ final class CommandBarService: ObservableObject {
             // Growing downward must stop at the screen edge; the list scrolls
             // instead of hiding its own footer below the bezel.
             frame.origin.y = max(frame.origin.y, screen.minY + 16)
-            panel.setFrame(frame, display: true)
+            let compact = self.isCompactHome
+            let animateHeight = self.lastLaidOutCompact != nil
+                && self.lastLaidOutCompact != compact
+                && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+            self.lastLaidOutCompact = compact
+            if animateHeight {
+                NSAnimationContext.runAnimationGroup { context in
+                    context.duration = CommandBarChrome.expandDuration
+                    context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                    panel.animator().setFrame(frame, display: true)
+                }
+            } else {
+                panel.setFrame(frame, display: true)
+            }
         }
     }
 
@@ -1929,7 +1988,7 @@ final class CommandBarService: ObservableObject {
     }
 
     func run(at index: Int) {
-        guard case .search = mode, rows.indices.contains(index) else { return }
+        guard !isTearingDown, case .search = mode, rows.indices.contains(index) else { return }
         run(rows[index])
     }
 
@@ -1937,7 +1996,7 @@ final class CommandBarService: ObservableObject {
     /// click and this call the list may have been rebuilt by a background
     /// load, and a position would then point at a different command.
     func run(_ entry: CommandBarEntry, fromClick: Bool) {
-        guard case .search = mode, fromClick else { return }
+        guard !isTearingDown, case .search = mode, fromClick else { return }
         run(entry)
     }
 
@@ -2431,7 +2490,7 @@ final class CommandBarService: ObservableObject {
 
     private func ensurePanel() -> NSPanel {
         if let panel { return panel }
-        let panel = KeyableBarPanel(contentRect: NSRect(x: 0, y: 0, width: 560, height: 380),
+        let panel = KeyableBarPanel(contentRect: NSRect(x: 0, y: 0, width: CommandBarChrome.width, height: 380),
                                     styleMask: [.borderless, .nonactivatingPanel],
                                     backing: .buffered,
                                     defer: false)
@@ -2442,6 +2501,7 @@ final class CommandBarService: ObservableObject {
         panel.level = .floating
         panel.backgroundColor = .clear
         panel.isOpaque = false
+        panel.hasShadow = true
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
         let host = NSHostingController(rootView: CommandBarView())
         host.sizingOptions = .preferredContentSize
@@ -2457,7 +2517,7 @@ final class CommandBarService: ObservableObject {
     /// away from that spot is added on, so the choice survives the close.
     private func position(_ panel: NSPanel, animated: Bool = false) {
         panel.contentViewController?.view.layoutSubtreeIfNeeded()
-        let size = panel.contentViewController?.view.fittingSize ?? NSSize(width: 560, height: 380)
+        let size = panel.contentViewController?.view.fittingSize ?? NSSize(width: CommandBarChrome.width, height: 380)
         // Decided once, here: moving the pointer to another display while
         // typing must not clamp the panel against a screen it is not on.
         let screen = NSScreen.pointerVisibleFrame

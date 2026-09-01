@@ -318,6 +318,7 @@ if (( TEST )); then
         Sources/Vorssaint/Core/SwitcherAppRulesStrings.swift \
         Sources/Vorssaint/Services/QuickTools/QuickToolsSupport.swift \
         Sources/Vorssaint/Services/CommandBar/CommandBarSupport.swift \
+        Sources/Vorssaint/Services/CommandBar/CommandBarChrome.swift \
         Sources/Vorssaint/Services/CommandBar/CommandBarPreferences.swift \
         Sources/Vorssaint/Services/CommandBar/CommandBarMath.swift \
         Sources/Vorssaint/Services/CommandBar/CommandBarUnits.swift \

@@ -19498,6 +19498,56 @@ struct MetricsTests {
                 && !SettingsBackupSupport.valueLooksRight(DefaultsKey.commandBarCompactMode, "yes"),
                "a restored compact mode has to be a switch, not text that looks like one")
 
+        // MARK: Command bar Spotlight chrome
+        expect(CommandBarChrome.width == 560
+                && CommandBarChrome.cornerRadius == 26
+                && CommandBarChrome.fieldFontSize == 18,
+               "the bar stays the known width, with Spotlight-like corners and type")
+        expect(CommandBarChrome.appearDuration < 0.2
+                && CommandBarChrome.disappearDuration < CommandBarChrome.appearDuration
+                && CommandBarChrome.expandDuration < 0.2
+                && CommandBarChrome.hairlineHeight < 1,
+               "appear, dismiss and compact-expand stay short so they never feel like a second job")
+        expect(CommandBarChrome.selectionOpacity(isDark: true)
+                    > CommandBarChrome.selectionOpacity(isDark: false),
+               "the selected row is a quiet plate, a little stronger in the dark")
+        expect(CommandBarChrome.plateOpacity(liquidGlass: true,
+                                             reduceTransparency: false,
+                                             isDark: true)
+                    < CommandBarChrome.plateOpacity(liquidGlass: false,
+                                                     reduceTransparency: false,
+                                                     isDark: true)
+                && CommandBarChrome.plateOpacity(liquidGlass: true,
+                                                  reduceTransparency: true,
+                                                  isDark: true) == 0
+                && CommandBarChrome.plateOpacity(liquidGlass: false,
+                                                  reduceTransparency: true,
+                                                  isDark: false) == 0,
+               "Liquid Glass keeps a thin plate; Reduce Transparency removes it")
+        let commandBarServiceSource = (try? String(
+            contentsOfFile: "Sources/Vorssaint/Services/CommandBar/CommandBarService.swift",
+            encoding: .utf8)) ?? ""
+        expect(commandBarServiceSource.contains("CommandBarChrome.appearDuration")
+                && commandBarServiceSource.contains("CommandBarChrome.disappearDuration")
+                && commandBarServiceSource.contains("animator().alphaValue")
+                && commandBarServiceSource.contains("accessibilityDisplayShouldReduceMotion"),
+               "the bar fades in and out, and Reduce Motion skips the fade")
+        expect(!commandBarServiceSource.contains("animator().alphaValue = 1")
+                || commandBarServiceSource.contains("CommandBarChrome.appearDuration"),
+               "the appear fade is the same duration the chrome names")
+        let commandBarViewSource = (try? String(
+            contentsOfFile: "Sources/Vorssaint/UI/CommandBar/CommandBarView.swift",
+            encoding: .utf8)) ?? ""
+        expect(commandBarViewSource.contains("contrast: .spotlight")
+                && commandBarViewSource.contains("CommandBarChrome.cornerRadius")
+                && commandBarViewSource.contains("CommandBarChrome.selectionOpacity")
+                && !commandBarViewSource.contains("contrast: .high"),
+               "the bar uses the Spotlight glass plate, not the high-contrast HUD plate")
+        expect(commandBarServiceSource.contains("CommandBarChrome.expandDuration")
+                && commandBarServiceSource.contains("lastLaidOutCompact")
+                && !commandBarServiceSource.contains("setFrame(frame, display: true, animate: true)"),
+               "height animation is the compact expand only, at the chrome duration")
+
         // MARK: What the bar noticed about this session
         expect(CommandBarQueryMemory.prefixes(of: "wha") == ["w", "wh", "wha"],
                "choosing a row for what was typed also answers every shorter piece of it")
