@@ -690,6 +690,21 @@ enum CommandBarCatalog {
             icon: .symbol("face.smiling"),
             keepsBarOpen: true,
             run: { _ in CommandBarService.shared.setCategory(.emoji) }))
+        if AppFeature.quickAI.isAvailable {
+            entries.append(CommandBarEntry(
+                id: "action.quickAI",
+                title: FeatureStrings.quickAI(language).pageTitle,
+                subtitle: area(.quickAI, under: FeatureStrings.quickAI(language).pageTitle),
+                icon: .symbol("sparkle"),
+                keepsBarOpen: true,
+                run: { _ in CommandBarService.shared.enterQuickAI() }))
+            entries.append(CommandBarEntry(
+                id: "action.quickAI.chats",
+                title: FeatureStrings.quickAI(language).openChats,
+                subtitle: area(.quickAI, under: FeatureStrings.quickAI(language).pageTitle),
+                icon: .symbol("bubble.left.and.bubble.right"),
+                run: { _ in afterBeat { QuickAIService.shared.showWindow() } }))
+        }
         if AppFeature.killProcess.isAvailable,
            UserDefaults.standard.bool(forKey: DefaultsKey.killProcessCommandBarEnabled) {
             let killStrings = FeatureStrings.killProcess(language)

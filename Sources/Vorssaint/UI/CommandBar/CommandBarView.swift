@@ -133,6 +133,9 @@ struct CommandBarView: View {
             case .capturingShortcut(let entryID):
                 Divider()
                 shortcutCard(entryID: entryID)
+            case .quickAI:
+                Divider()
+                QuickAICommandBarPane()
             }
             // A footer under a bare field reads as a second row of chrome on
             // something meant to be one strip.
@@ -340,6 +343,9 @@ struct CommandBarView: View {
             return String(format: text.argumentRangeFormat, range.lowerBound, range.upperBound)
         }
         if case .naming = service.mode { return text.aliasPlaceholder }
+        if case .quickAI = service.mode {
+            return FeatureStrings.quickAI(l10n.language).askPlaceholder
+        }
         return text.searchPlaceholder
     }
 
@@ -789,24 +795,45 @@ struct CommandBarView: View {
                 .font(.system(size: 9, weight: .semibold, design: .rounded))
                 .foregroundStyle(.tertiary)
             Spacer()
-            if service.canOpenActions {
-                Text("⌘K")
-                    .font(.system(size: 9, weight: .semibold, design: .rounded))
+            if service.mode == .quickAI {
+                Image(systemName: "return")
+                    .font(.system(size: 8))
                     .foregroundStyle(.tertiary)
-                Text(text.actionsHint)
+                Text(FeatureStrings.quickAI(l10n.language).send)
                     .font(.system(size: 9))
                     .foregroundStyle(.tertiary)
-                    .padding(.trailing, 4)
+                Text("Esc")
+                    .font(.system(size: 9, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.tertiary)
+            } else {
+                if AppFeature.quickAI.isAvailable {
+                    Text(QuickAIService.shared.commandBarKey().displayName)
+                        .font(.system(size: 9, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.tertiary)
+                    Text(FeatureStrings.quickAI(l10n.language).pageTitle)
+                        .font(.system(size: 9))
+                        .foregroundStyle(.tertiary)
+                        .padding(.trailing, 4)
+                }
+                if service.canOpenActions {
+                    Text("⌘K")
+                        .font(.system(size: 9, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.tertiary)
+                    Text(text.actionsHint)
+                        .font(.system(size: 9))
+                        .foregroundStyle(.tertiary)
+                        .padding(.trailing, 4)
+                }
+                Text(service.isShowingSuggestions && !service.categoryChips.isEmpty ? "⌃P ⌃N ↑↓ ←→" : "⌃P ⌃N ↑↓")
+                    .font(.system(size: 9, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.tertiary)
+                Image(systemName: "return")
+                    .font(.system(size: 8))
+                    .foregroundStyle(.tertiary)
+                Text("Esc")
+                    .font(.system(size: 9, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.tertiary)
             }
-            Text(service.isShowingSuggestions && !service.categoryChips.isEmpty ? "⌃P ⌃N ↑↓ ←→" : "⌃P ⌃N ↑↓")
-                .font(.system(size: 9, weight: .semibold, design: .rounded))
-                .foregroundStyle(.tertiary)
-            Image(systemName: "return")
-                .font(.system(size: 8))
-                .foregroundStyle(.tertiary)
-            Text("Esc")
-                .font(.system(size: 9, weight: .semibold, design: .rounded))
-                .foregroundStyle(.tertiary)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)

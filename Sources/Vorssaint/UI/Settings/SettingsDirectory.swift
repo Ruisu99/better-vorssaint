@@ -214,6 +214,10 @@ enum SettingsDirectory {
                                       icon: "command",
                                       keywords: [FeatureStrings.commandBar(language).openButton,
                                                  FeatureStrings.commandBar(language).searchPlaceholder]),
+                SettingsDirectoryItem(page: .quickAI,
+                                      title: FeatureStrings.quickAI(language).pageTitle,
+                                      icon: "sparkle",
+                                      keywords: ["openai", "chatgpt", "ai", "chat", "web search"]),
                 SettingsDirectoryItem(page: .quickTools, title: s.quickToolsTab, icon: "wand.and.rays",
                                        featureKeywords: [
                                         (.quickLauncher, [s.launcherName]),

@@ -27,6 +27,9 @@ final class CommandBarService: ObservableObject {
         /// Waiting for the person to press the combination they want for one
         /// row. Every other key is theirs while this lasts.
         case capturingShortcut(entryID: String)
+        /// Quick AI chat inside the bar: follow-ups stay in this session
+        /// until Esc puts the ordinary search back.
+        case quickAI
     }
 
     /// One line in the actions list.
@@ -340,6 +343,7 @@ final class CommandBarService: ObservableObject {
         // Closing while listening for a combination must give every global key
         // back, or the whole app would go quiet until the next relaunch.
         if case .capturingShortcut = mode { endCapturingShortcut() }
+        if case .quickAI = mode { QuickAIService.shared.cancel() }
         // Clearing the field on the way out would otherwise rebuild the whole
         // browse list for a panel nobody can see.
         isTearingDown = true
@@ -981,7 +985,7 @@ final class CommandBarService: ObservableObject {
                                                       query: query,
                                                       hasCategory: activeCategory != nil,
                                                       isPeeking: isPeekingHome))
-        case .argument, .confirm, .actions, .naming, .capturingShortcut:
+        case .argument, .confirm, .actions, .naming, .capturingShortcut, .quickAI:
             setCompactHome(false)
         }
         refreshPanelLayout()
@@ -1381,6 +1385,50 @@ final class CommandBarService: ObservableObject {
     func completeSelection() {
         guard case .search = mode, let entry = selectedEntry, !entry.isAnswer else { return }
         query = entry.title
+    }
+
+    /// Opens Quick AI inside the bar. Selected text is attached as context
+    /// once; the clipboard is never sent on its own. Follow-ups stay in this
+    /// draft until Esc. A non-empty field is the first question when Tab (or
+    /// the chosen key) is what opened the mode, not when the catalog row did.
+    func enterQuickAI(sendingField: Bool = false) {
+        guard AppFeature.quickAI.isAvailable, case .search = mode else { return }
+        let pending = sendingField ? query.trimmingCharacters(in: .whitespacesAndNewlines) : ""
+        query = ""
+        QuickAIService.shared.prepareCommandBarSession(selection: selectedText)
+        mode = .quickAI
+        setCompactHome(false)
+        refreshPanelLayout()
+        if !pending.isEmpty {
+            QuickAIService.shared.send(pending, fromCommandBar: true)
+        }
+    }
+
+    func leaveQuickAI() {
+        guard case .quickAI = mode else { return }
+        QuickAIService.shared.cancel()
+        mode = .search
+        refreshResults()
+    }
+
+    func sendQuickAI() {
+        guard case .quickAI = mode else { return }
+        let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        query = ""
+        QuickAIService.shared.send(text, fromCommandBar: true)
+        refreshPanelLayout()
+    }
+
+    /// True when this keystroke is the Command Bar Quick AI key and the
+    /// bar was in ordinary search. Shift-Tab never comes here: the caller
+    /// keeps that for completing a row.
+    @discardableResult
+    func handleQuickAIKey(_ keyCode: Int) -> Bool {
+        guard AppFeature.quickAI.isAvailable, case .search = mode else { return false }
+        guard QuickAIService.shared.commandBarKey().keyCode == keyCode else { return false }
+        enterQuickAI(sendingField: true)
+        return true
     }
 
     func select(_ index: Int) {
@@ -1857,6 +1905,9 @@ final class CommandBarService: ObservableObject {
         case .capturingShortcut:
             // Return is a combination like any other while listening.
             return
+        case .quickAI:
+            sendQuickAI()
+            return
         case .confirm(let id):
             guard let entry = entry(withID: id) else { return }
             finish(entry, value: nil)
@@ -1946,6 +1997,8 @@ final class CommandBarService: ObservableObject {
             mode = .search
             query = savedQuery
             refreshResults()
+        case .quickAI:
+            leaveQuickAI()
         case .search:
             // A long query typed by mistake should be clearable without
             // throwing the whole session away; then Esc leaves the category,
@@ -2546,9 +2599,19 @@ final class CommandBarService: ObservableObject {
             case kVK_RightArrow:
                 return self.moveCategory(1) ? nil : event
             case kVK_Tab:
+                let shift = event.modifierFlags.contains(.shift)
+                if shift {
+                    self.completeSelection()
+                    return nil
+                }
+                if self.handleQuickAIKey(Int(event.keyCode)) { return nil }
                 self.completeSelection()
                 return nil
             default:
+                if event.modifierFlags.intersection([.command, .option, .control, .shift]).isEmpty,
+                   self.handleQuickAIKey(Int(event.keyCode)) {
+                    return nil
+                }
                 // ⌘1…⌘9 run by position; plain digits belong to the field.
                 if event.modifierFlags.contains(.command),
                    let index = Self.digitIndex(for: event.keyCode) {

@@ -218,6 +218,10 @@ enum DefaultsKey {
     static let killProcessGroupRelated = "killProcessGroupRelated"
     static let killProcessSortBy = "killProcessSortBy" // cpu | memory | name | pid
     static let killProcessSortAscending = "killProcessSortAscending"
+    static let panelUtilityQuickAI = "panelUtilityQuickAI"
+    static let quickAIModel = "quickAIModel"
+    static let quickAIWebSearch = "quickAIWebSearch"
+    static let quickAICommandBarKey = "quickAICommandBarKey"
     static let panelUtilityCleaner = "panelUtilityCleaner"
     static let panelUtilityHomebrew = "panelUtilityHomebrew"
     static let panelUtilityAppUpdates = "panelUtilityAppUpdates"
@@ -985,6 +989,10 @@ enum Defaults {
         DefaultsKey.killProcessGroupRelated: true,
         DefaultsKey.killProcessSortBy: "cpu",
         DefaultsKey.killProcessSortAscending: false,
+        DefaultsKey.panelUtilityQuickAI: true,
+        DefaultsKey.quickAIModel: QuickAISupport.defaultModel,
+        DefaultsKey.quickAIWebSearch: false,
+        DefaultsKey.quickAICommandBarKey: QuickAISupport.CommandBarKey.tab.rawValue,
         DefaultsKey.panelUtilityCleaner: true,
         DefaultsKey.panelUtilityHomebrew: true,
         DefaultsKey.panelUtilityAppUpdates: true,

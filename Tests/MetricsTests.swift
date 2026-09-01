@@ -12510,7 +12510,7 @@ struct MetricsTests {
 
         // MARK: Features hub catalog
 
-        expect(AppFeature.allCases.count == 57, "feature catalog has 57 features")
+        expect(AppFeature.allCases.count == 58, "feature catalog has 58 features")
         expect(Set(AppFeature.allCases.map(\.rawValue)).count == AppFeature.allCases.count,
                "feature ids are unique")
         expect(AppFeature.allCases.map(\.rawValue) == [
@@ -12523,7 +12523,7 @@ struct MetricsTests {
             "keepAwake", "brightness", "extraBrightness", "bluetoothSleep",
             "quickLauncher", "quickToggles", "colorPicker", "screenOCR", "cleaningMode", "mediaTools",
             "cleaner", "uninstaller", "homebrew", "appUpdates", "screenshot", "cameraPreview",
-            "radialMenu", "scratchpad", "commandBar", "screenRecorder", "killProcess",
+            "radialMenu", "scratchpad", "commandBar", "screenRecorder", "killProcess", "quickAI",
             "monitorCPU", "monitorGPU", "monitorMemory", "monitorNetwork", "monitorDisk", "monitorPower",
             "fanControl",
         ], "feature ids are stable (they persist inside availability keys)")
@@ -12591,9 +12591,10 @@ struct MetricsTests {
                 && (AppFeature.availabilityDefaults[AppFeature.diskImageInstaller.availabilityKey] as? Bool) == false
                 && (AppFeature.availabilityDefaults[AppFeature.focusFollowsMouse.availabilityKey] as? Bool) == false
                 && (AppFeature.availabilityDefaults[AppFeature.killProcess.availabilityKey] as? Bool) == false
+                && (AppFeature.availabilityDefaults[AppFeature.quickAI.availabilityKey] as? Bool) == false
                 && AppFeature.allCases.filter {
                     $0 != .focusFollowsMouse && $0 != .fanControl && $0 != .diskImageInstaller
-                        && $0 != .killProcess
+                        && $0 != .killProcess && $0 != .quickAI
                 }.allSatisfy {
                     (AppFeature.availabilityDefaults[$0.availabilityKey] as? Bool) == true
                 },
@@ -13439,6 +13440,12 @@ struct MetricsTests {
                     && FeatureStrings.killProcess(language).confirmKillTreeFormat.contains("%@")
                     && FeatureStrings.killProcess(language).adminPromptFormat.contains("%@"),
                    "kill process formats keep their placeholders (\(language.rawValue))")
+            let quickAIValues = Mirror(reflecting: FeatureStrings.quickAI(language)).children
+                .compactMap { $0.value as? String }
+            expect(quickAIValues.count == 37 && quickAIValues.allSatisfy { !$0.isEmpty },
+                   "every Quick AI string is set for \(language.rawValue)")
+            expect(quickAIValues.allSatisfy { !$0.contains("—") },
+                   "no em-dash in visible Quick AI strings (\(language.rawValue))")
         }
 
         // MARK: Kill Process safety
@@ -13472,6 +13479,189 @@ struct MetricsTests {
                 == "Thu Aug 27 10:20:30 2026"
                && KillProcessSupport.normalizedStartDescription("bad'; kill 1") == nil,
                "Kill Process accepts only safe normalized start identities for the admin command")
+
+        // MARK: Quick AI
+
+        expect(AppFeature.quickAI.group == .tools
+                && AppFeature.quickAI.enabledKeys.isEmpty
+                && AppFeature.quickAI.permissions.isEmpty
+                && AppFeature.quickAI.energyProfile == .idle
+                && AppFeature.quickAI.symbolName == "sparkle"
+                && AppFeature.quickAI.settingsDestination == FeatureSettingsDestination(.quickAI),
+               "Quick AI is an on-demand tool with no macOS permission and a settings page of its own")
+        expect(featureRuntimeSource.contains(
+            ".quickAI: { QuickAIService.shared.syncWithPreferences() }"
+        ), "uninstalling Quick AI tears the chat window and in-flight request down")
+        expect(Defaults.registeredDefaults[DefaultsKey.panelUtilityQuickAI] as? Bool == true
+                && Defaults.registeredDefaults[DefaultsKey.quickAIModel] as? String
+                    == QuickAISupport.defaultModel
+                && Defaults.registeredDefaults[DefaultsKey.quickAIWebSearch] as? Bool == false
+                && Defaults.registeredDefaults[DefaultsKey.quickAICommandBarKey] as? String
+                    == QuickAISupport.CommandBarKey.tab.rawValue,
+               "Quick AI ships with Tab, web search off, and a visible panel tile")
+        expect(SettingsBackupSupport.exportKeys().contains(DefaultsKey.quickAIModel)
+                && SettingsBackupSupport.exportKeys().contains(DefaultsKey.quickAIWebSearch)
+                && SettingsBackupSupport.exportKeys().contains(DefaultsKey.quickAICommandBarKey)
+                && SettingsBackupSupport.exportKeys().contains(DefaultsKey.panelUtilityQuickAI)
+                && !SettingsBackupSupport.exportKeys().contains(where: {
+                    $0.lowercased().contains("apikey") || $0.lowercased().contains("api-key")
+                        || $0.lowercased().contains("openai")
+                }),
+               "Quick AI preferences travel in backups; the API key never does")
+        expect(QuickAISupport.chatURL().host == QuickAISupport.apiHost
+                && QuickAISupport.chatURL().scheme == "https"
+                && QuickAISupport.chatURL().path == QuickAISupport.chatPath
+                && QuickAISupport.responsesURL().host == QuickAISupport.apiHost
+                && QuickAISupport.responsesURL().path == QuickAISupport.responsesPath,
+               "Quick AI names only api.openai.com")
+        expect(QuickAISupport.sanitizedAPIKey("  sk-test  ") == "sk-test"
+                && !QuickAISupport.hasAPIKey("short")
+                && QuickAISupport.hasAPIKey("12345678")
+                && !QuickAISupport.hasAPIKey("   "),
+               "a pasted key is trimmed and rejected when it is too short")
+        expect(QuickAISupport.clipped("") == ""
+                && QuickAISupport.clipped("  hi  ") == "hi"
+                && QuickAISupport.clipped(String(repeating: "a", count: QuickAISupport.maximumInputLength + 8))
+                    .count == QuickAISupport.maximumInputLength,
+               "prompts are clipped to the input cap")
+        expect(QuickAISupport.resolvedContext(selection: "  chosen  ") == "chosen"
+                && QuickAISupport.resolvedContext(selection: "   ").isEmpty,
+               "only selected text is attached; an empty selection attaches nothing")
+        expect(QuickAISupport.title(from: "Hello") == "Hello"
+                && QuickAISupport.title(from: "") == "Chat"
+                && QuickAISupport.title(from: String(repeating: "x", count: 50)).count == 41,
+               "chat titles come from the first user line")
+        expect(QuickAISupport.Model.sanitized(nil) == QuickAISupport.defaultModel
+                && QuickAISupport.Model.sanitized("") == QuickAISupport.defaultModel
+                && QuickAISupport.Model.sanitized(String(repeating: "m", count: 81))
+                    == QuickAISupport.defaultModel
+                && QuickAISupport.Model.sanitized("gpt-4o") == "gpt-4o",
+               "unknown model names stay as typed; empty or oversized names fall back")
+        expect(QuickAISupport.CommandBarKey.sanitized(nil) == .tab
+                && QuickAISupport.CommandBarKey.sanitized("slash") == .slash
+                && QuickAISupport.CommandBarKey.sanitized("nope") == .tab
+                && QuickAISupport.CommandBarKey.matching(keyCode: 48) == .tab
+                && QuickAISupport.CommandBarKey.matching(keyCode: 50) == .grave
+                && QuickAISupport.CommandBarKey.matching(keyCode: 44) == .slash
+                && QuickAISupport.CommandBarKey.matching(keyCode: 0) == nil,
+               "the Command Bar Quick AI key is Tab, grave or slash")
+        expect(!QuickAISupport.conversationSystemPrompt(webSearch: false, languageCode: "en")
+                    .localizedCaseInsensitiveContains("web search")
+                && QuickAISupport.conversationSystemPrompt(webSearch: true, languageCode: "en")
+                    .localizedCaseInsensitiveContains("web search"),
+               "web search is only in the prompt when the person switched it on")
+        var seeded = QuickAISupport.Chat()
+        expect(QuickAISupport.appending(userText: "   ", to: seeded) == nil,
+               "an empty question is not a turn")
+        seeded = QuickAISupport.appending(userText: "Hello there", to: seeded)!
+        expect(seeded.title == "Hello there" && seeded.messages.count == 1
+                && seeded.messages[0].role == .user,
+               "the first user line names the chat")
+        seeded = QuickAISupport.appending(assistantText: "Hi", to: seeded)
+        expect(seeded.messages.last?.role == .assistant && seeded.messages.last?.content == "Hi",
+               "the reply is stored as an assistant turn")
+        var full = QuickAISupport.Chat()
+        for index in 0..<QuickAISupport.maximumMessagesPerChat {
+            full.messages.append(QuickAISupport.Message(role: .user, content: "\(index)"))
+        }
+        expect(QuickAISupport.appending(userText: "one more", to: full) == nil,
+               "a chat stops accepting turns at the message cap")
+        let now = Date()
+        let older = QuickAISupport.Chat(title: "old", updatedAt: now.addingTimeInterval(-10))
+        let newer = QuickAISupport.Chat(title: "new", updatedAt: now)
+        let capped = QuickAISupport.cappedChats(
+            (0..<QuickAISupport.maximumSavedChats + 5).map {
+                QuickAISupport.Chat(title: "\($0)", updatedAt: now.addingTimeInterval(TimeInterval($0)))
+            })
+        expect(capped.count == QuickAISupport.maximumSavedChats
+                && QuickAISupport.cappedChats([older, newer]).first?.title == "new",
+               "saved chats keep the newest forty")
+        let upserted = QuickAIStore.upsert(newer, in: [older, newer])
+        expect(upserted.count == 2 && upserted.first?.id == newer.id,
+               "keeping a chat moves it to the front without duplicating it")
+        var bodyChat = QuickAISupport.Chat(model: "gpt-4o-mini",
+                                           webSearch: false,
+                                           contextNote: "selected")
+        bodyChat = QuickAISupport.appending(userText: "What is this?", to: bodyChat)!
+        if let completionsData = QuickAISupport.chatCompletionsBody(chat: bodyChat, languageCode: "en"),
+           let completionsObject = try? JSONSerialization.jsonObject(with: completionsData) as? [String: Any],
+           let completionMessages = completionsObject["messages"] as? [[String: Any]] {
+            expect(completionsObject["model"] as? String == "gpt-4o-mini"
+                    && completionsObject["tools"] == nil
+                    && completionMessages.contains { ($0["role"] as? String) == "system" }
+                    && completionMessages.contains {
+                        ($0["role"] as? String) == "user" && ($0["content"] as? String) == "What is this?"
+                    }
+                    && completionMessages.contains {
+                        ($0["content"] as? String)?.contains("selected") == true
+                    },
+                   "chat completions send the system prompt, the selection and the question")
+            let request = QuickAISupport.request(url: QuickAISupport.chatURL(),
+                                                 apiKey: "sk-secret",
+                                                 body: completionsData)
+            let bodyText = request.httpBody.flatMap { String(data: $0, encoding: .utf8) } ?? ""
+            expect(request.httpMethod == "POST"
+                    && request.value(forHTTPHeaderField: "Authorization") == "Bearer sk-secret"
+                    && request.url?.host == "api.openai.com"
+                    && !bodyText.contains("sk-secret"),
+                   "the key is only on the Authorization header, never in the body")
+        } else {
+            expect(false, "chat completions body is JSON")
+        }
+        bodyChat.webSearch = true
+        if let responsesData = QuickAISupport.responsesBody(chat: bodyChat, languageCode: "en"),
+           let responsesObject = try? JSONSerialization.jsonObject(with: responsesData) as? [String: Any],
+           let tools = responsesObject["tools"] as? [[String: Any]] {
+            expect(responsesObject["model"] as? String == "gpt-4o-mini"
+                    && tools.count == 1
+                    && tools.first?["type"] as? String == "web_search",
+                   "web search uses the Responses API with an explicit web_search tool")
+        } else {
+            expect(false, "responses body is JSON with a web_search tool")
+        }
+        let completionJSON = """
+        {"choices":[{"message":{"role":"assistant","content":"  ok  "}}]}
+        """.data(using: .utf8)!
+        expect(QuickAISupport.parseChatCompletions(completionJSON) == .success("ok"),
+               "chat completions replies are trimmed")
+        let partsJSON = """
+        {"choices":[{"message":{"content":[{"text":"hel"},{"text":"lo"}]}}]}
+        """.data(using: .utf8)!
+        expect(QuickAISupport.parseChatCompletions(partsJSON) == .success("hello"),
+               "chat completions content arrays are joined")
+        let responseJSON = """
+        {"output_text":"  found  "}
+        """.data(using: .utf8)!
+        expect(QuickAISupport.parseResponses(responseJSON) == .success("found"),
+               "the Responses API output_text is accepted")
+        let outputJSON = """
+        {"output":[{"content":[{"text":"a"},{"text":"b"}]}]}
+        """.data(using: .utf8)!
+        expect(QuickAISupport.parseResponses(outputJSON) == .success("a\nb"),
+               "Responses API output content arrays are joined")
+        let serverJSON = """
+        {"error":{"message":"bad key"}}
+        """.data(using: .utf8)!
+        expect(QuickAISupport.parseChatCompletions(serverJSON) == .failure(.server("bad key")),
+               "OpenAI error messages are shown as they are")
+        expect(QuickAISupport.httpError(status: 401, data: Data()) == .noKey
+                && QuickAISupport.httpError(status: 500, data: Data()) == .network,
+               "a refused key is distinct from a network failure")
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("quick-ai-tests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let chatsURL = folder.appendingPathComponent("chats.json")
+        let keyURL = folder.appendingPathComponent("api-key")
+        expect(QuickAIStore.saveAPIKey(" sk-testkey ", to: keyURL)
+                && QuickAIStore.loadAPIKey(from: keyURL) == "sk-testkey",
+               "the API key is trimmed and stored as its own file")
+        expect(QuickAIStore.saveAPIKey("  ", to: keyURL)
+                && QuickAIStore.loadAPIKey(from: keyURL).isEmpty
+                && !FileManager.default.fileExists(atPath: keyURL.path),
+               "clearing the key deletes the file")
+        expect(QuickAIStore.saveChats([seeded], to: chatsURL)
+                && QuickAIStore.loadChats(from: chatsURL).first?.title == "Hello there",
+               "saved chats round-trip as JSON next to the key, never inside it")
 
         for language in AppLanguage.allCases {
             let categoryValues = Mirror(reflecting: FeatureStrings.settingsCategories(language)).children
@@ -13698,7 +13888,8 @@ struct MetricsTests {
                 && AppFeature.colorPicker.energyProfile == .idle
                 && AppFeature.keepAwake.energyProfile == .idle
                 && AppFeature.brightness.energyProfile == .idle
-                && AppFeature.scratchpad.energyProfile == .idle,
+                && AppFeature.scratchpad.energyProfile == .idle
+                && AppFeature.quickAI.energyProfile == .idle,
                "energy badges tell the honest mechanism per feature")
         let previousWindowGestureEnergy = UserDefaults.standard.object(
             forKey: DefaultsKey.windowGestureEnabled
@@ -13773,6 +13964,9 @@ struct MetricsTests {
                "the quick toggles alone keep the quick tools page")
         expect(pageVisible(.clipboard, available: [.finderCutPaste]),
                "the image paste option keeps the Clipboard page available")
+        expect(pageVisible(.quickAI, available: [.quickAI])
+                && !pageVisible(.quickAI, available: []),
+               "the Quick AI page follows its hub switch")
         expect(AppFeature.allCases.allSatisfy { feature in
             let destination = feature.settingsDestination
             let gate = FeatureVisibilitySupport.features(for: destination.page)
@@ -19762,6 +19956,9 @@ struct MetricsTests {
         expect(pageVisible(.commandBar, available: [.commandBar])
                 && !pageVisible(.commandBar, available: []),
                "the command bar page follows its hub switch")
+        expect(pageVisible(.quickAI, available: [.quickAI])
+                && !pageVisible(.quickAI, available: []),
+               "the Quick AI settings page follows its hub switch")
         expect(!SettingsBackupSupport.exportKeys().contains(DefaultsKey.commandBarUsage),
                "what the person runs most never travels in a backup")
         expect(SettingsBackupSupport.exportKeys().contains(DefaultsKey.commandBarShortcutEnabled)

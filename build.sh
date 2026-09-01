@@ -249,6 +249,8 @@ if (( TEST )); then
         Sources/Vorssaint/Services/RadialMenu/RadialMenuSupport.swift \
         Sources/Vorssaint/Services/QuickTools/ScratchpadSupport.swift \
         Sources/Vorssaint/Services/KillProcess/KillProcessSupport.swift \
+        Sources/Vorssaint/Services/QuickAI/QuickAISupport.swift \
+        Sources/Vorssaint/Services/QuickAI/QuickAIStore.swift \
         Sources/Vorssaint/Services/Recorder/RecorderSupport.swift \
         Sources/Vorssaint/Services/Recorder/RecordingSharingSupport.swift \
         Sources/Vorssaint/Services/PrivateFileStore.swift \
@@ -265,6 +267,7 @@ if (( TEST )); then
         Sources/Vorssaint/Core/Localizations/Strings+*.swift \
         Sources/Vorssaint/Core/FeatureStrings.swift \
         Sources/Vorssaint/Core/KillProcessStrings.swift \
+        Sources/Vorssaint/Core/QuickAIStrings.swift \
         Sources/Vorssaint/Core/WhatsAppDownloadStrings.swift \
         Sources/Vorssaint/Core/WhatsAppOrganizerStrings.swift \
         Sources/Vorssaint/Core/ReleaseNotes.swift \

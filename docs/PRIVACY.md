@@ -45,6 +45,8 @@ The service validates and rebuilds the MP4 without its original metadata. The vi
 
 Feedback is delivered to private support channels visible to the service owner. After delivery, the text and any technical details you selected remain there until the service owner deletes them. The temporary delivery copy is then deleted; if delivery never succeeds, that copy is permanently deleted after 7 days. No contact information is sent, so feedback cannot receive a direct reply.
 
+8. **Quick AI, only when you install it and press Return.** The feature is off until you install it in Features. It talks only to OpenAI at `api.openai.com`, and only with an API key you paste yourself. That key is stored owner-only in the app's local files and is never part of a settings backup. Selected text is attached only when you send a message; the clipboard is never read for this. Optional web search uses OpenAI's own search tool on the same request. Nothing is sent in the background, and chats stay on this Mac.
+
 That is the entire list. There are no hidden beacons or background uploads.
 
 ## Changes to this document

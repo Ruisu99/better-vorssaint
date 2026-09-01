@@ -361,6 +361,7 @@ struct SettingsView: View {
         case .quitProtection: QuitProtectionSettings()
         case .uninstaller: UninstallerView()
         case .killProcess: KillProcessView()
+        case .quickAI: QuickAISettings()
         case .urlCleaner: URLCleanerSettings()
         case .cleaner: CleanerSettings()
         case .homebrew: HomebrewSettings()
