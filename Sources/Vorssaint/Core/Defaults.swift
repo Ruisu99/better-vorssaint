@@ -60,6 +60,10 @@ enum DefaultsKey {
     // and which source to take back after a crash.
     static let superKeyMappingApplied = "superKeyMappingApplied"
     static let superKeyMappedSource = "superKeyMappedSource"
+    static let dictationEnabled = "dictationEnabled"
+    static let dictationHoldKey = "dictationHoldKey"       // DictationSupport.HoldKey raw value
+    static let dictationEngine = "dictationEngine"         // DictationSupport.Engine raw value
+    static let dictationOpenAIModel = "dictationOpenAIModel"
     // One list of bundle ids per mouse feature: apps it leaves alone (issue #358).
     static let smoothScrollExceptions = "smoothScrollExceptions"
     static let scrollInverterExceptions = "scrollInverterExceptions"
@@ -845,6 +849,10 @@ enum Defaults {
         DefaultsKey.superKeySource: SuperKeySource.capsLock.rawValue,
         DefaultsKey.superKeyModifiers: SuperKeySupport.defaultModifierStorageValue,
         DefaultsKey.superKeySoloAction: SuperKeySoloAction.none.rawValue,
+        DefaultsKey.dictationEnabled: false,
+        DefaultsKey.dictationHoldKey: DictationSupport.HoldKey.defaultKey.rawValue,
+        DefaultsKey.dictationEngine: DictationSupport.Engine.defaultEngine.rawValue,
+        DefaultsKey.dictationOpenAIModel: DictationSupport.defaultOpenAIModel,
         DefaultsKey.smoothScrollExceptions: [String](),
         DefaultsKey.scrollInverterExceptions: [String](),
         DefaultsKey.focusFollowsMouseExceptions: [String](),

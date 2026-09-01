@@ -235,6 +235,7 @@ final class FeatureRuntime: ObservableObject {
         .scratchpad: { ScratchpadService.shared.syncWithPreferences() },
         .commandBar: { CommandBarService.shared.syncWithPreferences() },
         .quickAI: { QuickAIService.shared.syncWithPreferences() },
+        .dictation: { DictationService.shared.syncWithPreferences() },
         .cleaner: {
             CleanerScheduler.shared.syncWithPreferences()
             WhatsAppDownloadScheduler.shared.syncWithPreferences()
