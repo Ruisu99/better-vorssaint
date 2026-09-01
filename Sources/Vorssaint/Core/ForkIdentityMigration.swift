@@ -73,28 +73,42 @@ enum ForkIdentityMigration {
 
     // MARK: - Retire old apps
 
-    /// Quits and trashes the old Vorssaint installs that this fork used to
-    /// overwrite in place. Official Vorssaint stays only if it somehow lived
-    /// outside /Applications; the installer never put the fork there under
-    /// another name.
+    /// Quits and trashes leftover fork copies that would put a second icon in
+    /// the menu bar. Official Vorssaint (`com.vorssaint.utils` without our
+    /// fork marker) is left alone so it can coexist beside Better Vorssaint.
+    /// The installer still removes a previous in-place fork install at
+    /// `/Applications/Vorssaint.app` during updates.
     private static func retireLegacyApps() {
         let running = Bundle.main.bundleURL.resolvingSymlinksInPath().standardizedFileURL.path
         let candidates = [
             "/Applications/Vorssaint.app",
             "/Applications/Vorssaint (Developer).app",
             "/Applications/Vorssaint Utils.app",
+            "/Applications/Better Vorssaint (Developer).app",
         ]
         for path in candidates {
             let url = URL(fileURLWithPath: path)
             let candidatePath = url.resolvingSymlinksInPath().standardizedFileURL.path
             guard candidatePath != running,
                   FileManager.default.fileExists(atPath: path),
-                  let id = Bundle(url: url)?.bundleIdentifier,
-                  AppInfo.legacyForkBundleIDs.contains(id)
+                  shouldRetire(url)
             else { continue }
             quitLegacyProcess(at: url)
             try? FileManager.default.trashItem(at: url, resultingItemURL: nil)
         }
+    }
+
+    private static func shouldRetire(_ url: URL) -> Bool {
+        guard let bundle = Bundle(url: url),
+              let id = bundle.bundleIdentifier
+        else { return false }
+        if id == AppInfo.developerBundleID { return true }
+        if id == "com.vorssaint.utils.dev" { return true }
+        // Older personal builds that already stamped the fork marker.
+        if bundle.object(forInfoDictionaryKey: "BetterVorssaintFork") as? Bool == true {
+            return true
+        }
+        return false
     }
 
     private static func quitLegacyProcess(at appURL: URL) {
