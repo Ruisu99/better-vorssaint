@@ -19657,6 +19657,10 @@ struct MetricsTests {
                 && commandBarServiceSource.contains("lastLaidOutCompact")
                 && !commandBarServiceSource.contains("setFrame(frame, display: true, animate: true)"),
                "height animation is the compact expand only, at the chrome duration")
+        expect(commandBarServiceSource.contains("forgetSavedPanelPosition")
+                && commandBarServiceSource.contains("offset: .zero")
+                && !commandBarServiceSource.contains("set(encoded, forKey: DefaultsKey.commandBarPositionOffset)"),
+               "a dragged bar is not remembered; the next hotkey opens on the default spot")
 
         // MARK: What the bar noticed about this session
         expect(CommandBarQueryMemory.prefixes(of: "wha") == ["w", "wh", "wha"],
