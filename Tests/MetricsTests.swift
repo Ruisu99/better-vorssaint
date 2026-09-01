@@ -21869,6 +21869,167 @@ struct MetricsTests {
                + "(ran \(detachedRuns) time(s))")
         try? FileManager.default.removeItem(at: detachRoot)
 
+        // MARK: Dictation
+
+        expect(AppFeature.dictation.group == .tools
+                && AppFeature.dictation.enabledKeys == [DefaultsKey.dictationEnabled]
+                && AppFeature.dictation.permissions == [.accessibility, .microphone]
+                && AppFeature.dictation.energyProfile == .keyboard
+                && AppFeature.dictation.symbolName == "waveform"
+                && AppFeature.dictation.settingsDestination == FeatureSettingsDestination(.dictation)
+                && AppFeature.availabilityDefaults[AppFeature.dictation.availabilityKey] as? Bool == false,
+               "Dictation is an opt-in tool that needs Microphone and Accessibility, uninstalled by default")
+        let dictationRuntimeSource = (try? String(
+            contentsOfFile: "Sources/Vorssaint/App/FeatureRuntime.swift",
+            encoding: .utf8)) ?? ""
+        expect(dictationRuntimeSource.contains(
+            ".dictation: { DictationService.shared.syncWithPreferences() }"
+        ), "the Features hub owns the dictation runtime lifecycle")
+        expect(Defaults.registeredDefaults[DefaultsKey.dictationEnabled] as? Bool == false
+                && Defaults.registeredDefaults[DefaultsKey.dictationHoldKey] as? String
+                    == DictationSupport.HoldKey.defaultKey.rawValue
+                && Defaults.registeredDefaults[DefaultsKey.dictationEngine] as? String
+                    == DictationSupport.Engine.defaultEngine.rawValue
+                && Defaults.registeredDefaults[DefaultsKey.dictationOpenAIModel] as? String
+                    == DictationSupport.defaultOpenAIModel,
+               "Dictation ships off, holding Right Option, on the Apple engine")
+        expect(SettingsBackupSupport.exportKeys().contains(DefaultsKey.dictationEnabled)
+                && SettingsBackupSupport.exportKeys().contains(DefaultsKey.dictationHoldKey)
+                && SettingsBackupSupport.exportKeys().contains(DefaultsKey.dictationEngine)
+                && SettingsBackupSupport.exportKeys().contains(DefaultsKey.dictationOpenAIModel)
+                && !SettingsBackupSupport.exportKeys().contains(where: {
+                    $0.lowercased().contains("apikey") || $0.lowercased().contains("api-key")
+                        || $0.lowercased().contains("dictationopenaikey")
+                }),
+               "Dictation's own choices travel in backups; its OpenAI key never does")
+
+        expect(DictationSupport.Engine.sanitized(nil) == .apple
+                && DictationSupport.Engine.sanitized("nope") == .apple
+                && DictationSupport.Engine.sanitized("openAI") == .openAI
+                && DictationSupport.Engine.sanitized("parakeet") == .parakeet,
+               "an unknown or missing engine choice falls back to Apple Speech")
+        expect(DictationSupport.HoldKey.sanitized(nil) == .rightOption
+                && DictationSupport.HoldKey.sanitized("nope") == .rightOption
+                && DictationSupport.HoldKey.sanitized("leftOption") == .leftOption
+                && DictationSupport.HoldKey.sanitized("rightCommand") == .rightCommand
+                && DictationSupport.HoldKey.sanitized("rightControl") == .rightControl
+                && DictationSupport.HoldKey.sanitized("rightShift") == .rightShift,
+               "an unknown or missing hold key choice falls back to Right Option")
+        expect(DictationSupport.HoldKey.rightOption.modifiers == .option
+                && DictationSupport.HoldKey.leftOption.modifiers == .option
+                && DictationSupport.HoldKey.rightCommand.modifiers == .command
+                && DictationSupport.HoldKey.rightControl.modifiers == .control
+                && DictationSupport.HoldKey.rightShift.modifiers == .shift,
+               "every hold key maps to the modifier its own flagsChanged event carries")
+
+        expect(DictationSupport.appleLocaleIdentifier(appLanguage: .de, systemLocaleIdentifier: "en-US")
+                    == "de-DE"
+                && DictationSupport.appleLocaleIdentifier(appLanguage: .enUS, systemLocaleIdentifier: "fr-FR")
+                    == "fr-FR",
+               "Apple Speech uses German when the app language is German, the system locale otherwise")
+
+        expect(DictationSupport.sanitizedOpenAIModel(nil) == DictationSupport.defaultOpenAIModel
+                && DictationSupport.sanitizedOpenAIModel("nope") == DictationSupport.defaultOpenAIModel
+                && DictationSupport.sanitizedOpenAIModel("whisper-1") == "whisper-1",
+               "only the two allowed OpenAI transcription models are accepted")
+        expect(DictationSupport.openAITranscriptionsURL().host == DictationSupport.openAIHost
+                && DictationSupport.openAITranscriptionsURL().scheme == "https"
+                && DictationSupport.openAITranscriptionsURL().path == DictationSupport.openAITranscriptionsPath,
+               "Dictation's OpenAI engine names only api.openai.com over HTTPS")
+        expect(DictationSupport.sanitizedAPIKey("  sk-test  ") == "sk-test"
+                && !DictationSupport.hasAPIKey("short")
+                && DictationSupport.hasAPIKey("12345678")
+                && !DictationSupport.hasAPIKey(nil),
+               "a pasted Dictation key is trimmed and rejected when it is too short")
+        expect(DictationSupport.effectiveOpenAIKey(ownKey: "", quickAIKey: "sk-quickai") == "sk-quickai"
+                && DictationSupport.effectiveOpenAIKey(ownKey: "sk-own", quickAIKey: "sk-quickai") == "sk-own"
+                && DictationSupport.effectiveOpenAIKey(ownKey: "", quickAIKey: "").isEmpty,
+               "Dictation's own key wins; the Quick AI key is only a fallback")
+
+        let dictationBody = DictationSupport.multipartBody(
+            wavData: Data([0x01, 0x02, 0x03]), model: "whisper-1", boundary: "vorssaint-test-boundary")
+        let dictationBodyText = String(data: dictationBody, encoding: .isoLatin1) ?? ""
+        expect(dictationBodyText.contains("name=\"model\"")
+                && dictationBodyText.contains("whisper-1")
+                && dictationBodyText.contains("name=\"file\"; filename=\"dictation.wav\"")
+                && dictationBodyText.contains("Content-Type: audio/wav")
+                && dictationBodyText.contains("--vorssaint-test-boundary--"),
+               "the multipart body carries the model field and the WAV file between the same boundary")
+        let dictationRequest = DictationSupport.multipartRequest(
+            url: DictationSupport.openAITranscriptionsURL(), apiKey: "sk-secret",
+            body: dictationBody, boundary: "vorssaint-test-boundary")
+        let dictationRequestBodyText = dictationRequest.httpBody
+            .flatMap { String(data: $0, encoding: .isoLatin1) } ?? ""
+        expect(dictationRequest.httpMethod == "POST"
+                && dictationRequest.value(forHTTPHeaderField: "Authorization") == "Bearer sk-secret"
+                && dictationRequest.value(forHTTPHeaderField: "Content-Type")
+                    == "multipart/form-data; boundary=vorssaint-test-boundary"
+                && !dictationRequestBodyText.contains("sk-secret"),
+               "the Dictation OpenAI key is only on the Authorization header, never in the body")
+
+        let dictationSuccessJSON = "{\"text\": \"  hello there  \"}".data(using: .utf8)!
+        if case .success(let dictationText) = DictationSupport.parseOpenAITranscription(dictationSuccessJSON) {
+            expect(dictationText == "hello there", "a transcription reply is trimmed")
+        } else {
+            expect(false, "a text field in the OpenAI reply parses as a success")
+        }
+        let dictationEmptyJSON = "{\"text\": \"   \"}".data(using: .utf8)!
+        expect({
+            if case .failure(.empty) = DictationSupport.parseOpenAITranscription(dictationEmptyJSON) {
+                return true
+            }
+            return false
+        }(), "a transcription reply that is only whitespace counts as nothing heard")
+        let dictationErrorJSON = "{\"error\": {\"message\": \"bad key\"}}".data(using: .utf8)!
+        expect({
+            if case .failure(.server("bad key")) = DictationSupport.parseOpenAITranscription(dictationErrorJSON) {
+                return true
+            }
+            return false
+        }(), "an OpenAI error payload surfaces its own message")
+        expect(DictationSupport.httpError(status: 401, data: Data()) == .noKey,
+               "a 401 from the transcriptions endpoint is treated as a rejected key")
+        expect(DictationSupport.httpError(status: 500, data: Data()) == .network,
+               "a server error with no parseable body falls back to a network failure")
+
+        expect(DictationSupport.parakeetScript(modelName: DictationSupport.parakeetModel)
+                    .contains(DictationSupport.parakeetModel)
+                && DictationSupport.parakeetScript(modelName: DictationSupport.parakeetModel)
+                    .contains("parakeet_mlx"),
+               "the generated Parakeet script names the configured model and imports the package")
+        expect(DictationSupport.cleanedParakeetOutput("Warning: cache miss\nhello there\n") == "hello there"
+                && DictationSupport.cleanedParakeetOutput("   \n  \n") == "",
+               "only the transcript line survives, even behind stray warning output")
+        expect(DictationSupport.sanitizedTranscript("  hi there  \n") == "hi there"
+                && DictationSupport.sanitizedTranscript("   ").isEmpty,
+               "a whitespace-only transcript never reaches the caret")
+
+        var dictationHold = DictationSupport.HoldState()
+        expect(dictationHold.decide(.keyDown, now: 0) == .startRecording,
+               "pressing the hold key starts a recording")
+        expect(dictationHold.decide(.keyDown, now: 0.05) == .none,
+               "a repeated keyDown while already held starts nothing new")
+        expect(dictationHold.decide(.keyUp, now: 0.05) == .stopRecording(discard: true),
+               "releasing before the minimum hold duration discards the recording")
+        _ = dictationHold.decide(.keyDown, now: 1)
+        expect(dictationHold.decide(.keyUp, now: 1.4) == .stopRecording(discard: false),
+               "releasing after the minimum hold duration keeps the recording")
+        expect(dictationHold.decide(.keyUp, now: 1.5) == .none,
+               "releasing an already-up key does nothing")
+        dictationHold.reset()
+        expect(dictationHold.decide(.keyUp, now: 2) == .none,
+               "reset clears a stuck hold so a stray release is a no-op")
+
+        for language in AppLanguage.allCases {
+            let dictation = FeatureStrings.dictation(language)
+            let dictationValues = Mirror(reflecting: dictation).children
+                .compactMap { $0.value as? String }
+            expect(dictationValues.count == 35 && dictationValues.allSatisfy { !$0.isEmpty },
+                   "every Dictation string is set for \(language.rawValue)")
+            expect(dictationValues.allSatisfy { !$0.contains("—") },
+                   "no em-dash in Dictation strings (\(language.rawValue))")
+        }
+
         // MARK: Command-Q / Command-W protection
         expect(QuitProtectionSupport.sanitizedHoldDuration(100) == 250,
                "quit protection clamps a too-short hold duration")
