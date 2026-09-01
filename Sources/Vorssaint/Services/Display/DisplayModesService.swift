@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Vorssaint
 
 import AppKit
+import CoreGraphics
 import os
 
 /// One resolution a display can be switched to, trimmed to what the picker
@@ -20,7 +21,10 @@ struct DisplayModeOption: Identifiable, Equatable {
     var isHiDPI: Bool { DisplayModesSupport.isHiDPI(width: width, pixelWidth: pixelWidth) }
     var resolutionLabel: String { DisplayModesSupport.formattedResolution(width: width, height: height) }
     var refreshLabel: String { DisplayModesSupport.formattedRefreshRate(refreshRate) }
-    var fullLabel: String { DisplayModesSupport.formattedMode(width: width, height: height, refreshRate: refreshRate) }
+    var fullLabel: String {
+        DisplayModesSupport.formattedMode(width: width, height: height,
+                                          refreshRate: refreshRate, isHiDPI: isHiDPI)
+    }
 }
 
 /// One display the resolution switcher can talk to.
@@ -38,11 +42,13 @@ struct DisplayModesDisplay: Identifiable, Equatable {
 }
 
 /// Better Display-style resolution switching, built entirely on public
-/// CoreGraphics: `CGDisplayCopyAllDisplayModes` to list a display's modes and
-/// `CGConfigureDisplayWithDisplayMode` inside a `CGBeginDisplayConfiguration`
-/// / `CGCompleteDisplayConfiguration` transaction to apply one. Unlike the
-/// brightness feature's on/off switch, applying a mode needs no private
-/// symbol at all, so there is no dlsym bridge here.
+/// CoreGraphics: `CGDisplayCopyAllDisplayModes` with
+/// `kCGDisplayShowDuplicateLowResolutionModes` so HiDPI (Retina) modes are
+/// listed next to 1x, then `CGConfigureDisplayWithDisplayMode` inside a
+/// `CGBeginDisplayConfiguration` / `CGCompleteDisplayConfiguration`
+/// transaction to apply one. Unlike the brightness feature's on/off switch,
+/// applying a mode needs no private symbol at all, so there is no dlsym
+/// bridge here.
 ///
 /// While the feature is off there is no screen observer and no standing
 /// state; everything below comes from a rescan triggered by opening the
@@ -128,7 +134,7 @@ final class DisplayModesService: ObservableObject {
             // A mirroring display follows its source; only the source has a
             // mode list worth switching.
             guard CGDisplayMirrorsDisplay(id) == 0 else { continue }
-            guard let rawModes = CGDisplayCopyAllDisplayModes(id, nil) as? [CGDisplayMode],
+            guard let rawModes = CGDisplayCopyAllDisplayModes(id, Self.allDisplayModeOptions) as? [CGDisplayMode],
                   !rawModes.isEmpty else { continue }
 
             var liveByID: [Int32: CGDisplayMode] = [:]
@@ -201,6 +207,14 @@ final class DisplayModesService: ObservableObject {
         Self.log.log("applied mode \(option.width)x\(option.height)@\(option.refreshRate) to display \(displayID): \(succeeded)")
         if succeeded { refresh() }
     }
+
+    /// Without this option CoreGraphics hides the HiDPI (Retina) copies of
+    /// each resolution, so the picker would only offer 1x modes. The name is
+    /// Apple's: asking for the "duplicate low-resolution" modes is what also
+    /// surfaces the matching 2x ones.
+    private static let allDisplayModeOptions: CFDictionary = [
+        kCGDisplayShowDuplicateLowResolutionModes: kCFBooleanTrue
+    ] as CFDictionary
 
     private static func descriptor(for mode: CGDisplayMode) -> DisplayModesSupport.ModeDescriptor {
         // Prefer the Swift properties CoreGraphics exposes; the CGDisplayModeGet*

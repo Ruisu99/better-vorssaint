@@ -15,17 +15,16 @@ struct QuickAIChatView: View {
     var body: some View {
         NavigationSplitView {
             sidebar
-                .frame(minWidth: 180)
+                .frame(minWidth: 196)
         } detail: {
             VStack(spacing: 0) {
                 toolbar
                 Divider()
                 transcript
-                Divider()
                 composer
             }
         }
-        .frame(minWidth: 640, minHeight: 420)
+        .frame(minWidth: 680, minHeight: 460)
     }
 
     private var sidebar: some View {
@@ -55,12 +54,14 @@ struct QuickAIChatView: View {
                             .font(.caption2)
                             .foregroundStyle(.tertiary)
                     }
+                    .padding(.vertical, 2)
                     .contextMenu {
                         Button(strings.deleteChat, role: .destructive) {
                             service.deleteChat(chat.id)
                         }
                     }
                 }
+                .listStyle(.sidebar)
             }
         }
         .navigationTitle(strings.savedChats)
@@ -96,79 +97,80 @@ struct QuickAIChatView: View {
                 .toggleStyle(.checkbox)
             Spacer()
             Button(strings.copyResult) { service.copyLastAssistantReply() }
-                .disabled(service.draft.messages.last(where: { $0.role == .assistant }) == nil)
+                .disabled(service.draft.messages.last(where: { $0.role == .assistant }) == nil
+                          || service.draft.messages.last?.content.isEmpty == true)
             if !service.draft.messages.isEmpty {
                 Button(strings.keepChat) { service.persistDraft() }
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
     }
 
     private var transcript: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 12) {
+                LazyVStack(alignment: .leading, spacing: 14) {
                     if !service.draft.contextNote.isEmpty {
                         Label(strings.attachedContext, systemImage: "text.cursor")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
                     ForEach(service.draft.messages) { message in
-                        messageBubble(message)
-                            .id(message.id)
-                    }
-                    if service.isSending {
-                        HStack(spacing: 8) {
-                            ProgressView().controlSize(.small)
-                            Text(strings.generating)
-                                .foregroundStyle(.secondary)
-                        }
+                        QuickAIMessageBubble(
+                            message: message,
+                            isStreaming: isStreaming(message)
+                        )
+                        .id(message.id)
                     }
                     if let error = service.lastError {
                         Text(error)
                             .font(.caption)
                             .foregroundStyle(.orange)
                     }
+                    Color.clear.frame(height: 1).id("quick-ai-end")
                 }
-                .padding(16)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 16)
             }
             .onChange(of: service.draft.messages.count) { _, _ in
-                if let last = service.draft.messages.last {
-                    proxy.scrollTo(last.id, anchor: .bottom)
-                }
+                proxy.scrollTo("quick-ai-end", anchor: .bottom)
             }
-        }
-    }
-
-    private func messageBubble(_ message: QuickAISupport.Message) -> some View {
-        let isUser = message.role == .user
-        return HStack {
-            if isUser { Spacer(minLength: 40) }
-            Text(message.content)
-                .font(.system(size: 13.5))
-                .textSelection(.enabled)
-                .padding(10)
-                .background(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(isUser ? Color.accentColor.opacity(0.16) : Color.primary.opacity(0.06))
-                )
-            if !isUser { Spacer(minLength: 40) }
+            .onChange(of: service.draft.messages.last?.content) { _, _ in
+                proxy.scrollTo("quick-ai-end", anchor: .bottom)
+            }
         }
     }
 
     private var composer: some View {
-        HStack(alignment: .bottom, spacing: 8) {
-            TextField(strings.askPlaceholder, text: $draftText, axis: .vertical)
-                .textFieldStyle(.plain)
-                .lineLimit(1...6)
-                .disabled(service.isSending)
-            Button(strings.send) { send() }
-                .disabled(draftText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                          || service.isSending)
-                .keyboardShortcut(.return, modifiers: [])
+        VStack(spacing: 0) {
+            Divider()
+            HStack(alignment: .bottom, spacing: 10) {
+                TextField(strings.askPlaceholder, text: $draftText, axis: .vertical)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 14))
+                    .lineLimit(1...8)
+                    .disabled(service.isSending)
+                Button(strings.send) { send() }
+                    .disabled(draftText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                              || service.isSending)
+                    .keyboardShortcut(.return, modifiers: [])
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+            }
+            .padding(12)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color.primary.opacity(0.05))
+            )
+            .padding(12)
         }
-        .padding(12)
+    }
+
+    private func isStreaming(_ message: QuickAISupport.Message) -> Bool {
+        service.isSending
+            && message.role == .assistant
+            && message.id == service.draft.messages.last(where: { $0.role == .assistant })?.id
     }
 
     private func send() {

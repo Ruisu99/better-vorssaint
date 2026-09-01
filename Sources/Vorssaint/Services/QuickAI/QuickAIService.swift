@@ -128,6 +128,7 @@ final class QuickAIService: ObservableObject {
         sendGeneration += 1
         let generation = sendGeneration
         let language = L10n.shared.language.rawValue
+        draft = QuickAISupport.appendingStreamingPlaceholder(to: next)
         let chat = next
         sendTask?.cancel()
         sendTask = Task { [weak self] in
@@ -135,20 +136,26 @@ final class QuickAIService: ObservableObject {
                                                   apiKey: key,
                                                   languageCode: language,
                                                   reasoningEffort: self?.reasoningEffort
-                                                    ?? QuickAISupport.defaultReasoningEffort)
+                                                    ?? QuickAISupport.defaultReasoningEffort) { assembled in
+                await MainActor.run {
+                    guard let self, generation == self.sendGeneration else { return }
+                    self.draft = QuickAISupport.replacingLastAssistant(assembled, in: self.draft)
+                }
+            }
             await MainActor.run {
                 guard let self, generation == self.sendGeneration else { return }
                 self.isSending = false
                 self.sendTask = nil
                 switch result {
                 case .success(let reply):
-                    self.draft = QuickAISupport.appending(assistantText: reply, to: self.draft)
+                    self.draft = QuickAISupport.replacingLastAssistant(reply, in: self.draft)
                     if !fromCommandBar {
                         self.persistDraft()
                     }
                 case .failure(.cancelled):
-                    break
+                    self.draft = QuickAISupport.droppingTrailingEmptyAssistant(self.draft)
                 case .failure(let error):
+                    self.draft = QuickAISupport.droppingTrailingEmptyAssistant(self.draft)
                     self.lastError = self.message(for: error)
                 }
             }
@@ -189,7 +196,8 @@ final class QuickAIService: ObservableObject {
     }
 
     func copyLastAssistantReply() {
-        guard let reply = draft.messages.last(where: { $0.role == .assistant }) else { return }
+        guard let reply = draft.messages.last(where: { $0.role == .assistant }),
+              !reply.content.isEmpty else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(reply.content, forType: .string)
         QuickToolHUD.show(icon: "doc.on.doc",
@@ -211,15 +219,19 @@ final class QuickAIService: ObservableObject {
         if !NSScreen.screens.contains(where: { $0.visibleFrame.intersects(panel.frame) }) {
             center(panel)
         }
-        panel.alphaValue = 0
+        panel.alphaValue = 0.02
         panel.orderFrontRegardless()
         panel.makeKeyAndOrderFront(nil)
         installKeyMonitor()
         NSApp.activate(ignoringOtherApps: true)
-        NSAnimationContext.runAnimationGroup { context in
+        panel.displayIfNeeded()
+        NSAnimationContext.runAnimationGroup({ context in
             context.duration = 0.13
             panel.animator().alphaValue = 1
-        }
+        }, completionHandler: { [weak panel] in
+            panel?.alphaValue = 1
+            panel?.displayIfNeeded()
+        })
     }
 
     func hideWindow() {

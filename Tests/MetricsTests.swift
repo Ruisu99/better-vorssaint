@@ -13743,6 +13743,76 @@ struct MetricsTests {
         expect(QuickAISupport.httpError(status: 401, data: Data()) == .noKey
                 && QuickAISupport.httpError(status: 500, data: Data()) == .network,
                "a refused key is distinct from a network failure")
+
+        expect(QuickAISupport.parseSSELine("", responses: false) == .ignore
+                && QuickAISupport.parseSSELine("event: message", responses: false) == .ignore
+                && QuickAISupport.parseSSELine("data: [DONE]", responses: false) == .done
+                && QuickAISupport.parseSSELine(
+                    #"data: {"choices":[{"delta":{"content":"Hi"}}]}"#, responses: false)
+                    == .delta("Hi")
+                && QuickAISupport.parseSSELine(
+                    #"data: {"choices":[{"delta":{},"finish_reason":"stop"}]}"#,
+                    responses: false) == .done,
+               "chat completions SSE lines become deltas, done, or ignored")
+        expect(QuickAISupport.parseSSELine(
+                    #"data: {"type":"response.output_text.delta","delta":"Hello"}"#,
+                    responses: true) == .delta("Hello")
+                && QuickAISupport.parseSSELine(
+                    #"data: {"type":"response.completed"}"#, responses: true) == .done
+                && QuickAISupport.parseSSELine(
+                    #"data: {"error":{"message":"quota"}}"#, responses: true)
+                    == .error(.server("quota")),
+               "Responses API SSE lines carry output_text deltas and errors")
+
+        var streamChat = QuickAISupport.Chat()
+        streamChat = QuickAISupport.appending(userText: "Hi", to: streamChat)!
+        streamChat = QuickAISupport.appendingStreamingPlaceholder(to: streamChat)
+        expect(streamChat.messages.last?.role == .assistant
+                && streamChat.messages.last?.content == "",
+               "the streaming placeholder is an empty assistant turn")
+        streamChat = QuickAISupport.replacingLastAssistant("Hello **there**", in: streamChat)
+        expect(streamChat.messages.last?.content == "Hello **there**",
+               "tokens replace the placeholder instead of appending a second reply")
+        expect(QuickAISupport.droppingTrailingEmptyAssistant(
+                QuickAISupport.appendingStreamingPlaceholder(to: QuickAISupport.Chat()))
+                .messages.isEmpty,
+               "a cancelled wait drops the unused placeholder")
+        let formatted = QuickAISupport.formattedReply("**bold** and `code`")
+        expect(String(formatted.characters).contains("bold")
+                && String(formatted.characters).contains("code"),
+               "assistant markdown keeps its readable text")
+        if let streamedCompletions = QuickAISupport.chatCompletionsBody(chat: bodyChat,
+                                                                        languageCode: "en",
+                                                                        stream: true),
+           let streamedObject = try? JSONSerialization.jsonObject(with: streamedCompletions)
+                as? [String: Any] {
+            expect(streamedObject["stream"] as? Bool == true,
+                   "chat completions streaming requests set stream true")
+        } else {
+            expect(false, "streaming chat completions body is JSON")
+        }
+        let quickAIClientSource = (try? String(
+            contentsOfFile: "Sources/Vorssaint/Services/QuickAI/QuickAIClient.swift",
+            encoding: .utf8)) ?? ""
+        let quickAIChatViewSource = (try? String(
+            contentsOfFile: "Sources/Vorssaint/UI/QuickAI/QuickAIChatView.swift",
+            encoding: .utf8)) ?? ""
+        let quickAIPaneSource = (try? String(
+            contentsOfFile: "Sources/Vorssaint/UI/QuickAI/QuickAICommandBarPane.swift",
+            encoding: .utf8)) ?? ""
+        let quickAITranscriptSource = (try? String(
+            contentsOfFile: "Sources/Vorssaint/UI/QuickAI/QuickAITranscript.swift",
+            encoding: .utf8)) ?? ""
+        expect(quickAIClientSource.contains("session.bytes(for:")
+                && quickAIClientSource.contains("stream: true")
+                && quickAIClientSource.contains("parseSSELine"),
+               "Quick AI reads the OpenAI reply as a stream of tokens")
+        expect(quickAITranscriptSource.contains("QuickAITypingDots")
+                && quickAITranscriptSource.contains("QuickAIStreamingCaret")
+                && quickAITranscriptSource.contains("formattedReply")
+                && quickAIChatViewSource.contains("QuickAIMessageBubble")
+                && quickAIPaneSource.contains("QuickAIMessageBubble"),
+               "both chat surfaces use markdown bubbles with a typing animation")
         let folder = FileManager.default.temporaryDirectory
             .appendingPathComponent("quick-ai-tests-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: folder) }
@@ -14620,6 +14690,30 @@ struct MetricsTests {
         expect(DisplayModesSupport.formattedMode(width: 1920, height: 1080, refreshRate: 0)
                 == "1920 × 1080",
                "the full label drops the rate suffix entirely when there is none to show")
+        expect(DisplayModesSupport.formattedMode(width: 1280, height: 800, refreshRate: 60, isHiDPI: true)
+                == "1280 × 800 @ 60 Hz · HiDPI",
+               "HiDPI modes keep the same point size and add a badge so they are not confused with 1x")
+        expect(DisplayModesSupport.formattedMode(width: 1280, height: 800, refreshRate: 0, isHiDPI: true)
+                == "1280 × 800 · HiDPI",
+               "a HiDPI mode with no refresh rate still shows the badge")
+
+        let retinaScaled = DisplayModesSupport.ModeDescriptor(
+            ioModeID: 10, width: 1280, height: 800, pixelWidth: 2560, pixelHeight: 1600,
+            refreshRate: 60, usableForDesktopGUI: true)
+        let oneXSamePixels = DisplayModesSupport.ModeDescriptor(
+            ioModeID: 11, width: 2560, height: 1600, pixelWidth: 2560, pixelHeight: 1600,
+            refreshRate: 60, usableForDesktopGUI: true)
+        expect(DisplayModesSupport.sorted([oneXSamePixels, retinaScaled]).map(\.ioModeID)
+                == [retinaScaled.ioModeID, oneXSamePixels.ioModeID],
+               "at the same pixel grid, the HiDPI (scaled) mode is offered before the 1x copy")
+
+        let displayModesServiceSource = (try? String(
+            contentsOfFile: "Sources/Vorssaint/Services/Display/DisplayModesService.swift",
+            encoding: .utf8)) ?? ""
+        expect(displayModesServiceSource.contains("kCGDisplayShowDuplicateLowResolutionModes")
+                && displayModesServiceSource.contains("allDisplayModeOptions")
+                && !displayModesServiceSource.contains("CGDisplayCopyAllDisplayModes(id, nil)"),
+               "the picker asks CoreGraphics for HiDPI copies, not only the 1x list")
 
         // MARK: Text snippets engine (issue #201)
 
@@ -19716,8 +19810,17 @@ struct MetricsTests {
                "the bar uses the Spotlight glass plate, not the high-contrast HUD plate")
         expect(commandBarServiceSource.contains("CommandBarChrome.expandDuration")
                 && commandBarServiceSource.contains("lastLaidOutCompact")
+                && commandBarServiceSource.contains("chromeAnimating")
+                && commandBarServiceSource.contains("alphaValue = 0.02")
+                && commandBarServiceSource.contains("finishChromeFrame")
                 && !commandBarServiceSource.contains("setFrame(frame, display: true, animate: true)"),
-               "height animation is the compact expand only, at the chrome duration")
+               "height animation is the compact expand only, and open chrome is not interrupted by layout")
+        expect(commandBarServiceSource.contains("pasteIntoSearchField")
+                && commandBarServiceSource.contains("kVK_ANSI_V")
+                && commandBarServiceSource.contains("rememberPasteTarget")
+                && commandBarServiceSource.contains("target.activate")
+                && commandBarServiceSource.contains("0.04"),
+               "the bar pastes into its own field, and clipboard rows paste back into the previous app")
         expect(commandBarServiceSource.contains("forgetSavedPanelPosition")
                 && commandBarServiceSource.contains("offset: .zero")
                 && !commandBarServiceSource.contains("set(encoded, forKey: DefaultsKey.commandBarPositionOffset)"),

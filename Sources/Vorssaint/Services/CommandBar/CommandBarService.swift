@@ -174,6 +174,15 @@ final class CommandBarService: ObservableObject {
     /// The system only shows its Accessibility prompt once; after that a
     /// refusal is a beep, the pattern the other quick tools follow.
     private var promptedForAccessibility = false
+    /// The app that had focus when the bar opened. Clipboard paste has to
+    /// go back there; `makeKey()` on this panel is not the same as becoming
+    /// frontmost, but a later hide can still leave us as the front app.
+    private var pasteTargetApp: NSRunningApplication?
+    /// True while the open or close chrome is running. Layout passes during
+    /// that window cancel the implicit animation, which then sits at the
+    /// first frame until a mouse or key event flushes the compositor.
+    private var chromeAnimating = false
+    private var layoutAfterChrome = false
     private var restartObserver: NSObjectProtocol?
     private var restartPID: pid_t?
     private var restartURL: URL?
@@ -261,6 +270,7 @@ final class CommandBarService: ObservableObject {
         reloadPreferenceCaches()
         query = ""
         refreshResults()
+        rememberPasteTarget()
         present(panel)
         // Ordering the prepared panel is the keystroke path. Home is filled on
         // the next main-loop turn, when a close or newer opening can supersede it.
@@ -281,6 +291,8 @@ final class CommandBarService: ObservableObject {
         fileSearch.reset()
         lastLaidOutCompact = nil
         isTearingDown = false
+        chromeAnimating = false
+        layoutAfterChrome = false
         let id = UUID()
         presentationID = id
         presentationLifecycle.beginHome(id)
@@ -332,31 +344,62 @@ final class CommandBarService: ObservableObject {
 
     private func present(_ panel: NSPanel) {
         appearanceGeneration += 1
+        let generation = appearanceGeneration
         position(panel)
         installMonitors(for: panel)
         let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         panel.ignoresMouseEvents = false
         if reduceMotion {
+            chromeAnimating = false
             panel.alphaValue = 1
             panel.orderFrontRegardless()
             panel.makeKey()
+            finishChromeFrame(panel)
             return
         }
         // Fade and a short lift into place: one surface moving, not a second
         // layout pass. The resting frame is already set by position(_:).
+        // A fully transparent window is not composited, so the fade never
+        // starts until a mouse or key event; keep a sliver of opacity so the
+        // first frame is a real surface.
+        chromeAnimating = true
+        layoutAfterChrome = false
         let resting = panel.frame
         var lifted = resting
         lifted.origin.y -= CommandBarChrome.appearLift
-        panel.alphaValue = 0
-        panel.setFrame(lifted, display: false)
+        panel.alphaValue = 0.02
+        panel.setFrame(lifted, display: true)
         panel.orderFrontRegardless()
         panel.makeKey()
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = CommandBarChrome.appearDuration
-            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            panel.animator().alphaValue = 1
-            panel.animator().setFrame(resting, display: true)
+        finishChromeFrame(panel)
+        DispatchQueue.main.async { [weak self, weak panel] in
+            guard let self, let panel, generation == self.appearanceGeneration else { return }
+            NSAnimationContext.runAnimationGroup({ context in
+                context.duration = CommandBarChrome.appearDuration
+                context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                panel.animator().alphaValue = 1
+                panel.animator().setFrame(resting, display: true)
+            }, completionHandler: { [weak self, weak panel] in
+                guard let self, let panel, generation == self.appearanceGeneration else { return }
+                panel.alphaValue = 1
+                panel.setFrame(resting, display: true)
+                self.finishChromeFrame(panel)
+                self.chromeAnimating = false
+                if self.layoutAfterChrome {
+                    self.layoutAfterChrome = false
+                    self.refreshPanelLayout()
+                }
+            })
         }
+    }
+
+    /// Forces the window server to paint the current frame. Without this, a
+    /// nonactivating panel at the start of an alpha animation can sit invisible
+    /// until the next user event.
+    private func finishChromeFrame(_ panel: NSPanel) {
+        panel.displayIfNeeded()
+        panel.invalidateShadow()
+        panel.contentView?.layer?.setNeedsDisplay()
     }
 
     func hide() {
@@ -398,18 +441,21 @@ final class CommandBarService: ObservableObject {
         appearanceGeneration += 1
         let generation = appearanceGeneration
         guard let panel else {
+            chromeAnimating = false
             finishHideContent()
             return
         }
         panel.ignoresMouseEvents = true
         let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         if reduceMotion {
+            chromeAnimating = false
             panel.orderOut(nil)
             panel.alphaValue = 1
             panel.ignoresMouseEvents = false
             finishHideContent()
             return
         }
+        chromeAnimating = true
         let resting = panel.frame
         var dropped = resting
         dropped.origin.y -= CommandBarChrome.appearLift
@@ -424,6 +470,8 @@ final class CommandBarService: ObservableObject {
             panel.alphaValue = 1
             panel.setFrame(resting, display: false)
             panel.ignoresMouseEvents = false
+            self.chromeAnimating = false
+            self.layoutAfterChrome = false
             self.finishHideContent()
         })
     }
@@ -440,8 +488,16 @@ final class CommandBarService: ObservableObject {
     /// field itself never jumps under the caret.
     func refreshPanelLayout() {
         guard let panel, panel.isVisible else { return }
+        if chromeAnimating {
+            layoutAfterChrome = true
+            return
+        }
         DispatchQueue.main.async { [weak self] in
             guard let self, let panel = self.panel, panel.isVisible else { return }
+            if self.chromeAnimating {
+                self.layoutAfterChrome = true
+                return
+            }
             panel.contentViewController?.view.layoutSubtreeIfNeeded()
             let size = panel.contentViewController?.view.fittingSize ?? panel.frame.size
             let screen = self.panelScreen ?? NSScreen.pointerVisibleFrame
@@ -2121,16 +2177,14 @@ final class CommandBarService: ObservableObject {
 
     // MARK: - Clipboard paste
 
-    /// Pastes one history item at the caret. The panel never activated, so
-    /// the target app still has focus; all this does is put the item on the
-    /// clipboard, wait for a clean keyboard and press ⌘V for the person.
+    /// Pastes one history item at the caret of the app that had focus when the
+    /// bar opened. The panel is key but nonactivating, so we still have to
+    /// reactivate that app after the hide animation, wait for a clean keyboard,
+    /// and press ⌘V with a gap between keyDown and keyUp.
     private func paste(_ entry: ClipboardHistoryEntry) {
+        let target = pasteTargetApp
         hide()
-        if NSWorkspace.shared.frontmostApplication?.processIdentifier
-            == ProcessInfo.processInfo.processIdentifier {
-            NSSound.beep()
-            return
-        }
+        pasteTargetApp = nil
         // Without Accessibility the synthetic paste is dropped by the system.
         // Asking first matters: writing the item to the clipboard and then
         // failing would throw away what the person had copied, for nothing.
@@ -2148,10 +2202,33 @@ final class CommandBarService: ObservableObject {
                 NSSound.beep()
                 return
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                Self.postPasteWhenModifiersReleased(attempt: 0)
+            let settle = CommandBarChrome.disappearDuration + 0.08
+            DispatchQueue.main.asyncAfter(deadline: .now() + settle) {
+                if let target, !target.isTerminated {
+                    target.activate(options: [])
+                } else if NSWorkspace.shared.frontmostApplication?.processIdentifier
+                            == ProcessInfo.processInfo.processIdentifier {
+                    NSSound.beep()
+                    return
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+                    Self.postPasteWhenModifiersReleased(attempt: 0)
+                }
             }
         }
+    }
+
+    private func rememberPasteTarget() {
+        let ownPID = ProcessInfo.processInfo.processIdentifier
+        guard let app = NSWorkspace.shared.frontmostApplication,
+              app.processIdentifier != ownPID,
+              app.activationPolicy == .regular,
+              !app.isTerminated
+        else {
+            pasteTargetApp = nil
+            return
+        }
+        pasteTargetApp = app
     }
 
     /// The proven dance: ⌘V posted while the summoning chord is still held
@@ -2187,8 +2264,31 @@ final class CommandBarService: ObservableObject {
             keyDown.flags = .maskCommand
             keyUp.flags = .maskCommand
             keyDown.post(tap: .cghidEventTap)
-            keyUp.post(tap: .cghidEventTap)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.04) {
+                keyUp.post(tap: .cghidEventTap)
+            }
         }
+    }
+
+    /// ⌘V into the search field. The bar is a nonactivating panel, so the
+    /// field editor is not always first responder on the first keystroke
+    /// after open; fall back to writing the pasteboard into `query`.
+    @discardableResult
+    private func pasteIntoSearchField(in panel: NSPanel) -> Bool {
+        switch mode {
+        case .search, .argument, .naming, .quickAI: break
+        default: return false
+        }
+        if fieldIsComposing(in: panel) { return false }
+        if let editor = panel.firstResponder as? NSTextView {
+            editor.paste(nil)
+            return true
+        }
+        guard let text = NSPasteboard.general.string(forType: .string), !text.isEmpty else {
+            return false
+        }
+        query += text
+        return true
     }
 
     // MARK: - Background loads
@@ -2524,6 +2624,7 @@ final class CommandBarService: ObservableObject {
         let host = NSHostingController(rootView: CommandBarView())
         host.sizingOptions = .preferredContentSize
         panel.contentViewController = host
+        panel.contentView?.wantsLayer = true
         self.panel = panel
         return panel
     }
@@ -2619,6 +2720,11 @@ final class CommandBarService: ObservableObject {
                     // the person believes they are acting on the app the bar
                     // is floating over.
                     return nil
+                case kVK_ANSI_V:
+                    let extras = event.modifierFlags.intersection([.shift, .option, .control])
+                    if extras.isEmpty, self.pasteIntoSearchField(in: panel) {
+                        return nil
+                    }
                 case kVK_ANSI_Comma:
                     self.hide()
                     SettingsRouter.shared.page = .commandBar

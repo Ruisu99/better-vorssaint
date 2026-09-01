@@ -153,7 +153,9 @@ struct CommandBarView: View {
     }
 
     private func focusSearch() {
+        searchFocused = true
         DispatchQueue.main.async { searchFocused = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { searchFocused = true }
     }
 
     // MARK: - Field

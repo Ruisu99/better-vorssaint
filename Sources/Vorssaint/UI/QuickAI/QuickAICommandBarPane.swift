@@ -41,32 +41,33 @@ struct QuickAICommandBarPane: View {
             } else {
                 ScrollViewReader { proxy in
                     ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 8) {
+                        LazyVStack(alignment: .leading, spacing: 10) {
                             ForEach(service.draft.messages) { message in
-                                bubble(message).id(message.id)
-                            }
-                            if service.isSending {
-                                HStack(spacing: 6) {
-                                    ProgressView().controlSize(.mini)
-                                    Text(strings.generating)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
+                                QuickAIMessageBubble(
+                                    message: message,
+                                    compact: true,
+                                    isStreaming: isStreaming(message)
+                                )
+                                .id(message.id)
                             }
                             if let error = service.lastError {
                                 Text(error)
                                     .font(.caption)
                                     .foregroundStyle(.orange)
                             }
+                            Color.clear.frame(height: 1).id("quick-ai-bar-end")
                         }
                         .padding(.horizontal, 16)
                         .padding(.bottom, 8)
                     }
-                    .frame(maxHeight: 280)
+                    .frame(maxHeight: 300)
                     .onChange(of: service.draft.messages.count) { _, _ in
-                        if let last = service.draft.messages.last {
-                            proxy.scrollTo(last.id, anchor: .bottom)
-                        }
+                        proxy.scrollTo("quick-ai-bar-end", anchor: .bottom)
+                        CommandBarService.shared.refreshPanelLayout()
+                    }
+                    .onChange(of: service.draft.messages.last?.content) { _, _ in
+                        proxy.scrollTo("quick-ai-bar-end", anchor: .bottom)
+                        CommandBarService.shared.refreshPanelLayout()
                     }
                 }
             }
@@ -76,7 +77,8 @@ struct QuickAICommandBarPane: View {
                     .disabled(service.draft.messages.isEmpty)
                 Button(strings.openChats) { service.keepAndOpenWindow() }
                 Button(strings.copyResult) { service.copyLastAssistantReply() }
-                    .disabled(service.draft.messages.last(where: { $0.role == .assistant }) == nil)
+                    .disabled(service.draft.messages.last(where: { $0.role == .assistant }) == nil
+                              || service.draft.messages.last?.content.isEmpty == true)
                 Spacer()
                 Button(strings.newChat) {
                     service.resetDraft(keepingContext: true)
@@ -90,19 +92,9 @@ struct QuickAICommandBarPane: View {
         }
     }
 
-    private func bubble(_ message: QuickAISupport.Message) -> some View {
-        let isUser = message.role == .user
-        return HStack {
-            if isUser { Spacer(minLength: 48) }
-            Text(message.content)
-                .font(.system(size: 13))
-                .textSelection(.enabled)
-                .padding(8)
-                .background(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(isUser ? Color.accentColor.opacity(0.14) : Color.primary.opacity(0.06))
-                )
-            if !isUser { Spacer(minLength: 48) }
-        }
+    private func isStreaming(_ message: QuickAISupport.Message) -> Bool {
+        service.isSending
+            && message.role == .assistant
+            && message.id == service.draft.messages.last(where: { $0.role == .assistant })?.id
     }
 }

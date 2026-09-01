@@ -102,6 +102,9 @@ enum DisplayModesSupport {
             let rhsArea = rhs.pixelWidth * rhs.pixelHeight
             if lhsArea != rhsArea { return lhsArea > rhsArea }
             if lhs.refreshRate != rhs.refreshRate { return lhs.refreshRate > rhs.refreshRate }
+            let lhsHiDPI = isHiDPI(lhs)
+            let rhsHiDPI = isHiDPI(rhs)
+            if lhsHiDPI != rhsHiDPI { return lhsHiDPI }
             return lhs.width > rhs.width
         }
     }
@@ -131,10 +134,15 @@ enum DisplayModesSupport {
     }
 
     /// The full label a resolution row shows: "1920 × 1080 @ 60 Hz", or
-    /// without the rate suffix when the display reports none.
-    static func formattedMode(width: Int, height: Int, refreshRate: Double) -> String {
+    /// without the rate suffix when the display reports none. HiDPI modes keep
+    /// the same point size as their 1x pair, so the badge is what tells them
+    /// apart in the picker.
+    static func formattedMode(width: Int, height: Int, refreshRate: Double,
+                              isHiDPI: Bool = false) -> String {
         let resolution = formattedResolution(width: width, height: height)
         let rate = formattedRefreshRate(refreshRate)
-        return rate.isEmpty ? resolution : "\(resolution) @ \(rate)"
+        var label = rate.isEmpty ? resolution : "\(resolution) @ \(rate)"
+        if isHiDPI { label += " · HiDPI" }
+        return label
     }
 }

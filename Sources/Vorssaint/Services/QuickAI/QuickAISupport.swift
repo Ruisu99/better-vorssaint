@@ -282,6 +282,110 @@ enum QuickAISupport {
         return next
     }
 
+    /// Empty assistant bubble shown while tokens arrive. Unlike
+    /// `appending(assistantText:)`, an empty string stays empty so the typing
+    /// dots can sit in that bubble until the first delta.
+    static func appendingStreamingPlaceholder(to chat: Chat, now: Date = Date()) -> Chat {
+        var next = chat
+        next.messages.append(Message(role: .assistant, content: "", createdAt: now))
+        next.updatedAt = now
+        return next
+    }
+
+    static func replacingLastAssistant(_ text: String, in chat: Chat, now: Date = Date()) -> Chat {
+        var next = chat
+        if let index = next.messages.indices.last, next.messages[index].role == .assistant {
+            next.messages[index].content = clipped(text)
+            next.updatedAt = now
+            return next
+        }
+        return appending(assistantText: text, to: next, now: now)
+    }
+
+    static func droppingTrailingEmptyAssistant(_ chat: Chat) -> Chat {
+        var next = chat
+        if let last = next.messages.last, last.role == .assistant, last.content.isEmpty {
+            next.messages.removeLast()
+        }
+        return next
+    }
+
+    /// Markdown for chat bubbles. Falls back to the raw text if the string is
+    /// not valid markdown, so a half-streamed fence never blanks the reply.
+    static func formattedReply(_ raw: String) -> AttributedString {
+        let options = AttributedString.MarkdownParsingOptions(
+            interpretedSyntax: .full,
+            failurePolicy: .returnPartiallyParsedIfPossible)
+        if let parsed = try? AttributedString(markdown: raw, options: options) {
+            return parsed
+        }
+        return AttributedString(raw)
+    }
+
+    /// One line of an OpenAI SSE stream (`data: …`, `event: …`, or blank).
+    enum StreamEvent: Equatable {
+        case delta(String)
+        case done
+        case error(SendError)
+        case ignore
+    }
+
+    static func parseSSELine(_ line: String, responses: Bool) -> StreamEvent {
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return .ignore }
+        if trimmed.hasPrefix("event:") { return .ignore }
+        let payload: String
+        if trimmed.hasPrefix("data:") {
+            payload = String(trimmed.dropFirst(5)).trimmingCharacters(in: .whitespaces)
+        } else {
+            payload = trimmed
+        }
+        if payload.isEmpty { return .ignore }
+        if payload == "[DONE]" { return .done }
+        guard let data = payload.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return .ignore }
+        if let server = serverError(in: object) { return .error(.server(server)) }
+        if responses {
+            return parseResponsesStreamObject(object)
+        }
+        return parseChatCompletionsStreamObject(object)
+    }
+
+    private static func parseChatCompletionsStreamObject(_ object: [String: Any]) -> StreamEvent {
+        guard let choices = object["choices"] as? [[String: Any]],
+              let first = choices.first
+        else { return .ignore }
+        if let delta = first["delta"] as? [String: Any],
+           let text = contentString(from: delta), !text.isEmpty {
+            return .delta(text)
+        }
+        if let finish = first["finish_reason"] as? String, !finish.isEmpty, finish != "null" {
+            return .done
+        }
+        return .ignore
+    }
+
+    private static func parseResponsesStreamObject(_ object: [String: Any]) -> StreamEvent {
+        let type = object["type"] as? String ?? ""
+        if type == "response.completed" || type == "response.output_text.done" {
+            return .done
+        }
+        if type == "response.failed" || type == "error" {
+            if let server = serverError(in: object) { return .error(.server(server)) }
+            return .error(.network)
+        }
+        if type == "response.output_text.delta" || type.hasSuffix("output_text.delta") {
+            if let delta = object["delta"] as? String, !delta.isEmpty {
+                return .delta(delta)
+            }
+            if let text = object["text"] as? String, !text.isEmpty {
+                return .delta(text)
+            }
+        }
+        return .ignore
+    }
+
     static func cappedChats(_ chats: [Chat]) -> [Chat] {
         Array(chats.sorted { $0.updatedAt > $1.updatedAt }.prefix(maximumSavedChats))
     }
@@ -291,7 +395,8 @@ enum QuickAISupport {
     /// prepended here once.
     static func chatCompletionsBody(chat: Chat,
                                     languageCode: String,
-                                    reasoningEffort: String = defaultReasoningEffort) -> Data? {
+                                    reasoningEffort: String = defaultReasoningEffort,
+                                    stream: Bool = false) -> Data? {
         _ = reasoningEffort
         var messages: [[String: String]] = [
             ["role": "system",
@@ -307,6 +412,7 @@ enum QuickAISupport {
             "model": Model.sanitized(chat.model),
             "messages": messages,
             "temperature": 0.4,
+            "stream": stream,
         ]
         return try? JSONSerialization.data(withJSONObject: payload)
     }
@@ -315,7 +421,8 @@ enum QuickAISupport {
     /// travel with the request. Web search stays an explicit opt-in tool.
     static func responsesBody(chat: Chat,
                               languageCode: String,
-                              reasoningEffort: String = defaultReasoningEffort) -> Data? {
+                              reasoningEffort: String = defaultReasoningEffort,
+                              stream: Bool = false) -> Data? {
         var input: [[String: String]] = [
             ["role": "system",
              "content": conversationSystemPrompt(webSearch: chat.webSearch,
@@ -330,6 +437,7 @@ enum QuickAISupport {
         var payload: [String: Any] = [
             "model": Model.sanitized(chat.model),
             "input": input,
+            "stream": stream,
         ]
         if chat.webSearch {
             payload["tools"] = [["type": "web_search"]]
@@ -397,11 +505,14 @@ enum QuickAISupport {
         return .network
     }
 
-    static func request(url: URL, apiKey: String, body: Data) -> URLRequest {
+    static func request(url: URL, apiKey: String, body: Data, stream: Bool = false) -> URLRequest {
         var request = URLRequest(url: url, timeoutInterval: requestTimeout)
         request.httpMethod = "POST"
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if stream {
+            request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        }
         request.httpBody = body
         return request
     }
