@@ -640,6 +640,46 @@ struct MetricsTests {
         expect(!ClipboardHistoryImageSupport.isImageFileName("document.pdf")
                && !ClipboardHistoryImageSupport.isImageFileName("archive.zip"),
                "clipboard image file support rejects non-image extensions")
+        let namedImage = ClipboardHistoryEntry(text: "", kind: .image, imageFile: "shot.png")
+        let unnamedImage = ClipboardHistoryEntry(text: "", kind: .image)
+        let imageFileEntry = ClipboardHistoryEntry(text: "",
+                                                    kind: .files,
+                                                    filePaths: ["/Users/a/Desktop/Shot.PNG"])
+        let pdfFileEntry = ClipboardHistoryEntry(text: "",
+                                                  kind: .files,
+                                                  filePaths: ["/Users/a/Desktop/Report.pdf"])
+        let multiFileEntry = ClipboardHistoryEntry(text: "",
+                                                   kind: .files,
+                                                   filePaths: ["/Users/a/Desktop/a.png",
+                                                               "/Users/a/Desktop/b.png"])
+        expect(ClipboardImageExport.source(for: namedImage) == .storedPNG("shot.png"),
+               "clipboard image entries export from the stored PNG")
+        expect(ClipboardImageExport.source(for: unnamedImage) == nil,
+               "clipboard image entries without a stored file cannot export")
+        expect(ClipboardImageExport.source(for: imageFileEntry) == .file(path: "/Users/a/Desktop/Shot.PNG"),
+               "a single copied image file can be saved or recognized")
+        expect(ClipboardImageExport.source(for: pdfFileEntry) == nil
+                   && ClipboardImageExport.source(for: filesEntry) == nil
+                   && ClipboardImageExport.source(for: multiFileEntry) == nil
+                   && ClipboardImageExport.source(for: ClipboardHistoryEntry(text: "hello")) == nil,
+               "export and OCR stay on image entries")
+        let exportDate = Date(timeIntervalSince1970: 1_720_000_000)
+        expectEqual(ClipboardImageExport.preferredFileName(prefix: "Clipboard",
+                                                             date: exportDate,
+                                                             source: .storedPNG("shot.png")),
+                    ScreenshotSupport.fileName(prefix: "Clipboard", date: exportDate),
+                    "stored clipboard images use a dated PNG name")
+        expectEqual(ClipboardImageExport.preferredFileName(prefix: "Clipboard",
+                                                             date: exportDate,
+                                                             source: .file(path: "/Users/a/Desktop/Shot.PNG")),
+                    "Shot.PNG",
+                    "copied image files keep their original name in Downloads")
+        let uniqueDownloads = ClipboardImageExport.uniqueURL(
+            in: URL(fileURLWithPath: "/Users/a/Downloads"),
+            preferredName: "Clipboard.png",
+            exists: { $0 == "Clipboard.png" })
+        expectEqual(uniqueDownloads.lastPathComponent, "Clipboard 2.png",
+                    "saving a clipboard image never overwrites an existing Downloads file")
         expect(filesEntry.matchesContent(of: ClipboardHistoryEntry(text: "",
                                                                    kind: .files,
                                                                    filePaths: filesEntry.filePaths)),
@@ -6411,6 +6451,8 @@ struct MetricsTests {
                "Media output visibility respects dot-prefixed manual filenames")
         expect(MediaSupport.recognitionLanguages(for: "pt-BR") == ["pt-BR", "en-US"],
                "Media OCR language defaults include the app language and English")
+        expect(MediaSupport.recognitionLanguages(for: "de") == ["de-DE", "en-US"],
+               "Media OCR language defaults include German and English")
         expect(MediaSupport.recognitionLanguages(for: "tr") == ["tr-TR", "en-US"],
                "Media OCR language defaults include Turkish and English")
         expect(MediaSupport.recognitionLanguages(for: "ko") == ["ko-KR", "en-US"],
@@ -13333,12 +13375,14 @@ struct MetricsTests {
             let clipboard = FeatureStrings.clipboard(language)
             let values = Mirror(reflecting: clipboard).children
                 .compactMap { $0.value as? String }
-            expect(values.count == 54 && values.allSatisfy { !$0.isEmpty },
+            expect(values.count == 60 && values.allSatisfy { !$0.isEmpty },
                    "every clipboard string is set for \(language.rawValue)")
             expect(values.allSatisfy { !$0.contains("—") },
                    "no em-dash in visible clipboard strings (\(language.rawValue))")
             expectFormat(clipboard.deleteSelectedFormat, ["d"],
                          "\(language.rawValue) clipboard bulk-delete format")
+            expect(!clipboard.saveToDownloads.isEmpty && !clipboard.extractText.isEmpty,
+                   "clipboard image save and OCR labels are set for \(language.rawValue)")
         }
         for language in AppLanguage.allCases {
             let values = Mirror(reflecting: FeatureStrings.mouseButtons(language)).children

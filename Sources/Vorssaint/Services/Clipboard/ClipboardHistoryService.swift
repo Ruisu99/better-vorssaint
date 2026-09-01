@@ -1201,6 +1201,21 @@ final class ClipboardHistoryService: ObservableObject {
                 self.copySelectedQuickEntryOnly()
                 return nil
             }
+            if let entry = self.selectedQuickEntry,
+               ClipboardImageExport.source(for: entry) != nil {
+                if modifiers == [.command], key == "s" {
+                    ClipboardImageActions.saveToDownloads(entry)
+                    return nil
+                }
+                if modifiers == [.command, .shift], key == "s" {
+                    ClipboardImageActions.saveAs(entry)
+                    return nil
+                }
+                if modifiers == [.command], key == "e" {
+                    ClipboardImageActions.extractText(entry)
+                    return nil
+                }
+            }
             if modifiers == [.command], key == "a",
                ClipboardHistoryBatch.listOwnsSelectAllShortcut(
                    batchCount: self.quickBatchCount,

@@ -275,6 +275,20 @@ struct ClipboardEntryPreviewSidebar: View {
                         beginEditing(entry)
                     }
                 }
+                if ClipboardImageExport.source(for: entry) != nil {
+                    Button {
+                        ClipboardImageActions.saveToDownloads(entry)
+                    } label: {
+                        Image(systemName: "square.and.arrow.down")
+                    }
+                    .help(text.saveToDownloads)
+                    Button {
+                        ClipboardImageActions.extractText(entry)
+                    } label: {
+                        Image(systemName: "text.viewfinder")
+                    }
+                    .help(text.extractText)
+                }
                 Button(text.copy) {
                     ClipboardHistoryService.shared.copyOnlyQuickEntry(entry)
                 }
