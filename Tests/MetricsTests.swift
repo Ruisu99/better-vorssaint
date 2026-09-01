@@ -21836,6 +21836,22 @@ struct MetricsTests {
         expect(uninstallScriptSource.contains("SleepDisabled"),
                "script uninstall reads the sleep setting back for itself")
 
+        // MARK: Personal-fork install needs no local compile
+        let personalInstallScript = (try? String(contentsOfFile: "Tools/install-latest.sh",
+                                                   encoding: .utf8)) ?? ""
+        let personalBuildWorkflow = (try? String(contentsOfFile: ".github/workflows/personal-build.yml",
+                                                  encoding: .utf8)) ?? ""
+        expect(personalInstallScript.contains("personal-latest")
+                && personalInstallScript.contains("Vorssaint.zip")
+                && personalInstallScript.contains("autoCheckUpdates")
+                && personalInstallScript.contains("uname -s"),
+               "the Mac installer downloads the fork zip and will not run off a Mac")
+        expect(personalBuildWorkflow.contains("github.repository == 'Ruisu99/better-vorssaint'")
+                && personalBuildWorkflow.contains("personal-latest")
+                && personalBuildWorkflow.contains("ditto -c -k --keepParent")
+                && !personalBuildWorkflow.contains("vorssaintapp/vorssaint-utils"),
+               "only this fork publishes the personal zip, never the upstream repo")
+
         // MARK: Detached command reruns (counted last, so a late rerun still fails)
         // The `||` form reran the whole installer — as root — on every non-zero
         // payload exit. Counting here rather than after a fixed wait leaves the

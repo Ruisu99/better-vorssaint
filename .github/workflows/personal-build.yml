@@ -1,0 +1,76 @@
+name: Personal build
+
+# Fork-only: GitHub builds the app so the Mac never has to. Official
+# vorssaint-utils never runs this job.
+on:
+  push:
+    branches: [main, "cursor/**"]
+  workflow_dispatch:
+
+concurrency:
+  group: personal-build
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    name: Build and publish zip
+    if: github.repository == 'Ruisu99/better-vorssaint'
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Build
+        run: ./build.sh
+
+      - name: Selftest
+        run: ./build/Vorssaint --selftest
+
+      - name: Zip app
+        run: |
+          mkdir -p dist
+          ditto -c -k --keepParent build/stage/Vorssaint.app dist/Vorssaint.zip
+          ls -lh dist/Vorssaint.zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: Vorssaint
+          path: dist/Vorssaint.zip
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish personal-latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          NOTES="$(cat <<EOF
+          Personal build from \`${GITHUB_SHA}\` on \`${GITHUB_REF_NAME}\`.
+
+          On your Mac (no Xcode):
+
+          \`\`\`sh
+          curl -fsSL https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${GITHUB_SHA}/Tools/install-latest.sh | zsh
+          \`\`\`
+
+          Or download Vorssaint.zip, unzip, drag to Applications, then right-click Open.
+
+          The installer turns off automatic official updates so they cannot replace this build.
+          EOF
+          )"
+          if gh release view personal-latest >/dev/null 2>&1; then
+            gh release delete personal-latest --yes
+          fi
+          gh api -X DELETE "repos/${GITHUB_REPOSITORY}/git/refs/tags/personal-latest" >/dev/null 2>&1 || true
+          gh release create personal-latest dist/Vorssaint.zip \
+            --target "$GITHUB_SHA" \
+            --title "Latest personal build" \
+            --notes "$NOTES" \
+            --prerelease \
+            --latest=false

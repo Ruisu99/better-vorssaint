@@ -158,6 +158,8 @@ The rest bends the same way: panel sections reorder and hide, the compact layout
 
 ## Install
 
+This personal fork: skip Homebrew and the official disk image. On a Mac, after GitHub has built the latest commit, run `./Tools/install-latest.sh` or follow [docs/PERSONAL-INSTALL.md](docs/PERSONAL-INSTALL.md).
+
 With [Homebrew](https://brew.sh):
 
 ```sh
