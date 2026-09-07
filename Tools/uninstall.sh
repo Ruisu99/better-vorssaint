@@ -55,10 +55,12 @@ for legacy in "${LEGACY_BUNDLES[@]}"; do
     tccutil reset All "$legacy" >/dev/null 2>&1 || true
 done
 
-echo "▸ Removing app, preferences, saved state and stored data…"
+echo "▸ Removing app, preferences, saved state and stored data (clipboard history, shelf files, share links)…"
 rm -rf "${APPS[@]}"
 for id in "$BUNDLE" "${LEGACY_BUNDLES[@]}"; do
     defaults delete "$id" >/dev/null 2>&1 || true
+    /usr/bin/security delete-generic-password \
+        -s "$id.command-bar-query-habits" -a "hmac-key" >/dev/null 2>&1 || true
     rm -f "$HOME/Library/Preferences/$id.plist"
     rm -rf "$HOME/Library/Saved Application State/$id.savedState"
     rm -rf "$HOME/Library/Application Support/$id"

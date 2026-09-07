@@ -14,9 +14,7 @@ enum ForkIdentityMigration {
         guard AppInfo.isPersonalFork else { return }
         migrateLegacyDataIfNeeded()
         // Official auto-updates would replace this fork with upstream.
-        if UserDefaults.standard.object(forKey: DefaultsKey.autoCheckUpdates) == nil {
-            UserDefaults.standard.set(false, forKey: DefaultsKey.autoCheckUpdates)
-        }
+        UserDefaults.standard.set(false, forKey: DefaultsKey.autoCheckUpdates)
         retireLegacyApps()
     }
 

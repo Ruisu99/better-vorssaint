@@ -110,7 +110,8 @@ struct UninstallFailureNote: View {
                     .font(compact ? .system(size: 9.5) : .caption2)
                     .foregroundStyle(.tertiary)
             }
-            if !permissions.fullDiskAccess {
+            if !permissions.fullDiskAccess,
+               UninstallerSupport.failureNeedsFullDiskAccess(paths: items.map(\.url.path)) {
                 FullDiskAccessNote(compact: compact, reason: l10n.s.uninstallerFailedNeedsFDA)
             }
         }
@@ -160,13 +161,15 @@ struct HUDBackdrop: View {
     /// plate alone carries white text to 4.8:1 and black text to 5.3:1, both
     /// past the 4.5:1 the accessibility guidelines ask of body text, and the
     /// real material only ever adds to that.
+    static func plateOpacity(dark: Bool) -> Double { dark ? 0.55 : 0.5 }
+
     private var plateOpacity: Double {
         switch contrast {
         case .standard:
             return 0
         case .high:
             guard !reduceTransparency else { return 0 }
-            return colorScheme == .dark ? 0.55 : 0.5
+            return Self.plateOpacity(dark: colorScheme == .dark)
         case .spotlight:
             return CommandBarChrome.plateOpacity(
                 liquidGlass: liquidGlassEnabled,
