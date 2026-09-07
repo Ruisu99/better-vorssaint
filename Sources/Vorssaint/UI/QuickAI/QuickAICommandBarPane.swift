@@ -33,15 +33,28 @@ struct QuickAICommandBarPane: View {
             .padding(.top, 8)
 
             if service.draft.messages.isEmpty, service.lastError == nil, !service.isSending {
-                Text(strings.followUpHint)
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 8)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(strings.followUpHint)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                    HStack(spacing: 8) {
+                        chip(strings.researchThisQuestion, symbol: "globe") {
+                            service.enableResearchMode()
+                        }
+                        chip(strings.thinkHarder, symbol: "lightbulb") {
+                            service.enableThinkHarder()
+                        }
+                    }
+                    Text(strings.insertWithCommandReturn)
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 8)
             } else {
                 ScrollViewReader { proxy in
                     ScrollView {
-                LazyVStack(alignment: .leading, spacing: 14) {
+                        LazyVStack(alignment: .leading, spacing: 14) {
                             ForEach(service.draft.messages) { message in
                                 QuickAIMessageBubble(
                                     message: message,
@@ -93,6 +106,20 @@ struct QuickAICommandBarPane: View {
             .padding(.horizontal, 16)
             .padding(.bottom, 8)
         }
+    }
+
+    private func chip(_ title: String, symbol: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: symbol)
+                .font(.system(size: 11, weight: .semibold))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(Color.primary.opacity(0.08))
+                )
+        }
+        .buttonStyle(.plain)
     }
 
     private func isStreaming(_ message: QuickAISupport.Message) -> Bool {

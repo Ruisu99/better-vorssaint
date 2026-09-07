@@ -129,6 +129,23 @@ struct QuickAIChatView: View {
                             .font(.caption)
                             .foregroundStyle(.orange)
                     }
+                    if service.draft.messages.isEmpty, service.lastError == nil, !service.isSending {
+                        HStack(spacing: 8) {
+                            Button {
+                                service.enableResearchMode()
+                            } label: {
+                                Label(strings.researchThisQuestion, systemImage: "globe")
+                            }
+                            Button {
+                                service.enableThinkHarder()
+                            } label: {
+                                Label(strings.thinkHarder, systemImage: "lightbulb")
+                            }
+                        }
+                        .font(.system(size: 12, weight: .semibold))
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                    }
                     Color.clear.frame(height: 1).id("quick-ai-end")
                 }
                 .padding(.horizontal, 20)

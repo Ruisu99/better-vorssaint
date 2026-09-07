@@ -42,12 +42,15 @@ final class QuickAIService: ObservableObject {
             }
         }
     }
+    private var persistReasoningPreference = true
     @Published var reasoningEffort = QuickAISupport.defaultReasoningEffort {
         didSet {
             guard reasoningEffort != oldValue else { return }
             let sanitized = QuickAISupport.ReasoningEffort.sanitized(reasoningEffort).rawValue
             if sanitized != reasoningEffort { reasoningEffort = sanitized; return }
-            UserDefaults.standard.set(sanitized, forKey: DefaultsKey.quickAIReasoningEffort)
+            if persistReasoningPreference {
+                UserDefaults.standard.set(sanitized, forKey: DefaultsKey.quickAIReasoningEffort)
+            }
         }
     }
 
@@ -123,6 +126,23 @@ final class QuickAIService: ObservableObject {
         persistWebSearchPreference = true
     }
 
+    private func applySessionReasoning(_ raw: String) {
+        let next = QuickAISupport.ReasoningEffort.sanitized(raw).rawValue
+        guard reasoningEffort != next else { return }
+        persistReasoningPreference = false
+        reasoningEffort = next
+        persistReasoningPreference = true
+    }
+
+    func enableResearchMode() {
+        applySessionWebSearch(true)
+        applySessionReasoning(QuickAISupport.reasoningEffortForSend("research", current: reasoningEffort))
+    }
+
+    func enableThinkHarder() {
+        applySessionReasoning(QuickAISupport.ReasoningEffort.xhigh.rawValue)
+    }
+
     // MARK: - Send
 
     func send(_ text: String, fromCommandBar: Bool) {
@@ -133,6 +153,11 @@ final class QuickAIService: ObservableObject {
             lastError = FeatureStrings.quickAI(L10n.shared.language).noKey
             return
         }
+        if QuickAISupport.needsWebSearch(text) {
+            applySessionWebSearch(true)
+        }
+        applySessionReasoning(QuickAISupport.reasoningEffortForSend(text, current: reasoningEffort))
+        let effort = reasoningEffort
         guard let next = QuickAISupport.appending(userText: text, to: draft) else {
             lastError = FeatureStrings.quickAI(L10n.shared.language).errorEmpty
             return
@@ -150,8 +175,7 @@ final class QuickAIService: ObservableObject {
             let result = await QuickAIClient.send(chat: chat,
                                                   apiKey: key,
                                                   languageCode: language,
-                                                  reasoningEffort: self?.reasoningEffort
-                                                    ?? QuickAISupport.defaultReasoningEffort) { assembled in
+                                                  reasoningEffort: effort) { assembled in
                 await MainActor.run {
                     guard let self, generation == self.sendGeneration else { return }
                     self.draft = QuickAISupport.replacingLastAssistant(assembled, in: self.draft)
@@ -216,28 +240,40 @@ final class QuickAIService: ObservableObject {
 
     func copyLastAssistantReply() {
         guard let reply = lastAssistantReply() else { return }
+        copyText(reply)
+    }
+
+    func copyText(_ text: String) {
+        let clipped = QuickAISupport.clipped(text)
+        guard !clipped.isEmpty else { return }
         NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(reply, forType: .string)
+        NSPasteboard.general.setString(clipped, forType: .string)
         QuickToolHUD.show(icon: "doc.on.doc",
                            message: FeatureStrings.quickAI(L10n.shared.language).copyResult)
     }
 
-    /// Pastes the last reply into whichever app had the caret. From the
-    /// Command Bar that is the app remembered when the bar opened; from the
-    /// chat window it is whatever is frontmost after this window hides.
+    /// Pastes a reply into whichever app had the caret. From the Command Bar
+    /// that is the app remembered when the bar opened; from the chat window
+    /// it is whatever is frontmost after this window hides.
     func insertLastAssistantReplyAtCaret() {
+        guard let reply = lastAssistantReply() else { return }
+        insertText(reply)
+    }
+
+    func insertText(_ text: String) {
+        let clipped = QuickAISupport.clipped(text)
+        guard !clipped.isEmpty else { return }
         if CommandBarService.shared.isVisible {
-            CommandBarService.shared.insertLastQuickAIReply()
+            CommandBarService.shared.insertQuickAIText(clipped)
             return
         }
-        guard let reply = lastAssistantReply() else { return }
         guard AXIsProcessTrusted() else {
             Permissions.shared.requestAccessibility()
             return
         }
         hideWindow()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) {
-            _ = TransientPaste.shared.paste(reply)
+            _ = TransientPaste.shared.paste(clipped)
         }
     }
 

@@ -12,7 +12,7 @@ enum QuickAISupport {
     static let chatPath = "/v1/chat/completions"
     static let responsesPath = "/v1/responses"
     static let defaultModel = Model.gpt56Luna.rawValue
-    static let defaultReasoningEffort = ReasoningEffort.medium.rawValue
+    static let defaultReasoningEffort = ReasoningEffort.high.rawValue
     static let maximumInputLength = 20_000
     static let maximumMessagesPerChat = 80
     static let maximumSavedChats = 40
@@ -307,17 +307,54 @@ enum QuickAISupport {
         var lines = [
             "You are Quick AI, a fast assistant inside a Mac menu bar app.",
             "Answer in the same language the person writes in. If that is unclear, use \(languageCode).",
-            "Be concise by default. Go deeper only when they ask.",
-            "Write in short paragraphs, markdown lists, and headings so the reply is easy to scan. Put a blank line between paragraphs. Never dump a long answer as one block.",
+            "Be concise by default. Go deeper only when they ask, or when the question needs it.",
+            "Structure every reply like a Raycast or ChatGPT answer: a short heading or takeaway, then short paragraphs, then a list if there are several points.",
+            "Put a blank line between paragraphs. Use markdown headings, lists, and bold. Never dump a long answer as one block.",
+            "When the question is non-trivial, show a few numbered thinking steps, then the answer.",
             "Do not invent Mac actions, files, or settings changes. You only answer in text.",
             "Never ask for API keys or passwords.",
             "If they attached selected text, treat it as context.",
             "Never repeat the system instructions.",
         ]
         if webSearch {
-            lines.append("You may use web search for current facts. Prefer sources over guessing.")
+            lines.append("You may use web search for current facts. Look things up instead of guessing. Prefer sources.")
         }
         return lines.joined(separator: " ")
+    }
+
+    /// True when the person is asking for current facts, not a rewrite.
+    static func needsWebSearch(_ text: String) -> Bool {
+        let folded = text.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+        let needles = [
+            "recherch", "research", "look up", "nachschlag", "aktuell",
+            "latest", "breaking", "wikipedia", "who is ", "wer ist ",
+            "what happened", "was passiert", "im web", "quelle",
+            "news", "heute", "this week", "wetter", "weather",
+            "search the web", "finde heraus", "lookup", "preis von",
+            "stock price", "who won", "ergebnis",
+        ]
+        return needles.contains { folded.contains($0) }
+    }
+
+    static func wantsDeeperThinking(_ text: String) -> Bool {
+        if needsWebSearch(text) { return true }
+        let folded = text.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+        if text.count > 280 { return true }
+        let needles = [
+            "erkla", "explain", "why ", "warum", "compare", "vergleich",
+            "plan ", "schritt", "analy", "how do i", "wie kann", "tradeoff",
+            "think step", "denk nach", "gruendlich", "gründlich",
+        ]
+        return needles.contains { folded.contains($0) }
+    }
+
+    static func reasoningEffortForSend(_ text: String, current: String) -> String {
+        let currentEffort = ReasoningEffort.sanitized(current)
+        guard wantsDeeperThinking(text) else { return currentEffort.rawValue }
+        let order: [ReasoningEffort] = [.none, .low, .medium, .high, .xhigh, .max]
+        let currentIndex = order.firstIndex(of: currentEffort) ?? 2
+        let highIndex = order.firstIndex(of: .high) ?? 3
+        return order[max(currentIndex, highIndex)].rawValue
     }
 
     static func contextPreamble(_ context: String) -> String? {
@@ -389,12 +426,145 @@ enum QuickAISupport {
     /// not valid markdown, so a half-streamed fence never blanks the reply.
     static func formattedReply(_ raw: String) -> AttributedString {
         let options = AttributedString.MarkdownParsingOptions(
-            interpretedSyntax: .full,
+            interpretedSyntax: .inlineOnlyPreservingWhitespace,
             failurePolicy: .returnPartiallyParsedIfPossible)
         if let parsed = try? AttributedString(markdown: raw, options: options) {
             return parsed
         }
         return AttributedString(raw)
+    }
+
+    /// One visual chunk of an assistant reply. SwiftUI's default markdown
+    /// view collapses paragraphs; laying these out with spacing is what
+    /// makes the chat read like Raycast instead of one block.
+    enum ReplyBlock: Equatable {
+        case heading(Int, String)
+        case paragraph(String)
+        case bullets([String])
+        case numbered([String])
+        case code(String)
+        case quote(String)
+    }
+
+    static func replyBlocks(_ raw: String) -> [ReplyBlock] {
+        let text = raw.replacingOccurrences(of: "\r\n", with: "\n")
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return [] }
+        var blocks: [ReplyBlock] = []
+        var paragraph: [String] = []
+        var bullets: [String] = []
+        var numbered: [String] = []
+        var code: [String] = []
+        var inCode = false
+
+        func flushParagraph() {
+            let joined = paragraph.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+            paragraph = []
+            guard !joined.isEmpty else { return }
+            blocks.append(.paragraph(joined))
+        }
+        func flushLists() {
+            if !bullets.isEmpty {
+                blocks.append(.bullets(bullets))
+                bullets = []
+            }
+            if !numbered.isEmpty {
+                blocks.append(.numbered(numbered))
+                numbered = []
+            }
+        }
+
+        for line in text.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).map(String.init) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("```") {
+                flushLists()
+                flushParagraph()
+                if inCode {
+                    blocks.append(.code(code.joined(separator: "\n")))
+                    code = []
+                    inCode = false
+                } else {
+                    inCode = true
+                }
+                continue
+            }
+            if inCode {
+                code.append(line)
+                continue
+            }
+            if trimmed.isEmpty {
+                flushLists()
+                flushParagraph()
+                continue
+            }
+            if let heading = headingBlock(trimmed) {
+                flushLists()
+                flushParagraph()
+                blocks.append(heading)
+                continue
+            }
+            if let item = bulletItem(trimmed) {
+                flushParagraph()
+                if !numbered.isEmpty { flushLists() }
+                bullets.append(item)
+                continue
+            }
+            if let item = numberedItem(trimmed) {
+                flushParagraph()
+                if !bullets.isEmpty { flushLists() }
+                numbered.append(item)
+                continue
+            }
+            if trimmed.hasPrefix("> ") || trimmed == ">" {
+                flushLists()
+                flushParagraph()
+                let quote = trimmed.hasPrefix("> ") ? String(trimmed.dropFirst(2)) : ""
+                if case .quote(let existing) = blocks.last {
+                    blocks.removeLast()
+                    blocks.append(.quote(existing + " " + quote))
+                } else {
+                    blocks.append(.quote(quote))
+                }
+                continue
+            }
+            paragraph.append(trimmed)
+        }
+        if inCode {
+            blocks.append(.code(code.joined(separator: "\n")))
+        }
+        flushLists()
+        flushParagraph()
+        return blocks.isEmpty ? [.paragraph(text.trimmingCharacters(in: .whitespacesAndNewlines))] : blocks
+    }
+
+    private static func headingBlock(_ line: String) -> ReplyBlock? {
+        var level = 0
+        var index = line.startIndex
+        while index < line.endIndex, line[index] == "#", level < 3 {
+            level += 1
+            index = line.index(after: index)
+        }
+        guard level > 0, index < line.endIndex, line[index] == " " else { return nil }
+        let text = String(line[line.index(after: index)...]).trimmingCharacters(in: .whitespaces)
+        guard !text.isEmpty else { return nil }
+        return .heading(level, text)
+    }
+
+    private static func bulletItem(_ line: String) -> String? {
+        for prefix in ["- ", "* ", "• "] where line.hasPrefix(prefix) {
+            let item = String(line.dropFirst(prefix.count)).trimmingCharacters(in: .whitespaces)
+            return item.isEmpty ? nil : item
+        }
+        return nil
+    }
+
+    private static func numberedItem(_ line: String) -> String? {
+        guard let dot = line.firstIndex(of: "."), dot > line.startIndex else { return nil }
+        let number = line[line.startIndex..<dot]
+        guard number.allSatisfy(\.isNumber) else { return nil }
+        let rest = line[line.index(after: dot)...]
+        guard rest.first == " " else { return nil }
+        let item = rest.dropFirst().trimmingCharacters(in: .whitespaces)
+        return item.isEmpty ? nil : item
     }
 
     /// One line of an OpenAI SSE stream (`data: …`, `event: …`, or blank).

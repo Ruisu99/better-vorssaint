@@ -1746,8 +1746,12 @@ final class CommandBarService: ObservableObject {
     /// when the bar opened. If that app still has the original selection,
     /// a paste replaces it.
     func insertLastQuickAIReply() {
-        guard case .quickAI = mode else { return }
         guard let reply = QuickAIService.shared.lastAssistantReply() else { return }
+        insertQuickAIText(reply)
+    }
+
+    func insertQuickAIText(_ reply: String) {
+        guard case .quickAI = mode else { return }
         let target = pasteTargetApp
         hide()
         pasteTargetApp = nil
@@ -3073,6 +3077,10 @@ final class CommandBarService: ObservableObject {
             // and Return goes on meaning what it always did.
             if event.modifierFlags.contains(.command),
                Int(event.keyCode) == kVK_Return || Int(event.keyCode) == kVK_ANSI_KeypadEnter {
+                if case .quickAI = self.mode {
+                    self.insertLastQuickAIReply()
+                    return nil
+                }
                 if case .search = self.mode, let entry = self.selectedEntry,
                    entry.canRevealInFinder {
                     self.revealInFinder(entry)

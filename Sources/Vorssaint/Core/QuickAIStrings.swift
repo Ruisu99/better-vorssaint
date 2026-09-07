@@ -50,6 +50,9 @@ struct QuickAIFeatureStrings {
     let selectionSummarize: String
     let selectionTranslate: String
     let insertReply: String
+    let thinkHarder: String
+    let insertWithCommandReturn: String
+    let researchThisQuestion: String
 }
 
 extension FeatureStrings {
@@ -117,7 +120,10 @@ extension QuickAIFeatureStrings {
         selectionResearch: "Research this",
         selectionSummarize: "Summarize",
         selectionTranslate: "Translate",
-        insertReply: "Insert"
+        insertReply: "Insert",
+        thinkHarder: "Think harder",
+        insertWithCommandReturn: "⌘Return inserts",
+        researchThisQuestion: "Research this"
     )
 
     static let de = QuickAIFeatureStrings(
@@ -164,7 +170,10 @@ extension QuickAIFeatureStrings {
         selectionResearch: "Recherchieren",
         selectionSummarize: "Zusammenfassen",
         selectionTranslate: "Übersetzen",
-        insertReply: "Einfügen"
+        insertReply: "Einfügen",
+        thinkHarder: "Gründlicher denken",
+        insertWithCommandReturn: "⌘Return fügt ein",
+        researchThisQuestion: "Das recherchieren"
     )
 
     static let ptBR = QuickAIFeatureStrings(
@@ -211,7 +220,10 @@ extension QuickAIFeatureStrings {
         selectionResearch: "Pesquisar isto",
         selectionSummarize: "Resumir",
         selectionTranslate: "Traduzir",
-        insertReply: "Inserir"
+        insertReply: "Inserir",
+        thinkHarder: "Pensar mais",
+        insertWithCommandReturn: "⌘Return insere",
+        researchThisQuestion: "Pesquisar isto"
     )
 
     static let tr = QuickAIFeatureStrings(
@@ -258,7 +270,10 @@ extension QuickAIFeatureStrings {
         selectionResearch: "Bunu araştır",
         selectionSummarize: "Özetle",
         selectionTranslate: "Çevir",
-        insertReply: "Ekle"
+        insertReply: "Ekle",
+        thinkHarder: "Daha derin düşün",
+        insertWithCommandReturn: "⌘Return yapıştırır",
+        researchThisQuestion: "Bunu araştır"
     )
 
     static let ru = QuickAIFeatureStrings(
@@ -305,7 +320,10 @@ extension QuickAIFeatureStrings {
         selectionResearch: "Исследовать",
         selectionSummarize: "Кратко изложить",
         selectionTranslate: "Перевести",
-        insertReply: "Вставить"
+        insertReply: "Вставить",
+        thinkHarder: "Думать глубже",
+        insertWithCommandReturn: "⌘Return вставляет",
+        researchThisQuestion: "Исследовать это"
     )
 
     static let es = QuickAIFeatureStrings(
@@ -352,7 +370,10 @@ extension QuickAIFeatureStrings {
         selectionResearch: "Investigar esto",
         selectionSummarize: "Resumir",
         selectionTranslate: "Traducir",
-        insertReply: "Insertar"
+        insertReply: "Insertar",
+        thinkHarder: "Pensar más",
+        insertWithCommandReturn: "⌘Return inserta",
+        researchThisQuestion: "Investigar esto"
     )
 
     static let fr = QuickAIFeatureStrings(
@@ -399,7 +420,10 @@ extension QuickAIFeatureStrings {
         selectionResearch: "Rechercher ceci",
         selectionSummarize: "Résumer",
         selectionTranslate: "Traduire",
-        insertReply: "Insérer"
+        insertReply: "Insérer",
+        thinkHarder: "Réfléchir plus",
+        insertWithCommandReturn: "⌘Retour insère",
+        researchThisQuestion: "Rechercher ceci"
     )
 
     static let it = QuickAIFeatureStrings(
@@ -446,7 +470,10 @@ extension QuickAIFeatureStrings {
         selectionResearch: "Cerca informazioni",
         selectionSummarize: "Riassumi",
         selectionTranslate: "Traduci",
-        insertReply: "Inserisci"
+        insertReply: "Inserisci",
+        thinkHarder: "Pensa di più",
+        insertWithCommandReturn: "⌘Invio inserisce",
+        researchThisQuestion: "Cerca informazioni"
     )
 
     static let ja = QuickAIFeatureStrings(
@@ -493,7 +520,10 @@ extension QuickAIFeatureStrings {
         selectionResearch: "これを調べる",
         selectionSummarize: "要約する",
         selectionTranslate: "翻訳する",
-        insertReply: "挿入"
+        insertReply: "挿入",
+        thinkHarder: "しっかり考える",
+        insertWithCommandReturn: "⌘Returnで挿入",
+        researchThisQuestion: "これを調べる"
     )
 
     static let ko = QuickAIFeatureStrings(
@@ -540,7 +570,10 @@ extension QuickAIFeatureStrings {
         selectionResearch: "이 내용 조사",
         selectionSummarize: "요약하기",
         selectionTranslate: "번역하기",
-        insertReply: "삽입"
+        insertReply: "삽입",
+        thinkHarder: "더 깊게 생각",
+        insertWithCommandReturn: "⌘Return으로 삽입",
+        researchThisQuestion: "이 내용 조사"
     )
 
     static let zhHans = QuickAIFeatureStrings(
@@ -587,7 +620,10 @@ extension QuickAIFeatureStrings {
         selectionResearch: "检索此内容",
         selectionSummarize: "总结",
         selectionTranslate: "翻译",
-        insertReply: "插入"
+        insertReply: "插入",
+        thinkHarder: "再想深一点",
+        insertWithCommandReturn: "⌘Return 插入",
+        researchThisQuestion: "检索此内容"
     )
 
     static let zhTW = QuickAIFeatureStrings(
@@ -634,7 +670,10 @@ extension QuickAIFeatureStrings {
         selectionResearch: "檢索此內容",
         selectionSummarize: "摘要",
         selectionTranslate: "翻譯",
-        insertReply: "插入"
+        insertReply: "插入",
+        thinkHarder: "再想深一點",
+        insertWithCommandReturn: "⌘Return 插入",
+        researchThisQuestion: "檢索此內容"
     )
 
     static let zhHK = QuickAIFeatureStrings(
@@ -681,6 +720,9 @@ extension QuickAIFeatureStrings {
         selectionResearch: "檢索此內容",
         selectionSummarize: "摘要",
         selectionTranslate: "翻譯",
-        insertReply: "插入"
+        insertReply: "插入",
+        thinkHarder: "再想深一點",
+        insertWithCommandReturn: "⌘Return 插入",
+        researchThisQuestion: "檢索此內容"
     )
 }

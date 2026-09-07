@@ -15515,7 +15515,7 @@ struct MetricsTests {
                    "kill process formats keep their placeholders (\(language.rawValue))")
             let quickAIValues = Mirror(reflecting: FeatureStrings.quickAI(language)).children
                 .compactMap { $0.value as? String }
-            expect(quickAIValues.count == 44 && quickAIValues.allSatisfy { !$0.isEmpty },
+            expect(quickAIValues.count == 47 && quickAIValues.allSatisfy { !$0.isEmpty },
                    "every Quick AI string is set for \(language.rawValue)")
             expect(quickAIValues.allSatisfy { !$0.contains("—") },
                    "no em-dash in visible Quick AI strings (\(language.rawValue))")
@@ -15654,6 +15654,7 @@ struct MetricsTests {
                 && QuickAISupport.Model.supportsReasoning("gpt-5.6-luna")
                 && !QuickAISupport.Model.supportsReasoning("gpt-4o-mini")
                 && QuickAISupport.ReasoningEffort.sanitized(nil) == .medium
+                && QuickAISupport.defaultReasoningEffort == QuickAISupport.ReasoningEffort.high.rawValue
                 && QuickAISupport.ReasoningEffort.options(for: "gpt-5.6-terra").count == 6
                 && QuickAISupport.ReasoningEffort.options(for: "gpt-4.1").isEmpty
                 && QuickAISupport.usesResponsesAPI(model: "gpt-5.6-luna", webSearch: false)
@@ -15681,8 +15682,38 @@ struct MetricsTests {
                 && QuickAISupport.conversationSystemPrompt(webSearch: false, languageCode: "en")
                     .localizedCaseInsensitiveContains("short paragraphs")
                 && QuickAISupport.conversationSystemPrompt(webSearch: false, languageCode: "en")
-                    .localizedCaseInsensitiveContains("blank line"),
+                    .localizedCaseInsensitiveContains("blank line")
+                && QuickAISupport.conversationSystemPrompt(webSearch: false, languageCode: "en")
+                    .localizedCaseInsensitiveContains("numbered thinking steps"),
                "web search is only in the prompt when the person switched it on, and replies are asked to use spaced markdown")
+        expect(QuickAISupport.needsWebSearch("Recherchiere Swift 6")
+                && QuickAISupport.needsWebSearch("Who is the mayor")
+                && !QuickAISupport.needsWebSearch("Improve this sentence"),
+               "research-shaped questions turn web search on; rewrites do not")
+        expect(QuickAISupport.reasoningEffortForSend("why is this slow", current: "low")
+                    == QuickAISupport.ReasoningEffort.high.rawValue
+                && QuickAISupport.reasoningEffortForSend("hi", current: "medium")
+                    == QuickAISupport.ReasoningEffort.medium.rawValue,
+               "non-trivial questions raise intensity to at least high")
+        let spaced = QuickAISupport.replyBlocks("""
+            # Title
+
+            Hello **there**.
+
+            - one
+            - two
+
+            1. first
+            2. second
+            """)
+        expect(spaced == [
+            .heading(1, "Title"),
+            .paragraph("Hello **there**."),
+            .bullets(["one", "two"]),
+            .numbered(["first", "second"]),
+        ], "assistant replies split into headings, paragraphs and lists")
+        expect(QuickAISupport.replyBlocks("```\nlet x = 1") == [.code("let x = 1")],
+               "an unfinished code fence still shows as a code block while it streams")
         var seeded = QuickAISupport.Chat()
         expect(QuickAISupport.appending(userText: "   ", to: seeded) == nil,
                "an empty question is not a turn")
@@ -15863,13 +15894,17 @@ struct MetricsTests {
         expect(quickAITranscriptSource.contains("QuickAITypingDots")
                 && quickAITranscriptSource.contains("QuickAIStreamingCaret")
                 && quickAITranscriptSource.contains("formattedReply")
-                && quickAITranscriptSource.contains("paragraphSpacing")
+                && quickAITranscriptSource.contains("QuickAIReplyBlocks")
+                && quickAITranscriptSource.contains("replyBlocks")
                 && quickAIChatViewSource.contains("QuickAIMessageBubble")
                 && quickAIPaneSource.contains("QuickAIMessageBubble"),
                "both chat surfaces use markdown bubbles with a typing animation")
         expect(quickAIPaneSource.contains("insertReply")
                 && quickAIPaneSource.contains("insertLastAssistantReplyAtCaret")
-                && quickAIChatViewSource.contains("insertLastAssistantReplyAtCaret"),
+                && quickAIPaneSource.contains("thinkHarder")
+                && quickAIPaneSource.contains("researchThisQuestion")
+                && quickAIChatViewSource.contains("insertLastAssistantReplyAtCaret")
+                && quickAIChatViewSource.contains("enableResearchMode"),
                "the Command Bar and the chat window can insert the last reply into the previous app")
         let folder = FileManager.default.temporaryDirectory
             .appendingPathComponent("quick-ai-tests-\(UUID().uuidString)", isDirectory: true)
@@ -22760,6 +22795,7 @@ struct MetricsTests {
                "the bar pastes into its own field, and clipboard rows paste back into the previous app")
         expect(commandBarServiceSource.contains("runQuickAISelection")
                 && commandBarServiceSource.contains("insertLastQuickAIReply")
+                && commandBarServiceSource.contains("insertQuickAIText")
                 && commandBarServiceSource.contains("TransientPaste.shared.paste"),
                "the bar runs selected-text AI actions and can paste the reply back")
         let commandBarCatalogSource = (try? String(
