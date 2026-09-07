@@ -22785,8 +22785,27 @@ struct MetricsTests {
                 && commandBarServiceSource.contains("chromeAnimating")
                 && commandBarServiceSource.contains("alphaValue = 0.02")
                 && commandBarServiceSource.contains("finishChromeFrame")
+                && commandBarServiceSource.contains("completeHomeHydrationForOpening")
+                && commandBarServiceSource.contains("isRevealing")
                 && !commandBarServiceSource.contains("setFrame(frame, display: true, animate: true)"),
                "height animation is the compact expand only, and open chrome is not interrupted by layout")
+        let showSource = commandBarServiceSource
+            .components(separatedBy: "private func show(promptingFor").last ?? ""
+            .components(separatedBy: "private func beginPresentation").first ?? ""
+        let presentSource = commandBarServiceSource
+            .components(separatedBy: "private func present(_ panel: NSPanel)").last ?? ""
+            .components(separatedBy: "private func finishChromeFrame").first ?? ""
+        if let hydrateRange = showSource.range(of: "completeHomeHydrationForOpening"),
+           let presentRange = showSource.range(of: "present(panel)"),
+           let positionRange = presentSource.range(of: "self.position(panel)"),
+           let orderFrontRange = presentSource.range(of: "orderFrontRegardless()") {
+            expect(hydrateRange.lowerBound < presentRange.lowerBound
+                    && presentSource.contains("DispatchQueue.main.async")
+                    && positionRange.lowerBound < orderFrontRange.lowerBound,
+                   "home is fitted before the panel is ordered on screen")
+        } else {
+            expect(false, "home is fitted before the panel is ordered on screen")
+        }
         expect(commandBarServiceSource.contains("pasteIntoSearchField")
                 && commandBarServiceSource.contains("kVK_ANSI_V")
                 && commandBarServiceSource.contains("rememberPasteTarget")
@@ -24816,8 +24835,24 @@ struct MetricsTests {
         expect(barLifecycle.isLoadingHome,
                "home presents with no stale runnable rows while its catalog hydrates")
         barLifecycle.hide()
-        expect(!barLifecycle.completeHomeHydration(firstBarPresentation, isVisible: false),
+        expect(!barLifecycle.completeHomeHydration(firstBarPresentation, isVisible: false)
+                && !barLifecycle.completeHomeHydrationForOpening(firstBarPresentation),
                "closing the panel cancels deferred hydration")
+
+        barLifecycle.beginHome(firstBarPresentation)
+        expect(barLifecycle.completeHomeHydrationForOpening(firstBarPresentation)
+                && !barLifecycle.isLoadingHome
+                && barLifecycle.acceptsHomeUpdates(firstBarPresentation, isVisible: true)
+                && !barLifecycle.completeHomeHydration(firstBarPresentation, isVisible: true),
+               "opening hydration fills home before the panel is visible")
+        barLifecycle.hide()
+
+        barLifecycle.beginHome(firstBarPresentation)
+        barLifecycle.beginHome(secondBarPresentation)
+        expect(!barLifecycle.completeHomeHydrationForOpening(firstBarPresentation)
+                && barLifecycle.completeHomeHydrationForOpening(secondBarPresentation),
+               "only the latest opening may complete hydration before it is visible")
+        barLifecycle.hide()
 
         barLifecycle.beginHome(firstBarPresentation)
         barLifecycle.beginHome(secondBarPresentation)

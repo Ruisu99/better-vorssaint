@@ -43,8 +43,9 @@ enum CommandBarHome {
     }
 }
 
-/// The bar can be visible before home has finished preparing, but only the
-/// presentation that asked for that work may receive it.
+/// Home can finish preparing before the panel is visible, so the first
+/// painted frame is already the full surface. Only the presentation that
+/// asked for later work may receive it.
 struct CommandBarPresentationLifecycle {
     enum Surface: Equatable {
         case hidden
@@ -68,6 +69,10 @@ struct CommandBarPresentationLifecycle {
         isVisible && surface == .loadingHome(id)
     }
 
+    func acceptsOpeningHydration(_ id: UUID) -> Bool {
+        surface == .loadingHome(id)
+    }
+
     func acceptsHomeUpdates(_ id: UUID, isVisible: Bool) -> Bool {
         isVisible && surface == .home(id)
     }
@@ -84,6 +89,16 @@ struct CommandBarPresentationLifecycle {
     @discardableResult
     mutating func completeHomeHydration(_ id: UUID, isVisible: Bool) -> Bool {
         guard acceptsHomeHydration(id, isVisible: isVisible) else { return false }
+        surface = .home(id)
+        return true
+    }
+
+    /// Fills home before `orderFront`, without waiting for the panel to be
+    /// visible. A close or newer opening still cancels this through `hide()`
+    /// or a later `beginHome`.
+    @discardableResult
+    mutating func completeHomeHydrationForOpening(_ id: UUID) -> Bool {
+        guard acceptsOpeningHydration(id) else { return false }
         surface = .home(id)
         return true
     }

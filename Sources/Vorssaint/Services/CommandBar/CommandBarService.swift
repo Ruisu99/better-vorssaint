@@ -208,6 +208,10 @@ final class CommandBarService: ObservableObject {
     /// first frame until a mouse or key event flushes the compositor.
     private var chromeAnimating = false
     private var layoutAfterChrome = false
+    /// True from the open keystroke until the panel has been ordered on
+    /// screen. Toggle and background loads treat this as already visible, so
+    /// a one-turn layout wait cannot open a second bar or drop home rows.
+    private var isRevealing = false
     private var restartObserver: NSObjectProtocol?
     private var restartPID: pid_t?
     private var restartURL: URL?
@@ -276,7 +280,7 @@ final class CommandBarService: ObservableObject {
     }
 
     var isVisible: Bool {
-        panel?.isVisible == true
+        isRevealing || panel?.isVisible == true
     }
 
     func toggle() {
@@ -297,6 +301,11 @@ final class CommandBarService: ObservableObject {
         if let stableKey { deferredRowShortcut.schedule(stableKey, for: id) }
         reloadPreferenceCaches()
         query = ""
+        // Home is filled before the first composited frame, so fade and lift
+        // move one surface instead of a field that later grows a list.
+        if presentationLifecycle.completeHomeHydrationForOpening(id) {
+            prepareHomeForCurrentPresentation()
+        }
         refreshResults()
         rememberPasteTarget()
         CommandBarQueryHabits.warmInstallationKey { [weak self] in
@@ -307,14 +316,8 @@ final class CommandBarService: ObservableObject {
             }
         }
         present(panel)
-        // Ordering the prepared panel is the keystroke path. Home is filled on
-        // the next main-loop turn, when a close or newer opening can supersede it.
         DispatchQueue.main.async { [weak self] in
-            guard let self,
-                  self.presentationLifecycle.completeHomeHydration(
-                    id, isVisible: self.isVisible) else { return }
-            self.prepareHomeForCurrentPresentation()
-            self.refreshResults()
+            guard let self, self.presentationID == id, self.isVisible else { return }
             self.runDeferredRowShortcutIfReady(for: id)
         }
     }
@@ -328,6 +331,7 @@ final class CommandBarService: ObservableObject {
         isTearingDown = false
         chromeAnimating = false
         layoutAfterChrome = false
+        isRevealing = false
         let id = UUID()
         presentationID = id
         presentationLifecycle.beginHome(id)
@@ -383,51 +387,61 @@ final class CommandBarService: ObservableObject {
     private func present(_ panel: NSPanel) {
         appearanceGeneration += 1
         let generation = appearanceGeneration
-        position(panel)
+        isRevealing = true
         installMonitors(for: panel)
         let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         panel.ignoresMouseEvents = false
-        if reduceMotion {
-            chromeAnimating = false
-            panel.alphaValue = 1
-            panel.orderFrontRegardless()
-            panel.makeKey()
-            finishChromeFrame(panel)
-            return
-        }
-        // Fade and a short lift into place: one surface moving, not a second
-        // layout pass. The resting frame is already set by position(_:).
-        // A fully transparent window is not composited, so the fade never
-        // starts until a mouse or key event; keep a sliver of opacity so the
-        // first frame is a real surface.
-        chromeAnimating = true
+        // One main-loop turn lets SwiftUI apply the home rows published in
+        // show(), so position(_:) measures the full surface. Ordering a
+        // field-only frame first is what made the list arrive as a second
+        // motion.
+        chromeAnimating = !reduceMotion
         layoutAfterChrome = false
-        let resting = panel.frame
-        var lifted = resting
-        lifted.origin.y -= CommandBarChrome.appearLift
-        panel.alphaValue = 0.02
-        panel.setFrame(lifted, display: true)
-        panel.orderFrontRegardless()
-        panel.makeKey()
-        finishChromeFrame(panel)
         DispatchQueue.main.async { [weak self, weak panel] in
             guard let self, let panel, generation == self.appearanceGeneration else { return }
-            NSAnimationContext.runAnimationGroup({ context in
-                context.duration = CommandBarChrome.appearDuration
-                context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-                panel.animator().alphaValue = 1
-                panel.animator().setFrame(resting, display: true)
-            }, completionHandler: { [weak self, weak panel] in
-                guard let self, let panel, generation == self.appearanceGeneration else { return }
-                panel.alphaValue = 1
-                panel.setFrame(resting, display: true)
-                self.finishChromeFrame(panel)
+            self.position(panel)
+            if reduceMotion {
                 self.chromeAnimating = false
-                if self.layoutAfterChrome {
-                    self.layoutAfterChrome = false
-                    self.refreshPanelLayout()
-                }
-            })
+                self.isRevealing = false
+                panel.alphaValue = 1
+                panel.orderFrontRegardless()
+                panel.makeKey()
+                self.finishChromeFrame(panel)
+                return
+            }
+            // Fade and a short lift into place: one surface moving, not a
+            // second layout pass. The resting frame is already the fitted
+            // home. A fully transparent window is not composited, so the
+            // fade never starts until a mouse or key event; keep a sliver
+            // of opacity so the first frame is a real surface.
+            let resting = panel.frame
+            var lifted = resting
+            lifted.origin.y -= CommandBarChrome.appearLift
+            panel.alphaValue = 0.02
+            panel.setFrame(lifted, display: true)
+            panel.orderFrontRegardless()
+            panel.makeKey()
+            self.finishChromeFrame(panel)
+            self.isRevealing = false
+            DispatchQueue.main.async { [weak self, weak panel] in
+                guard let self, let panel, generation == self.appearanceGeneration else { return }
+                NSAnimationContext.runAnimationGroup({ context in
+                    context.duration = CommandBarChrome.appearDuration
+                    context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                    panel.animator().alphaValue = 1
+                    panel.animator().setFrame(resting, display: true)
+                }, completionHandler: { [weak self, weak panel] in
+                    guard let self, let panel, generation == self.appearanceGeneration else { return }
+                    panel.alphaValue = 1
+                    panel.setFrame(resting, display: true)
+                    self.finishChromeFrame(panel)
+                    self.chromeAnimating = false
+                    if self.layoutAfterChrome {
+                        self.layoutAfterChrome = false
+                        self.refreshPanelLayout()
+                    }
+                })
+            }
         }
     }
 
@@ -476,10 +490,18 @@ final class CommandBarService: ObservableObject {
         forgetSavedPanelPosition()
         presentationLifecycle.hide()
         clearIndex()
+        isRevealing = false
         appearanceGeneration += 1
         let generation = appearanceGeneration
         guard let panel else {
             chromeAnimating = false
+            finishHideContent()
+            return
+        }
+        if !panel.isVisible {
+            chromeAnimating = false
+            panel.alphaValue = 1
+            panel.ignoresMouseEvents = false
             finishHideContent()
             return
         }
@@ -1168,8 +1190,8 @@ final class CommandBarService: ObservableObject {
             sectionTitles = [:]
             categoryChips = []
             isShowingSuggestions = false
-            // The panel is on screen for this turn already, so a compact bar
-            // has to start collapsed rather than drop its footer a frame later.
+            // Opening hydrates before the first frame. This path is only a
+            // close or a newer opening that still has an empty catalog.
             setCompactHome(compactMode)
             return
         }
