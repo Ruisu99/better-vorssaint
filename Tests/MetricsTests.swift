@@ -15948,7 +15948,6 @@ struct MetricsTests {
                "the Command Bar and the chat window can insert the last reply into the previous app")
         let folder = FileManager.default.temporaryDirectory
             .appendingPathComponent("quick-ai-tests-\(UUID().uuidString)", isDirectory: true)
-        defer { try? FileManager.default.removeItem(at: folder) }
         let chatsURL = folder.appendingPathComponent("chats.json")
         let keyURL = folder.appendingPathComponent("api-key")
         expect(QuickAIStore.saveAPIKey(" sk-testkey ", to: keyURL)
@@ -15961,6 +15960,7 @@ struct MetricsTests {
         expect(QuickAIStore.saveChats([seeded], to: chatsURL)
                 && QuickAIStore.loadChats(from: chatsURL).first?.title == "Hello there",
                "saved chats round-trip as JSON next to the key, never inside it")
+        try? FileManager.default.removeItem(at: folder)
 
         for language in AppLanguage.allCases {
             let categoryValues = Mirror(reflecting: FeatureStrings.settingsCategories(language)).children
@@ -26283,7 +26283,7 @@ struct MetricsTests {
                 && queryHabitSupportSource.contains("keyService = installationKeyService(")
                 && queryHabitSupportSource.contains("keyAccount = \"hmac-key\"")
                 && uninstallScriptSource.contains("/usr/bin/security delete-generic-password")
-                && uninstallScriptSource.contains("-s \"$BUNDLE.command-bar-query-habits\" -a \"hmac-key\""),
+                && uninstallScriptSource.contains("-s \"$id.command-bar-query-habits\" -a \"hmac-key\""),
                "both uninstall paths remove only the query-learning Keychain item")
         let requiredSubpaths = ["Library/Application Support", "Library/Caches", "Library/HTTPStorages"]
         for subpath in requiredSubpaths {

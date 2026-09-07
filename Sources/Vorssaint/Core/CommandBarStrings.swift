@@ -1291,7 +1291,7 @@ extension CommandBarFeatureStrings {
         scriptSearchHint: "Saisissez ce qui sera envoyé après le nom",
         scriptBareSearchHint: "S’exécute seul, ou saisissez ce qui sera envoyé",
         linkAddButton: "Ajouter un raccourci",
-        positionCaption: "Faites glisser la marque à gauche du champ pour déplacer la barre pour cette ouverture. Le prochain raccourci la remet à l'emplacement par défaut. Double-cliquez sur la marque pour la recentrer maintenant.",
+        positionCaption: "Faites glisser la marque à gauche du champ pour déplacer la barre pour cette ouverture. Le prochain raccourci la remet à l’emplacement par défaut. Double-cliquez sur la marque pour la recentrer maintenant.",
         resetPositionButton: "Recentrer la barre",
         shortcutToggle: "Raccourci global pour ouvrir la barre",
         dragHint: "Glisser pour déplacer · Double-clic pour recentrer",

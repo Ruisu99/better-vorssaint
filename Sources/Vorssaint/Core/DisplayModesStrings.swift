@@ -40,12 +40,12 @@ extension FeatureStrings {
 extension DisplayModesFeatureStrings {
     static let enUS = DisplayModesFeatureStrings(
         pageTitle: "Display Resolution",
-        hubDescription: "Switch each display's resolution and refresh rate, with a HiDPI badge for scaled modes",
+        hubDescription: "Switch each display’s resolution and refresh rate, with a HiDPI badge for scaled modes",
         enable: "Control display resolution",
-        enableCaption: "Lists every display's available resolutions here and in the menu bar panel, switching with one tap.",
+        enableCaption: "Lists every display’s available resolutions here and in the menu bar panel, switching with one tap.",
         noDisplays: "No display found.",
         hidpiBadge: "HiDPI",
-        applyFailed: "Could not change this display's resolution.",
+        applyFailed: "Could not change this display’s resolution.",
         panelCaption: "Pick a resolution to switch to it right away."
     )
 
@@ -105,10 +105,10 @@ extension DisplayModesFeatureStrings {
     )
 
     static let fr = DisplayModesFeatureStrings(
-        pageTitle: "Résolution d'écran",
-        hubDescription: "Changez la résolution et la fréquence de rafraîchissement de chaque écran, avec un badge HiDPI pour les modes mis à l'échelle",
-        enable: "Contrôler la résolution d'écran",
-        enableCaption: "Affiche ici et dans le panneau de la barre de menus les résolutions disponibles de chaque écran, à changer d'un geste.",
+        pageTitle: "Résolution d’écran",
+        hubDescription: "Changez la résolution et la fréquence de rafraîchissement de chaque écran, avec un badge HiDPI pour les modes mis à l’échelle",
+        enable: "Contrôler la résolution d’écran",
+        enableCaption: "Affiche ici et dans le panneau de la barre de menus les résolutions disponibles de chaque écran, à changer d’un geste.",
         noDisplays: "Aucun écran trouvé.",
         hidpiBadge: "HiDPI",
         applyFailed: "Impossible de changer la résolution de cet écran.",

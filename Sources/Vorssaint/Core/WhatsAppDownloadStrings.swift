@@ -357,7 +357,7 @@ extension WhatsAppDownloadStrings {
                 manualIntro: "Analysez à tout moment. La sélection initiale suit vos types et votre durée, mais tous les fichiers confirmés restent vérifiables.",
                 resultsFormat: "%1$d fichiers confirmés · %2$@", selectRules: "Sélectionner selon mes règles",
                 cleanSelectedFormat: "Placer %1$d dans la Corbeille · %2$@",
-                lastRunFormat: "Dernier nettoyage %@ : %d fichiers · %@ · %d échecs",
+                lastRunFormat: "Dernier nettoyage %@\u{00A0}: %d fichiers · %@ · %d échecs",
                 nextRunFormat: "Prochaine vérification automatique %@.",
                 firstMessageFormat: "%d fichiers existants correspondent déjà à vos règles. Choisissez de les inclure ou de ne gérer que les futurs téléchargements.",
                 localNote: "Seules les métadonnées locales sont consultées. Vorssaint ne lit ni les discussions ni le contenu des fichiers.",

@@ -130,7 +130,7 @@ enum DisplayModesSupport {
         guard hz > 0, hz.isFinite else { return "" }
         let rounded = hz.rounded()
         guard abs(hz - rounded) >= 0.05 else { return "\(Int(rounded)) Hz" }
-        return String(format: "%.2f Hz", hz)
+        return String(format: "%.2f Hz", locale: Locale.current, hz)
     }
 
     /// The full label a resolution row shows: "1920 × 1080 @ 60 Hz", or
