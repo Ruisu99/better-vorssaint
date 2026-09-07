@@ -26261,11 +26261,14 @@ struct MetricsTests {
                "only this fork publishes the personal zip, never the upstream repo")
         let personalSigningScript = (try? String(contentsOfFile: "Tools/ci-setup-signing.sh",
                                                    encoding: .utf8)) ?? ""
-        expect(FileManager.default.fileExists(atPath: "Tools/personal-signing.b64")
-                && personalSigningScript.contains("personal-signing.b64")
+        expect(FileManager.default.fileExists(atPath: "Tools/personal-signing-cert.b64")
+                && FileManager.default.fileExists(atPath: "Tools/personal-signing-key.b64")
+                && personalSigningScript.contains("personal-signing-cert.b64")
+                && personalSigningScript.contains("personal-signing-key.b64")
+                && personalSigningScript.contains("/usr/bin/openssl pkcs12")
                 && personalSigningScript.contains("vorssaint-signing.keychain-db")
                 && personalSigningScript.contains("REQUIRE_SIGNING"),
-               "personal CI imports a stable signing identity so TCC grants survive updates")
+               "personal CI packs a LibreSSL p12 so TCC grants survive updates")
 
         // MARK: Detached command reruns (counted last, so a late rerun still fails)
         // The `||` form reran the whole installer — as root — on every non-zero
