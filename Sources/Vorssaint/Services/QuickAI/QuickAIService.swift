@@ -16,10 +16,15 @@ final class QuickAIService: ObservableObject {
     @Published private(set) var isSending = false
     @Published private(set) var lastError: String?
     @Published private(set) var hasAPIKey = false
+    /// When a Command Bar selection action turns web search on for one session,
+    /// that must not rewrite the person's saved preference.
+    private var persistWebSearchPreference = true
     @Published var webSearch = false {
         didSet {
             guard webSearch != oldValue else { return }
-            UserDefaults.standard.set(webSearch, forKey: DefaultsKey.quickAIWebSearch)
+            if persistWebSearchPreference {
+                UserDefaults.standard.set(webSearch, forKey: DefaultsKey.quickAIWebSearch)
+            }
             draft.webSearch = webSearch
         }
     }
@@ -99,13 +104,22 @@ final class QuickAIService: ObservableObject {
         draft.contextNote = QuickAISupport.clipped(text)
     }
 
-    func prepareCommandBarSession(selection: String) {
+    func prepareCommandBarSession(selection: String, webSearch sessionWebSearch: Bool? = nil) {
         cancel()
+        let preferred = UserDefaults.standard.bool(forKey: DefaultsKey.quickAIWebSearch)
+        applySessionWebSearch(sessionWebSearch ?? preferred)
         resetDraft(keepingContext: false)
         attachContext(QuickAISupport.resolvedContext(selection: selection))
         if !hasAPIKey {
             lastError = FeatureStrings.quickAI(L10n.shared.language).noKey
         }
+    }
+
+    private func applySessionWebSearch(_ on: Bool) {
+        guard webSearch != on else { return }
+        persistWebSearchPreference = false
+        webSearch = on
+        persistWebSearchPreference = true
     }
 
     // MARK: - Send
@@ -195,11 +209,14 @@ final class QuickAIService: ObservableObject {
         }
     }
 
+    func lastAssistantReply() -> String? {
+        QuickAISupport.lastAssistantReply(in: draft)
+    }
+
     func copyLastAssistantReply() {
-        guard let reply = draft.messages.last(where: { $0.role == .assistant }),
-              !reply.content.isEmpty else { return }
+        guard let reply = lastAssistantReply() else { return }
         NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(reply.content, forType: .string)
+        NSPasteboard.general.setString(reply, forType: .string)
         QuickToolHUD.show(icon: "doc.on.doc",
                            message: FeatureStrings.quickAI(L10n.shared.language).copyResult)
     }

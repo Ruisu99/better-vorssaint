@@ -91,21 +91,29 @@ quit_app "Better Vorssaint (Developer)" "BetterVorssaintDeveloper"
 quit_app "Vorssaint" "Vorssaint"
 quit_app "Vorssaint (Developer)" "VorssaintDeveloper"
 
-# One menu-bar icon only: remove every prior path this fork has used.
-for legacy in \
-    "/Applications/Better Vorssaint.app" \
+# Other leftover Vorssaint.app copies from earlier fork installs still go.
+# Better Vorssaint itself is replaced in place: deleting the bundle first
+# gives macOS a new inode and, with ad-hoc signing, a new code hash, which
+# drops Accessibility and Screen Recording grants. Overwriting the same
+# path keeps the same location; a stable Developer ID also keeps the same
+# designated requirement so those grants survive the update.
+for leftover in \
     "/Applications/Better Vorssaint (Developer).app" \
     "/Applications/Vorssaint.app" \
     "/Applications/Vorssaint (Developer).app" \
     "/Applications/Vorssaint Utils.app"
 do
-    if [[ -d "$legacy" ]]; then
-        echo "  removing $(basename "$legacy")"
-        /bin/rm -rf "$legacy"
+    if [[ -d "$leftover" ]]; then
+        echo "  removing leftover $(basename "$leftover")"
+        /bin/rm -rf "$leftover"
     fi
 done
 
-echo "▸ Installing ${DEST}…"
+if [[ -d "$DEST" ]]; then
+    echo "▸ Updating ${DEST} in place…"
+else
+    echo "▸ Installing ${DEST}…"
+fi
 /usr/bin/ditto "$APP" "$DEST"
 /usr/bin/xattr -cr "$DEST"
 
@@ -124,6 +132,7 @@ open "$DEST"
 echo "✓ Installed Better Vorssaint."
 echo "  Look for the menu bar icon. Settings title says Better Vorssaint."
 echo "  If macOS blocks it: right-click the app in Applications, choose Open."
-echo "  Accessibility / Screen Recording may ask again (new bundle id)."
+echo "  Updates overwrite the existing app so permissions can stay granted."
+echo "  Ad-hoc (unsigned) builds may still ask Accessibility / Screen Recording again."
 echo "  Automatic official updates are off."
 echo "  Next update: wait for Personal build green, then run this command again."

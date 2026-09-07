@@ -25,6 +25,12 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Set up signing
+        env:
+          SIGNING_CERT_P12: ${{ secrets.SIGNING_CERT_P12 }}
+          SIGNING_CERT_PASSWORD: ${{ secrets.SIGNING_CERT_PASSWORD }}
+        run: ./Tools/ci-setup-signing.sh
+
       - name: Build
         run: ./build.sh
 
@@ -64,8 +70,10 @@ jobs:
 
           Or download BetterVorssaint.zip, unzip, drag to Applications, then right-click Open.
 
-          The installer removes older Vorssaint.app copies left by previous
-          fork installs and turns off automatic official updates.
+          The installer updates Better Vorssaint in place so macOS can keep
+          Accessibility and Screen Recording grants when the signing identity
+          is stable. It also removes older Vorssaint.app copies left by
+          previous fork installs and turns off automatic official updates.
           EOF
           )"
           if gh release view personal-latest >/dev/null 2>&1; then

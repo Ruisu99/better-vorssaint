@@ -15515,7 +15515,7 @@ struct MetricsTests {
                    "kill process formats keep their placeholders (\(language.rawValue))")
             let quickAIValues = Mirror(reflecting: FeatureStrings.quickAI(language)).children
                 .compactMap { $0.value as? String }
-            expect(quickAIValues.count == 39 && quickAIValues.allSatisfy { !$0.isEmpty },
+            expect(quickAIValues.count == 44 && quickAIValues.allSatisfy { !$0.isEmpty },
                    "every Quick AI string is set for \(language.rawValue)")
             expect(quickAIValues.allSatisfy { !$0.contains("—") },
                    "no em-dash in visible Quick AI strings (\(language.rawValue))")
@@ -15614,6 +15614,32 @@ struct MetricsTests {
         expect(QuickAISupport.resolvedContext(selection: "  chosen  ") == "chosen"
                 && QuickAISupport.resolvedContext(selection: "   ").isEmpty,
                "only selected text is attached; an empty selection attaches nothing")
+        let improvePrompt = QuickAISupport.SelectionAction.improve.userPrompt(for: "Hallo welt")
+        let researchPrompt = QuickAISupport.SelectionAction.research.userPrompt(for: "Swift")
+        let translatePrompt = QuickAISupport.SelectionAction.translate.userPrompt(for: "Hi")
+        expect(QuickAISupport.SelectionAction.allCases.count == 4
+                && QuickAISupport.SelectionAction.research.usesWebSearch
+                && !QuickAISupport.SelectionAction.improve.usesWebSearch
+                && !QuickAISupport.SelectionAction.summarize.usesWebSearch
+                && !QuickAISupport.SelectionAction.translate.usesWebSearch
+                && QuickAISupport.SelectionAction.improve.catalogID == "selection.ai.improve"
+                && improvePrompt.contains("Hallo welt")
+                && improvePrompt.contains("Improve the writing")
+                && researchPrompt.contains("web search")
+                && researchPrompt.contains("Swift")
+                && translatePrompt.contains("German")
+                && !improvePrompt.contains("—"),
+               "selection actions keep the selected text, research uses web search, and prompts stay ASCII-clean")
+        var replyChat = QuickAISupport.Chat()
+        expect(QuickAISupport.lastAssistantReply(in: replyChat) == nil,
+               "an empty chat has no insertable reply")
+        replyChat.messages.append(QuickAISupport.Message(role: .user, content: "Q"))
+        replyChat.messages.append(QuickAISupport.Message(role: .assistant, content: "  "))
+        expect(QuickAISupport.lastAssistantReply(in: replyChat) == nil,
+               "a blank assistant bubble is not insertable")
+        replyChat.messages.append(QuickAISupport.Message(role: .assistant, content: "  Cleaned text  "))
+        expect(QuickAISupport.lastAssistantReply(in: replyChat) == "Cleaned text",
+               "insert uses the last assistant reply, trimmed")
         expect(QuickAISupport.title(from: "Hello") == "Hello"
                 && QuickAISupport.title(from: "") == "Chat"
                 && QuickAISupport.title(from: String(repeating: "x", count: 50)).count == 41,
@@ -15836,6 +15862,9 @@ struct MetricsTests {
                 && quickAIChatViewSource.contains("QuickAIMessageBubble")
                 && quickAIPaneSource.contains("QuickAIMessageBubble"),
                "both chat surfaces use markdown bubbles with a typing animation")
+        expect(quickAIPaneSource.contains("insertReply")
+                && quickAIPaneSource.contains("insertLastQuickAIReply"),
+               "the Command Bar Quick AI pane can insert the last reply into the previous app")
         let folder = FileManager.default.temporaryDirectory
             .appendingPathComponent("quick-ai-tests-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: folder) }
@@ -22723,6 +22752,21 @@ struct MetricsTests {
                 && commandBarServiceSource.contains("target.activate")
                 && commandBarServiceSource.contains("0.04"),
                "the bar pastes into its own field, and clipboard rows paste back into the previous app")
+        expect(commandBarServiceSource.contains("runQuickAISelection")
+                && commandBarServiceSource.contains("insertLastQuickAIReply")
+                && commandBarServiceSource.contains("TransientPaste.shared.paste"),
+               "the bar runs selected-text AI actions and can paste the reply back")
+        let commandBarCatalogSource = (try? String(
+            contentsOfFile: "Sources/Vorssaint/Services/CommandBar/CommandBarCatalog.swift",
+            encoding: .utf8)) ?? ""
+        expect(commandBarCatalogSource.contains("QuickAISupport.SelectionAction.allCases")
+                && commandBarCatalogSource.contains("selectionImprove")
+                && commandBarCatalogSource.contains("selectionResearch")
+                && commandBarCatalogSource.contains("selectionSummarize")
+                && commandBarCatalogSource.contains("selectionTranslate")
+                && commandBarCatalogSource.contains("runQuickAISelection")
+                && commandBarCatalogSource.contains("keepsBarOpen: true"),
+               "selected text in the Command Bar offers improve, research, summarize and translate")
         expect(commandBarServiceSource.contains("forgetSavedPanelPosition")
                 && commandBarServiceSource.contains("offset: .zero")
                 && !commandBarServiceSource.contains("set(encoded, forKey: DefaultsKey.commandBarPositionOffset)"),
@@ -26160,11 +26204,14 @@ struct MetricsTests {
         expect(personalInstallScript.contains("personal-latest")
                 && personalInstallScript.contains("Vorssaint.zip")
                 && personalInstallScript.contains("autoCheckUpdates")
-                && personalInstallScript.contains("uname -s"),
-               "the Mac installer downloads the fork zip and will not run off a Mac")
+                && personalInstallScript.contains("uname -s")
+                && personalInstallScript.contains("in place")
+                && !personalInstallScript.contains("/Applications/Better Vorssaint.app"),
+               "the Mac installer downloads the fork zip, updates in place, and will not run off a Mac")
         expect(personalBuildWorkflow.contains("github.repository == 'Ruisu99/better-vorssaint'")
                 && personalBuildWorkflow.contains("personal-latest")
                 && personalBuildWorkflow.contains("ditto -c -k --keepParent")
+                && personalBuildWorkflow.contains("ci-setup-signing.sh")
                 && !personalBuildWorkflow.contains("vorssaintapp/vorssaint-utils"),
                "only this fork publishes the personal zip, never the upstream repo")
 

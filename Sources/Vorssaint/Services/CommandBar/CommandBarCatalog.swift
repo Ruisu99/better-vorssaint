@@ -1406,6 +1406,27 @@ enum CommandBarCatalog {
         guard !text.isEmpty else { return [] }
         let kind = bar.kindSelection
         var entries: [CommandBarEntry] = []
+        let ai = FeatureStrings.quickAI(L10n.shared.language)
+
+        if AppFeature.quickAI.isAvailable {
+            for action in QuickAISupport.SelectionAction.allCases {
+                let title: String
+                switch action {
+                case .improve: title = ai.selectionImprove
+                case .research: title = ai.selectionResearch
+                case .summarize: title = ai.selectionSummarize
+                case .translate: title = ai.selectionTranslate
+                }
+                entries.append(CommandBarEntry(
+                    id: action.catalogID,
+                    title: title,
+                    subtitle: kind,
+                    keywords: "\(ai.pageTitle) \(action.searchKeywords)",
+                    icon: .symbol(action.symbolName),
+                    keepsBarOpen: true,
+                    run: { _ in CommandBarService.shared.runQuickAISelection(action) }))
+            }
+        }
 
         entries.append(CommandBarEntry(
             id: "selection.copy",

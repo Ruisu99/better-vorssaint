@@ -45,6 +45,11 @@ struct QuickAIFeatureStrings {
     let testFailed: String
     let followUpHint: String
     let completeWithShiftTab: String
+    let selectionImprove: String
+    let selectionResearch: String
+    let selectionSummarize: String
+    let selectionTranslate: String
+    let insertReply: String
 }
 
 extension FeatureStrings {
@@ -107,7 +112,12 @@ extension QuickAIFeatureStrings {
         testSuccess: "OpenAI answered.",
         testFailed: "OpenAI did not answer.",
         followUpHint: "Return to ask a follow-up. Esc leaves Quick AI.",
-        completeWithShiftTab: "Shift-Tab"
+        completeWithShiftTab: "Shift-Tab",
+        selectionImprove: "Improve writing",
+        selectionResearch: "Research this",
+        selectionSummarize: "Summarize",
+        selectionTranslate: "Translate",
+        insertReply: "Insert"
     )
 
     static let de = QuickAIFeatureStrings(
@@ -149,7 +159,12 @@ extension QuickAIFeatureStrings {
         testSuccess: "OpenAI hat geantwortet.",
         testFailed: "OpenAI hat nicht geantwortet.",
         followUpHint: "Return stellt eine Nachfrage. Esc verlässt Quick AI.",
-        completeWithShiftTab: "Umschalt-Tab"
+        completeWithShiftTab: "Umschalt-Tab",
+        selectionImprove: "Schreibweise verbessern",
+        selectionResearch: "Recherchieren",
+        selectionSummarize: "Zusammenfassen",
+        selectionTranslate: "Übersetzen",
+        insertReply: "Einfügen"
     )
 
     static let ptBR = QuickAIFeatureStrings(
@@ -191,7 +206,12 @@ extension QuickAIFeatureStrings {
         testSuccess: "A OpenAI respondeu.",
         testFailed: "A OpenAI não respondeu.",
         followUpHint: "Return faz uma pergunta seguinte. Esc sai do Quick AI.",
-        completeWithShiftTab: "Shift-Tab"
+        completeWithShiftTab: "Shift-Tab",
+        selectionImprove: "Melhorar a escrita",
+        selectionResearch: "Pesquisar isto",
+        selectionSummarize: "Resumir",
+        selectionTranslate: "Traduzir",
+        insertReply: "Inserir"
     )
 
     static let tr = QuickAIFeatureStrings(
@@ -233,7 +253,12 @@ extension QuickAIFeatureStrings {
         testSuccess: "OpenAI yanıt verdi.",
         testFailed: "OpenAI yanıt vermedi.",
         followUpHint: "Return takip sorusu sorar. Esc Quick AI’den çıkar.",
-        completeWithShiftTab: "Shift-Tab"
+        completeWithShiftTab: "Shift-Tab",
+        selectionImprove: "Yazımı düzelt",
+        selectionResearch: "Bunu araştır",
+        selectionSummarize: "Özetle",
+        selectionTranslate: "Çevir",
+        insertReply: "Ekle"
     )
 
     static let ru = QuickAIFeatureStrings(
@@ -275,7 +300,12 @@ extension QuickAIFeatureStrings {
         testSuccess: "OpenAI ответил.",
         testFailed: "OpenAI не ответил.",
         followUpHint: "Return задаёт уточнение. Esc выходит из Quick AI.",
-        completeWithShiftTab: "Shift-Tab"
+        completeWithShiftTab: "Shift-Tab",
+        selectionImprove: "Улучшить текст",
+        selectionResearch: "Исследовать",
+        selectionSummarize: "Кратко изложить",
+        selectionTranslate: "Перевести",
+        insertReply: "Вставить"
     )
 
     static let es = QuickAIFeatureStrings(
@@ -317,7 +347,12 @@ extension QuickAIFeatureStrings {
         testSuccess: "OpenAI respondió.",
         testFailed: "OpenAI no respondió.",
         followUpHint: "Return hace una pregunta siguiente. Esc sale de Quick AI.",
-        completeWithShiftTab: "Mayús-Tab"
+        completeWithShiftTab: "Mayús-Tab",
+        selectionImprove: "Mejorar la escritura",
+        selectionResearch: "Investigar esto",
+        selectionSummarize: "Resumir",
+        selectionTranslate: "Traducir",
+        insertReply: "Insertar"
     )
 
     static let fr = QuickAIFeatureStrings(
@@ -359,7 +394,12 @@ extension QuickAIFeatureStrings {
         testSuccess: "OpenAI a répondu.",
         testFailed: "OpenAI n'a pas répondu.",
         followUpHint: "Retour pose une question de suivi. Esc quitte Quick AI.",
-        completeWithShiftTab: "Maj-Tab"
+        completeWithShiftTab: "Maj-Tab",
+        selectionImprove: "Améliorer le texte",
+        selectionResearch: "Rechercher ceci",
+        selectionSummarize: "Résumer",
+        selectionTranslate: "Traduire",
+        insertReply: "Insérer"
     )
 
     static let it = QuickAIFeatureStrings(
@@ -401,7 +441,12 @@ extension QuickAIFeatureStrings {
         testSuccess: "OpenAI ha risposto.",
         testFailed: "OpenAI non ha risposto.",
         followUpHint: "Invio fa una domanda di seguito. Esc esce da Quick AI.",
-        completeWithShiftTab: "Maiusc-Tab"
+        completeWithShiftTab: "Maiusc-Tab",
+        selectionImprove: "Migliora lo scritto",
+        selectionResearch: "Cerca informazioni",
+        selectionSummarize: "Riassumi",
+        selectionTranslate: "Traduci",
+        insertReply: "Inserisci"
     )
 
     static let ja = QuickAIFeatureStrings(
@@ -443,7 +488,12 @@ extension QuickAIFeatureStrings {
         testSuccess: "OpenAIが応答しました。",
         testFailed: "OpenAIは応答しませんでした。",
         followUpHint: "Returnで続きを質問します。EscでQuick AIを終了します。",
-        completeWithShiftTab: "Shift-Tab"
+        completeWithShiftTab: "Shift-Tab",
+        selectionImprove: "文章を整える",
+        selectionResearch: "これを調べる",
+        selectionSummarize: "要約する",
+        selectionTranslate: "翻訳する",
+        insertReply: "挿入"
     )
 
     static let ko = QuickAIFeatureStrings(
@@ -485,7 +535,12 @@ extension QuickAIFeatureStrings {
         testSuccess: "OpenAI가 응답했습니다.",
         testFailed: "OpenAI가 응답하지 않았습니다.",
         followUpHint: "Return으로 후속 질문을 합니다. Esc는 Quick AI를 종료합니다.",
-        completeWithShiftTab: "Shift-Tab"
+        completeWithShiftTab: "Shift-Tab",
+        selectionImprove: "문장 다듬기",
+        selectionResearch: "이 내용 조사",
+        selectionSummarize: "요약하기",
+        selectionTranslate: "번역하기",
+        insertReply: "삽입"
     )
 
     static let zhHans = QuickAIFeatureStrings(
@@ -527,7 +582,12 @@ extension QuickAIFeatureStrings {
         testSuccess: "OpenAI 已回应。",
         testFailed: "OpenAI 没有回应。",
         followUpHint: "Return 继续提问。Esc 离开 Quick AI。",
-        completeWithShiftTab: "Shift-Tab"
+        completeWithShiftTab: "Shift-Tab",
+        selectionImprove: "改进写法",
+        selectionResearch: "检索此内容",
+        selectionSummarize: "总结",
+        selectionTranslate: "翻译",
+        insertReply: "插入"
     )
 
     static let zhTW = QuickAIFeatureStrings(
@@ -569,7 +629,12 @@ extension QuickAIFeatureStrings {
         testSuccess: "OpenAI 已回應。",
         testFailed: "OpenAI 沒有回應。",
         followUpHint: "Return 繼續提問。Esc 離開 Quick AI。",
-        completeWithShiftTab: "Shift-Tab"
+        completeWithShiftTab: "Shift-Tab",
+        selectionImprove: "改進寫法",
+        selectionResearch: "檢索此內容",
+        selectionSummarize: "摘要",
+        selectionTranslate: "翻譯",
+        insertReply: "插入"
     )
 
     static let zhHK = QuickAIFeatureStrings(
@@ -611,6 +676,11 @@ extension QuickAIFeatureStrings {
         testSuccess: "OpenAI 已回應。",
         testFailed: "OpenAI 沒有回應。",
         followUpHint: "Return 繼續提問。Esc 離開 Quick AI。",
-        completeWithShiftTab: "Shift-Tab"
+        completeWithShiftTab: "Shift-Tab",
+        selectionImprove: "改進寫法",
+        selectionResearch: "檢索此內容",
+        selectionSummarize: "摘要",
+        selectionTranslate: "翻譯",
+        insertReply: "插入"
     )
 }

@@ -1726,6 +1726,55 @@ final class CommandBarService: ObservableObject {
         }
     }
 
+    /// Runs an AI action on the text that was selected when the bar opened.
+    /// The bar stays in Quick AI so the person can follow up or insert the reply.
+    func runQuickAISelection(_ action: QuickAISupport.SelectionAction) {
+        guard AppFeature.quickAI.isAvailable, case .search = mode else { return }
+        let selection = selectedText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !selection.isEmpty else { return }
+        query = ""
+        QuickAIService.shared.prepareCommandBarSession(
+            selection: selection,
+            webSearch: action.usesWebSearch ? true : nil)
+        mode = .quickAI
+        setCompactHome(false)
+        refreshPanelLayout()
+        QuickAIService.shared.send(action.userPrompt(for: selection), fromCommandBar: true)
+    }
+
+    /// Puts the last Quick AI reply at the caret of the app that had focus
+    /// when the bar opened. If that app still has the original selection,
+    /// a paste replaces it.
+    func insertLastQuickAIReply() {
+        guard case .quickAI = mode else { return }
+        guard let reply = QuickAIService.shared.lastAssistantReply() else { return }
+        let target = pasteTargetApp
+        hide()
+        pasteTargetApp = nil
+        guard AXIsProcessTrusted() else {
+            if promptedForAccessibility {
+                NSSound.beep()
+            } else {
+                promptedForAccessibility = true
+                Permissions.shared.requestAccessibility()
+            }
+            return
+        }
+        let settle = CommandBarChrome.disappearDuration + 0.08
+        DispatchQueue.main.asyncAfter(deadline: .now() + settle) {
+            if let target, !target.isTerminated {
+                target.activate(options: [])
+            } else if NSWorkspace.shared.frontmostApplication?.processIdentifier
+                        == ProcessInfo.processInfo.processIdentifier {
+                NSSound.beep()
+                return
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+                _ = TransientPaste.shared.paste(reply)
+            }
+        }
+    }
+
     func leaveQuickAI() {
         guard case .quickAI = mode else { return }
         QuickAIService.shared.cancel()

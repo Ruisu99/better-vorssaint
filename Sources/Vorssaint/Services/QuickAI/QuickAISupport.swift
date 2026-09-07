@@ -229,6 +229,80 @@ enum QuickAISupport {
         clipped(selection)
     }
 
+    /// Command Bar rows that run on the text that was selected when the bar
+    /// opened. Prompts stay English so the model sees one instruction shape;
+    /// they ask it to answer in the language of the selection.
+    enum SelectionAction: String, CaseIterable, Identifiable {
+        case improve
+        case research
+        case summarize
+        case translate
+
+        var id: String { rawValue }
+
+        var catalogID: String { "selection.ai.\(rawValue)" }
+
+        var usesWebSearch: Bool { self == .research }
+
+        var symbolName: String {
+            switch self {
+            case .improve: return "wand.and.stars"
+            case .research: return "globe"
+            case .summarize: return "doc.text"
+            case .translate: return "character.book.closed"
+            }
+        }
+
+        var searchKeywords: String {
+            switch self {
+            case .improve:
+                return "improve writing grammar spelling rewrite wording schreibweise verbessern korrektur"
+            case .research:
+                return "research lookup search recherchieren nachschlagen"
+            case .summarize:
+                return "summarize summary tldr zusammenfassen kurz"
+            case .translate:
+                return "translate translation übersetzen dolmetschen"
+            }
+        }
+
+        func userPrompt(for selection: String) -> String {
+            let text = clipped(selection)
+            switch self {
+            case .improve:
+                return """
+                Improve the writing of the following text. Fix spelling, grammar, and wording. Keep the same language and meaning. Return only the improved text, with no quotes, labels, or commentary.
+
+                \(text)
+                """
+            case .research:
+                return """
+                Research the following text. Explain what it is or refers to, add current context, and note anything worth knowing. Use web search. Be concise. Answer in the same language as the text.
+
+                \(text)
+                """
+            case .summarize:
+                return """
+                Summarize the following text in the same language. Keep it brief. Return only the summary, with no labels or commentary.
+
+                \(text)
+                """
+            case .translate:
+                return """
+                Detect the language of the following text. If it is German, translate it to English. Otherwise translate it to German. Return only the translation, with no quotes, labels, or commentary.
+
+                \(text)
+                """
+            }
+        }
+    }
+
+    static func lastAssistantReply(in chat: Chat) -> String? {
+        guard let reply = chat.messages.last(where: { $0.role == .assistant }) else { return nil }
+        let text = reply.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? nil : text
+    }
+
     static func conversationSystemPrompt(webSearch: Bool, languageCode: String) -> String {
         var lines = [
             "You are Quick AI, a fast assistant inside a Mac menu bar app.",

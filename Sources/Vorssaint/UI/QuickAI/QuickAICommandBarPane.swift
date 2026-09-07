@@ -77,8 +77,11 @@ struct QuickAICommandBarPane: View {
                     .disabled(service.draft.messages.isEmpty)
                 Button(strings.openChats) { service.keepAndOpenWindow() }
                 Button(strings.copyResult) { service.copyLastAssistantReply() }
-                    .disabled(service.draft.messages.last(where: { $0.role == .assistant }) == nil
-                              || service.draft.messages.last?.content.isEmpty == true)
+                    .disabled(service.lastAssistantReply() == nil)
+                Button(strings.insertReply) {
+                    CommandBarService.shared.insertLastQuickAIReply()
+                }
+                .disabled(service.isSending || service.lastAssistantReply() == nil)
                 Spacer()
                 Button(strings.newChat) {
                     service.resetDraft(keepingContext: true)
