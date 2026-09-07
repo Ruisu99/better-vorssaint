@@ -63,6 +63,37 @@ enum PermissionPollingSupport {
     }
 }
 
+/// Bundle ids whose TCC entries can shadow a personal-fork grant. Official
+/// Vorssaint is left alone when it is still installed beside this app.
+enum PermissionTCCReset {
+    static func bundleIDs(current: String?,
+                          isPersonalFork: Bool,
+                          officialInstalled: Bool) -> [String] {
+        var ids: [String] = []
+        if let current, !current.isEmpty { ids.append(current) }
+        guard isPersonalFork else { return unique(ids) }
+        ids.append(AppInfo.developerBundleID)
+        if !officialInstalled {
+            ids.append(contentsOf: AppInfo.legacyForkBundleIDs)
+        }
+        return unique(ids)
+    }
+
+    static var officialVorssaintIsInstalled: Bool {
+        let url = URL(fileURLWithPath: "/Applications/Vorssaint.app")
+        guard FileManager.default.fileExists(atPath: url.path),
+              let bundle = Bundle(url: url),
+              bundle.bundleIdentifier == "com.vorssaint.utils"
+        else { return false }
+        return bundle.object(forInfoDictionaryKey: "BetterVorssaintFork") as? Bool != true
+    }
+
+    private static func unique(_ ids: [String]) -> [String] {
+        var seen = Set<String>()
+        return ids.filter { seen.insert($0).inserted }
+    }
+}
+
 extension AppFeature {
     /// Whether an engaged feature needs permission changes while it sits in
     /// the background. One-shot tools ask and refresh at the moment they run;

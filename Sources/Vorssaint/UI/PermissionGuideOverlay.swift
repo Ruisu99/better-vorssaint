@@ -166,7 +166,7 @@ private struct PermissionGuideCard: View {
 
             VStack(alignment: .leading, spacing: 6) {
                 stepRow(1, guide.stepOpen)
-                stepRow(2, guide.stepToggle)
+                stepRow(2, String(format: guide.stepToggle, AppInfo.name))
                 stepRow(3, guide.stepReturn)
             }
 
@@ -189,13 +189,20 @@ private struct PermissionGuideCard: View {
                     Text(guide.waiting)
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
+                    // Screen Recording often stays false in this process
+                    // until a relaunch, even after the switch is on.
+                    if kind == .screenRecording {
+                        Spacer(minLength: 8)
+                        Button(guide.relaunch, action: onRelaunch)
+                            .controlSize(.small)
+                    }
                 }
             }
             .padding(.top, 2)
 
             if model.stale, !model.granted {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(guide.staleHint)
+                    Text(String(format: guide.staleHint, AppInfo.name))
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)

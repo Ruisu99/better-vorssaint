@@ -15145,6 +15145,38 @@ struct MetricsTests {
                                                  accessibilityIsGranted: true,
                                                  screenRecordingIsGranted: true) == 60,
                "a granted live feature keeps only the slow revocation watch")
+        expect(PermissionTCCReset.bundleIDs(current: "com.ruisu99.bettervorssaint",
+                                           isPersonalFork: true,
+                                           officialInstalled: false)
+                    == ["com.ruisu99.bettervorssaint",
+                        AppInfo.developerBundleID,
+                        "com.vorssaint.utils",
+                        "com.vorssaint.utils.dev"],
+               "a fork start-over also drops leftover official-id grants")
+        expect(PermissionTCCReset.bundleIDs(current: "com.ruisu99.bettervorssaint",
+                                           isPersonalFork: true,
+                                           officialInstalled: true)
+                    == ["com.ruisu99.bettervorssaint", AppInfo.developerBundleID],
+               "a fork start-over leaves official Vorssaint's grant alone")
+        expect(PermissionTCCReset.bundleIDs(current: "com.vorssaint.utils",
+                                           isPersonalFork: false,
+                                           officialInstalled: true)
+                    == ["com.vorssaint.utils"],
+               "an official build only resets its own bundle id")
+        let permissionGuideOverlaySource = (try? String(
+            contentsOfFile: "Sources/Vorssaint/UI/PermissionGuideOverlay.swift",
+            encoding: .utf8)) ?? ""
+        expect(permissionGuideOverlaySource.contains("String(format: guide.stepToggle, AppInfo.name)")
+                && permissionGuideOverlaySource.contains("String(format: guide.staleHint, AppInfo.name)")
+                && permissionGuideOverlaySource.contains("kind == .screenRecording")
+                && permissionGuideOverlaySource.contains("guide.relaunch"),
+               "the permission card names this fork and offers relaunch before Screen Recording flips")
+        let permissionsSource = (try? String(
+            contentsOfFile: "Sources/Vorssaint/Core/Permissions.swift",
+            encoding: .utf8)) ?? ""
+        expect(permissionsSource.contains("PermissionTCCReset.bundleIDs")
+                && permissionsSource.contains("for id in ids"),
+               "start-over resets every fork identity that can shadow Screen Recording")
         let windowLayoutPollingKeys = [
             DefaultsKey.windowLayoutShortcutsEnabled,
             DefaultsKey.windowGestureEnabled,
@@ -15446,6 +15478,14 @@ struct MetricsTests {
                    "every permission guide string is set for \(language.rawValue)")
             expect(guideValues.allSatisfy { !$0.contains("—") },
                    "no em-dash in permission guide strings (\(language.rawValue))")
+            let guide = FeatureStrings.permissionGuide(language)
+            expect(guide.stepToggle.contains("%@") && guide.staleHint.contains("%@"),
+                   "the permission guide names the running app (\(language.rawValue))")
+            let namedToggle = String(format: guide.stepToggle, AppInfo.name)
+            let namedStale = String(format: guide.staleHint, AppInfo.name)
+            expect(namedToggle.contains(AppInfo.name) && !namedToggle.contains("%")
+                    && namedStale.contains(AppInfo.name) && !namedStale.contains("%"),
+                   "the permission guide renders Better Vorssaint (\(language.rawValue))")
             let brightnessValues = Mirror(reflecting: FeatureStrings.brightness(language)).children
                 .compactMap { $0.value as? String }
             expect(!brightnessValues.isEmpty && brightnessValues.allSatisfy { !$0.isEmpty },
