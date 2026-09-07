@@ -26212,14 +26212,24 @@ struct MetricsTests {
                 && personalInstallScript.contains("autoCheckUpdates")
                 && personalInstallScript.contains("uname -s")
                 && personalInstallScript.contains("in place")
+                && personalInstallScript.contains("com.apple.quarantine")
+                && !personalInstallScript.contains("xattr -cr")
                 && !personalInstallScript.contains("/Applications/Better Vorssaint.app"),
                "the Mac installer downloads the fork zip, updates in place, and will not run off a Mac")
         expect(personalBuildWorkflow.contains("github.repository == 'Ruisu99/better-vorssaint'")
                 && personalBuildWorkflow.contains("personal-latest")
                 && personalBuildWorkflow.contains("ditto -c -k --keepParent")
                 && personalBuildWorkflow.contains("ci-setup-signing.sh")
+                && personalBuildWorkflow.contains("Signature=adhoc")
                 && !personalBuildWorkflow.contains("vorssaintapp/vorssaint-utils"),
                "only this fork publishes the personal zip, never the upstream repo")
+        let personalSigningScript = (try? String(contentsOfFile: "Tools/ci-setup-signing.sh",
+                                                   encoding: .utf8)) ?? ""
+        expect(FileManager.default.fileExists(atPath: "Tools/personal-signing.b64")
+                && personalSigningScript.contains("personal-signing.b64")
+                && personalSigningScript.contains("vorssaint-signing.keychain-db")
+                && personalSigningScript.contains("REQUIRE_SIGNING"),
+               "personal CI imports a stable signing identity so TCC grants survive updates")
 
         // MARK: Detached command reruns (counted last, so a late rerun still fails)
         // The `||` form reran the whole installer — as root — on every non-zero

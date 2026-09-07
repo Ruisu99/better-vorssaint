@@ -115,7 +115,9 @@ else
     echo "▸ Installing ${DEST}…"
 fi
 /usr/bin/ditto "$APP" "$DEST"
-/usr/bin/xattr -cr "$DEST"
+# Strip only the download quarantine. Clearing every xattr can disturb the
+# code signature macOS uses to remember Accessibility and Screen Recording.
+/usr/bin/xattr -dr com.apple.quarantine "$DEST" >/dev/null 2>&1 || true
 
 # Official GitHub releases would overwrite this fork. Keep that check off.
 /usr/bin/defaults write "$BUNDLE_ID" autoCheckUpdates -bool false
@@ -132,7 +134,8 @@ open "$DEST"
 echo "✓ Installed Better Vorssaint."
 echo "  Look for the menu bar icon. Settings title says Better Vorssaint."
 echo "  If macOS blocks it: right-click the app in Applications, choose Open."
-echo "  Updates overwrite the existing app so permissions can stay granted."
-echo "  Ad-hoc (unsigned) builds may still ask Accessibility / Screen Recording again."
+echo "  Updates overwrite the existing app and keep the same signing identity,"
+echo "  so Accessibility and Screen Recording should stay granted after this."
+echo "  If this is the first signed build on this Mac, grant those once."
 echo "  Automatic official updates are off."
 echo "  Next update: wait for Personal build green, then run this command again."
