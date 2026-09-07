@@ -4,6 +4,7 @@
 import AppKit
 import Carbon.HIToolbox
 import SwiftUI
+import ApplicationServices
 
 /// Quick AI: a Command Bar mode for fast follow-ups, and a window for chats
 /// the person wants to keep. The OpenAI key never sits in UserDefaults.
@@ -219,6 +220,25 @@ final class QuickAIService: ObservableObject {
         NSPasteboard.general.setString(reply, forType: .string)
         QuickToolHUD.show(icon: "doc.on.doc",
                            message: FeatureStrings.quickAI(L10n.shared.language).copyResult)
+    }
+
+    /// Pastes the last reply into whichever app had the caret. From the
+    /// Command Bar that is the app remembered when the bar opened; from the
+    /// chat window it is whatever is frontmost after this window hides.
+    func insertLastAssistantReplyAtCaret() {
+        if CommandBarService.shared.isVisible {
+            CommandBarService.shared.insertLastQuickAIReply()
+            return
+        }
+        guard let reply = lastAssistantReply() else { return }
+        guard AXIsProcessTrusted() else {
+            Permissions.shared.requestAccessibility()
+            return
+        }
+        hideWindow()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) {
+            _ = TransientPaste.shared.paste(reply)
+        }
     }
 
     // MARK: - Window

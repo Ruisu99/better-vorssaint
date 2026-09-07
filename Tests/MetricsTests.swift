@@ -15677,8 +15677,12 @@ struct MetricsTests {
         expect(!QuickAISupport.conversationSystemPrompt(webSearch: false, languageCode: "en")
                     .localizedCaseInsensitiveContains("web search")
                 && QuickAISupport.conversationSystemPrompt(webSearch: true, languageCode: "en")
-                    .localizedCaseInsensitiveContains("web search"),
-               "web search is only in the prompt when the person switched it on")
+                    .localizedCaseInsensitiveContains("web search")
+                && QuickAISupport.conversationSystemPrompt(webSearch: false, languageCode: "en")
+                    .localizedCaseInsensitiveContains("short paragraphs")
+                && QuickAISupport.conversationSystemPrompt(webSearch: false, languageCode: "en")
+                    .localizedCaseInsensitiveContains("blank line"),
+               "web search is only in the prompt when the person switched it on, and replies are asked to use spaced markdown")
         var seeded = QuickAISupport.Chat()
         expect(QuickAISupport.appending(userText: "   ", to: seeded) == nil,
                "an empty question is not a turn")
@@ -15859,12 +15863,14 @@ struct MetricsTests {
         expect(quickAITranscriptSource.contains("QuickAITypingDots")
                 && quickAITranscriptSource.contains("QuickAIStreamingCaret")
                 && quickAITranscriptSource.contains("formattedReply")
+                && quickAITranscriptSource.contains("paragraphSpacing")
                 && quickAIChatViewSource.contains("QuickAIMessageBubble")
                 && quickAIPaneSource.contains("QuickAIMessageBubble"),
                "both chat surfaces use markdown bubbles with a typing animation")
         expect(quickAIPaneSource.contains("insertReply")
-                && quickAIPaneSource.contains("insertLastQuickAIReply"),
-               "the Command Bar Quick AI pane can insert the last reply into the previous app")
+                && quickAIPaneSource.contains("insertLastAssistantReplyAtCaret")
+                && quickAIChatViewSource.contains("insertLastAssistantReplyAtCaret"),
+               "the Command Bar and the chat window can insert the last reply into the previous app")
         let folder = FileManager.default.temporaryDirectory
             .appendingPathComponent("quick-ai-tests-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: folder) }

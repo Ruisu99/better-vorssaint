@@ -41,7 +41,7 @@ struct QuickAICommandBarPane: View {
             } else {
                 ScrollViewReader { proxy in
                     ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 10) {
+                LazyVStack(alignment: .leading, spacing: 14) {
                             ForEach(service.draft.messages) { message in
                                 QuickAIMessageBubble(
                                     message: message,
@@ -79,7 +79,7 @@ struct QuickAICommandBarPane: View {
                 Button(strings.copyResult) { service.copyLastAssistantReply() }
                     .disabled(service.lastAssistantReply() == nil)
                 Button(strings.insertReply) {
-                    CommandBarService.shared.insertLastQuickAIReply()
+                    service.insertLastAssistantReplyAtCaret()
                 }
                 .disabled(service.isSending || service.lastAssistantReply() == nil)
                 Spacer()

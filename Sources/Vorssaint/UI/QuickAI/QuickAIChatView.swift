@@ -97,8 +97,9 @@ struct QuickAIChatView: View {
                 .toggleStyle(.checkbox)
             Spacer()
             Button(strings.copyResult) { service.copyLastAssistantReply() }
-                .disabled(service.draft.messages.last(where: { $0.role == .assistant }) == nil
-                          || service.draft.messages.last?.content.isEmpty == true)
+                .disabled(service.lastAssistantReply() == nil)
+            Button(strings.insertReply) { service.insertLastAssistantReplyAtCaret() }
+                .disabled(service.isSending || service.lastAssistantReply() == nil)
             if !service.draft.messages.isEmpty {
                 Button(strings.keepChat) { service.persistDraft() }
             }
@@ -110,7 +111,7 @@ struct QuickAIChatView: View {
     private var transcript: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 14) {
+                LazyVStack(alignment: .leading, spacing: 18) {
                     if !service.draft.contextNote.isEmpty {
                         Label(strings.attachedContext, systemImage: "text.cursor")
                             .font(.caption)

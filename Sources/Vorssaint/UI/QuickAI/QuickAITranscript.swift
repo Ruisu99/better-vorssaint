@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Vorssaint
 
 import SwiftUI
+import AppKit
 
 /// Shared chat chrome for Quick AI: markdown bubbles, a three-dot wait
 /// animation, and a blinking caret while tokens arrive.
@@ -34,9 +35,9 @@ struct QuickAIMessageBubble: View {
                         .padding(.vertical, compact ? 8 : 10)
                 } else {
                     HStack(alignment: .bottom, spacing: 4) {
-                        Text(QuickAISupport.formattedReply(message.content))
+                        Text(Self.displayReply(message.content, compact: compact))
                             .font(.system(size: compact ? 13 : 14))
-                            .lineSpacing(compact ? 2 : 3)
+                            .multilineTextAlignment(isUser ? .trailing : .leading)
                             .textSelection(.enabled)
                             .fixedSize(horizontal: false, vertical: true)
                         if isStreaming {
@@ -44,8 +45,8 @@ struct QuickAIMessageBubble: View {
                                 .padding(.bottom, 2)
                         }
                     }
-                    .padding(.horizontal, compact ? 10 : 12)
-                    .padding(.vertical, compact ? 8 : 10)
+                    .padding(.horizontal, compact ? 12 : 14)
+                    .padding(.vertical, compact ? 10 : 12)
                 }
             }
             .background(
@@ -56,6 +57,21 @@ struct QuickAIMessageBubble: View {
             )
             if !isUser { Spacer(minLength: compact ? 40 : 56) }
         }
+    }
+
+    /// Markdown with real paragraph gaps. SwiftUI's default AttributedString
+    /// rendering collapses those into one block, which is what people notice
+    /// first when they come from Raycast or ChatGPT.
+    private static func displayReply(_ raw: String, compact: Bool) -> AttributedString {
+        var attributed = QuickAISupport.formattedReply(raw)
+        let style = NSMutableParagraphStyle()
+        style.paragraphSpacing = compact ? 8 : 11
+        style.lineSpacing = compact ? 3 : 4
+        style.lineBreakMode = .byWordWrapping
+        var container = AttributeContainer()
+        container.paragraphStyle = style
+        attributed.mergeAttributes(container)
+        return attributed
     }
 }
 
