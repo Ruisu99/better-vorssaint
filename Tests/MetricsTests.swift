@@ -24765,13 +24765,13 @@ struct MetricsTests {
         // battery answer is titled with a localized string, so a fixed English
         // "battery" matched nothing outside English and the chip led to an
         // empty list, which teaches the opposite of what an example is for.
-        let commandBarViewSource = (try? String(
+        let commandBarExampleSource = (try? String(
             contentsOfFile: "Sources/Vorssaint/UI/CommandBar/CommandBarView.swift",
             encoding: .utf8)) ?? ""
-        expect(!commandBarViewSource.isEmpty, "the command bar view source reads back for its shape check")
+        expect(!commandBarExampleSource.isEmpty, "the command bar view source reads back for its shape check")
         // Comments are stripped so prose naming the old literal cannot fail
         // for code that no longer uses it.
-        let commandBarViewCode = commandBarViewSource.components(separatedBy: "\n")
+        let commandBarViewCode = commandBarExampleSource.components(separatedBy: "\n")
             .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") }
             .joined(separator: "\n")
         expect(!commandBarViewCode.contains("\"battery\""),
