@@ -15733,8 +15733,16 @@ struct MetricsTests {
         expect(QuickAISupport.reasoningEffortForSend("why is this slow", current: "low")
                     == QuickAISupport.ReasoningEffort.high.rawValue
                 && QuickAISupport.reasoningEffortForSend("hi", current: "medium")
-                    == QuickAISupport.ReasoningEffort.medium.rawValue,
-               "non-trivial questions raise intensity to at least high")
+                    == QuickAISupport.ReasoningEffort.medium.rawValue
+                && QuickAISupport.reasoningEffortForSend("Improve this sentence", current: "medium")
+                    == QuickAISupport.ReasoningEffort.high.rawValue
+                && QuickAISupport.wantsDeeperThinking("Schreibweise verbessern"),
+               "non-trivial questions and rewrites raise intensity to at least high")
+        expect(QuickAISupport.SelectionAction.improve.userPrompt(
+                    for: "Hallo welt", includeSelection: false).contains("attached context")
+                && !QuickAISupport.SelectionAction.improve.userPrompt(
+                    for: "Hallo welt", includeSelection: false).contains("Hallo welt"),
+               "an already-attached selection is not pasted into the prompt twice")
         let spaced = QuickAISupport.replyBlocks("""
             # Title
 
@@ -15931,6 +15939,15 @@ struct MetricsTests {
                 && quickAIClientSource.contains("stream: true")
                 && quickAIClientSource.contains("parseSSELine"),
                "Quick AI reads the OpenAI reply as a stream of tokens")
+        let quickAIServiceSource = (try? String(
+            contentsOfFile: "Sources/Vorssaint/Services/QuickAI/QuickAIService.swift",
+            encoding: .utf8)) ?? ""
+        expect(quickAIServiceSource.contains("func enableThinkHarder()")
+                && quickAIServiceSource.contains("isThinkHarderOn")
+                && quickAIServiceSource.contains("ReasoningEffort.xhigh")
+                && quickAIServiceSource.contains("func runSelectionAction")
+                && quickAIServiceSource.contains("includeSelection: false"),
+               "Think harder is a session toggle, and selection chips send against attached text")
         expect(quickAITranscriptSource.contains("QuickAITypingDots")
                 && quickAITranscriptSource.contains("QuickAIStreamingCaret")
                 && quickAITranscriptSource.contains("formattedReply")
@@ -15942,9 +15959,13 @@ struct MetricsTests {
         expect(quickAIPaneSource.contains("insertReply")
                 && quickAIPaneSource.contains("insertLastAssistantReplyAtCaret")
                 && quickAIPaneSource.contains("thinkHarder")
+                && quickAIPaneSource.contains("isThinkHarderOn")
+                && quickAIPaneSource.contains("selectionImprove")
+                && quickAIPaneSource.contains("runSelectionAction")
                 && quickAIPaneSource.contains("researchThisQuestion")
                 && quickAIChatViewSource.contains("insertLastAssistantReplyAtCaret")
-                && quickAIChatViewSource.contains("enableResearchMode"),
+                && quickAIChatViewSource.contains("enableResearchMode")
+                && quickAIChatViewSource.contains("runSelectionAction(.improve)"),
                "the Command Bar and the chat window can insert the last reply into the previous app")
         let folder = FileManager.default.temporaryDirectory
             .appendingPathComponent("quick-ai-tests-\(UUID().uuidString)", isDirectory: true)
@@ -22852,6 +22873,21 @@ struct MetricsTests {
                 && commandBarServiceSource.contains("target.activate")
                 && commandBarServiceSource.contains("0.04"),
                "the bar pastes into its own field, and clipboard rows paste back into the previous app")
+        if let rememberRange = showSource.range(of: "rememberPasteTarget()"),
+           let hydrateRange = showSource.range(of: "completeHomeHydrationForOpening") {
+            expect(rememberRange.lowerBound < hydrateRange.lowerBound,
+                   "the bar remembers the selected app before home work can change key status")
+        } else {
+            expect(false, "the bar remembers the selected app before home work can change key status")
+        }
+        let selectionReaderSource = (try? String(
+            contentsOfFile: "Sources/Vorssaint/Services/CommandBar/CommandBarSelection.swift",
+            encoding: .utf8)) ?? ""
+        expect(selectionReaderSource.contains("readSelectedText(from")
+                && selectionReaderSource.contains("kAXFocusedWindowAttribute")
+                && commandBarServiceSource.contains("readSelectedText(from: target)")
+                && commandBarServiceSource.contains("resolvedSelectedText()"),
+               "selection is read from the app that had focus when the bar opened")
         expect(commandBarServiceSource.contains("runQuickAISelection")
                 && commandBarServiceSource.contains("insertLastQuickAIReply")
                 && commandBarServiceSource.contains("insertQuickAIText")

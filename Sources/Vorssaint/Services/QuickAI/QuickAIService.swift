@@ -139,8 +139,26 @@ final class QuickAIService: ObservableObject {
         applySessionReasoning(QuickAISupport.reasoningEffortForSend("research", current: reasoningEffort))
     }
 
+    var isThinkHarderOn: Bool {
+        let effort = QuickAISupport.ReasoningEffort.sanitized(reasoningEffort)
+        return effort == .xhigh || effort == .max
+    }
+
     func enableThinkHarder() {
-        applySessionReasoning(QuickAISupport.ReasoningEffort.xhigh.rawValue)
+        if isThinkHarderOn {
+            applySessionReasoning(QuickAISupport.defaultReasoningEffort)
+        } else {
+            applySessionReasoning(QuickAISupport.ReasoningEffort.xhigh.rawValue)
+        }
+    }
+
+    /// Runs a Command Bar selection action against the attached text. Used
+    /// once Quick AI is already open, where the catalog row would refuse.
+    func runSelectionAction(_ action: QuickAISupport.SelectionAction) {
+        let selection = draft.contextNote.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !selection.isEmpty else { return }
+        if action.usesWebSearch { applySessionWebSearch(true) }
+        send(action.userPrompt(for: selection, includeSelection: false), fromCommandBar: true)
     }
 
     // MARK: - Send

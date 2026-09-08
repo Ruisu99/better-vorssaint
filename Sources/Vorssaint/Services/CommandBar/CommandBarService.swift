@@ -301,13 +301,13 @@ final class CommandBarService: ObservableObject {
         if let stableKey { deferredRowShortcut.schedule(stableKey, for: id) }
         reloadPreferenceCaches()
         query = ""
-        // Home is filled before the first composited frame, so fade and lift
-        // move one surface instead of a field that later grows a list.
+        // Remember the app that had the selection before any panel work
+        // changes key status, then fill home so fade and lift move one surface.
+        rememberPasteTarget()
         if presentationLifecycle.completeHomeHydrationForOpening(id) {
             prepareHomeForCurrentPresentation()
         }
         refreshResults()
-        rememberPasteTarget()
         CommandBarQueryHabits.warmInstallationKey { [weak self] in
             DispatchQueue.main.async {
                 guard let self, self.presentationID == id, self.isVisible else { return }
@@ -1739,7 +1739,7 @@ final class CommandBarService: ObservableObject {
         guard AppFeature.quickAI.isAvailable, case .search = mode else { return }
         let pending = sendingField ? query.trimmingCharacters(in: .whitespacesAndNewlines) : ""
         query = ""
-        QuickAIService.shared.prepareCommandBarSession(selection: selectedText)
+        QuickAIService.shared.prepareCommandBarSession(selection: resolvedSelectedText())
         mode = .quickAI
         setCompactHome(false)
         refreshPanelLayout()
@@ -1752,7 +1752,7 @@ final class CommandBarService: ObservableObject {
     /// The bar stays in Quick AI so the person can follow up or insert the reply.
     func runQuickAISelection(_ action: QuickAISupport.SelectionAction) {
         guard AppFeature.quickAI.isAvailable, case .search = mode else { return }
-        let selection = selectedText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let selection = resolvedSelectedText().trimmingCharacters(in: .whitespacesAndNewlines)
         guard !selection.isEmpty else { return }
         query = ""
         QuickAIService.shared.prepareCommandBarSession(
@@ -1761,7 +1761,9 @@ final class CommandBarService: ObservableObject {
         mode = .quickAI
         setCompactHome(false)
         refreshPanelLayout()
-        QuickAIService.shared.send(action.userPrompt(for: selection), fromCommandBar: true)
+        QuickAIService.shared.send(
+            action.userPrompt(for: selection, includeSelection: false),
+            fromCommandBar: true)
     }
 
     /// Puts the last Quick AI reply at the caret of the app that had focus
@@ -2505,6 +2507,17 @@ final class CommandBarService: ObservableObject {
         }
     }
 
+    /// The text that was selected when the bar opened. The background read
+    /// usually lands first; Tab into Quick AI can beat it, so this asks the
+    /// remembered app once more instead of attaching nothing.
+    private func resolvedSelectedText() -> String {
+        let existing = selectedText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !existing.isEmpty { return existing }
+        let text = CommandBarSelectionReader.readSelectedText(from: pasteTargetApp)
+        selectedText = text
+        return text
+    }
+
     private func rememberPasteTarget() {
         let ownPID = ProcessInfo.processInfo.processIdentifier
         guard let app = NSWorkspace.shared.frontmostApplication,
@@ -2731,11 +2744,11 @@ final class CommandBarService: ObservableObject {
     /// main thread (it asks Accessibility) and only while the bar is open, so
     /// nothing is ever read from anyone's screen in the background.
     private func loadSelection(for id: UUID) {
-        guard isEnabled(.selection), Permissions.shared.accessibility else { return }
         guard !selectionLoading else { return }
         selectionLoading = true
+        let target = pasteTargetApp
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let text = CommandBarSelectionReader.readSelectedText()
+            let text = CommandBarSelectionReader.readSelectedText(from: target)
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.selectionLoading = false
@@ -2750,12 +2763,16 @@ final class CommandBarService: ObservableObject {
                 }
                 let bar = FeatureStrings.commandBar(L10n.shared.language)
                 self.selectedText = text
-                self.selectionEntries = CommandBarCatalog.selectionEntries(text, bar: bar) {
-                    [weak self] selected in
-                    // The bar stays open: the point is to convert, add up or
-                    // look up what was selected without retyping it.
-                    self?.query = selected
-                }
+                // Quick AI still attaches the selection when this source is
+                // switched off; the rows themselves honour the switch.
+                self.selectionEntries = self.isEnabled(.selection)
+                    ? CommandBarCatalog.selectionEntries(text, bar: bar) {
+                        [weak self] selected in
+                        // The bar stays open: the point is to convert, add up
+                        // or look the selection up without retyping it.
+                        self?.query = selected
+                    }
+                    : []
                 self.selectionPreview = text.isEmpty ? "" : CommandBarText.preview(text)
                 self.indexEntries()
                 self.refreshResults()

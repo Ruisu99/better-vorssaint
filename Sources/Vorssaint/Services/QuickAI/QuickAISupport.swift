@@ -266,34 +266,22 @@ enum QuickAISupport {
             }
         }
 
-        func userPrompt(for selection: String) -> String {
-            let text = clipped(selection)
+        func userPrompt(for selection: String, includeSelection: Bool = true) -> String {
+            let instruction: String
             switch self {
             case .improve:
-                return """
-                Improve the writing of the following text. Fix spelling, grammar, and wording. Keep the same language and meaning. Return only the improved text, with no quotes, labels, or commentary.
-
-                \(text)
-                """
+                instruction = "Improve the writing of the following text. Fix spelling, grammar, and wording. Keep the same language and meaning. Return only the improved text, with no quotes, labels, or commentary."
             case .research:
-                return """
-                Research the following text. Explain what it is or refers to, add current context, and note anything worth knowing. Use web search. Be concise. Answer in the same language as the text.
-
-                \(text)
-                """
+                instruction = "Research the following text. Explain what it is or refers to, add current context, and note anything worth knowing. Use web search. Be concise. Answer in the same language as the text."
             case .summarize:
-                return """
-                Summarize the following text in the same language. Keep it brief. Return only the summary, with no labels or commentary.
-
-                \(text)
-                """
+                instruction = "Summarize the following text in the same language. Keep it brief. Return only the summary, with no labels or commentary."
             case .translate:
-                return """
-                Detect the language of the following text. If it is German, translate it to English. Otherwise translate it to German. Return only the translation, with no quotes, labels, or commentary.
-
-                \(text)
-                """
+                instruction = "Detect the language of the following text. If it is German, translate it to English. Otherwise translate it to German. Return only the translation, with no quotes, labels, or commentary."
             }
+            guard includeSelection else {
+                return instruction + " Treat the attached context as that text."
+            }
+            return instruction + "\n\n" + clipped(selection)
         }
     }
 
@@ -344,6 +332,8 @@ enum QuickAISupport {
             "erkla", "explain", "why ", "warum", "compare", "vergleich",
             "plan ", "schritt", "analy", "how do i", "wie kann", "tradeoff",
             "think step", "denk nach", "gruendlich", "gründlich",
+            "improve", "rewrite", "besser", "umschreib", "schreibweise",
+            "grammar", "wording",
         ]
         return needles.contains { folded.contains($0) }
     }

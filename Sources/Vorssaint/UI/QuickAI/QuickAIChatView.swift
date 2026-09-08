@@ -130,16 +130,38 @@ struct QuickAIChatView: View {
                             .foregroundStyle(.orange)
                     }
                     if service.draft.messages.isEmpty, service.lastError == nil, !service.isSending {
-                        HStack(spacing: 8) {
-                            Button {
-                                service.enableResearchMode()
-                            } label: {
-                                Label(strings.researchThisQuestion, systemImage: "globe")
+                        VStack(alignment: .leading, spacing: 8) {
+                            if !service.draft.contextNote.isEmpty {
+                                HStack(spacing: 8) {
+                                    Button {
+                                        service.runSelectionAction(.improve)
+                                    } label: {
+                                        Label(strings.selectionImprove, systemImage: "wand.and.stars")
+                                    }
+                                    Button {
+                                        service.runSelectionAction(.summarize)
+                                    } label: {
+                                        Label(strings.selectionSummarize, systemImage: "doc.text")
+                                    }
+                                    Button {
+                                        service.runSelectionAction(.translate)
+                                    } label: {
+                                        Label(strings.selectionTranslate, systemImage: "character.book.closed")
+                                    }
+                                }
                             }
-                            Button {
-                                service.enableThinkHarder()
-                            } label: {
-                                Label(strings.thinkHarder, systemImage: "lightbulb")
+                            HStack(spacing: 8) {
+                                Button {
+                                    service.enableResearchMode()
+                                } label: {
+                                    Label(strings.researchThisQuestion, systemImage: "globe")
+                                }
+                                Button {
+                                    service.enableThinkHarder()
+                                } label: {
+                                    Label(strings.thinkHarder, systemImage: "lightbulb")
+                                }
+                                .foregroundStyle(service.isThinkHarderOn ? Color.accentColor : Color.secondary)
                             }
                         }
                         .font(.system(size: 12, weight: .semibold))

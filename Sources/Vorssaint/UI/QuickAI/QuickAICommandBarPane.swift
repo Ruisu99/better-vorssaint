@@ -28,6 +28,10 @@ struct QuickAICommandBarPane: View {
                        isOn: $service.webSearch)
                     .toggleStyle(.checkbox)
                     .font(.caption)
+                chip(strings.thinkHarder, symbol: "lightbulb",
+                     selected: service.isThinkHarderOn) {
+                    service.enableThinkHarder()
+                }
             }
             .padding(.horizontal, 16)
             .padding(.top, 8)
@@ -37,12 +41,22 @@ struct QuickAICommandBarPane: View {
                     Text(strings.followUpHint)
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
+                    if !service.draft.contextNote.isEmpty {
+                        HStack(spacing: 8) {
+                            chip(strings.selectionImprove, symbol: "wand.and.stars") {
+                                service.runSelectionAction(.improve)
+                            }
+                            chip(strings.selectionSummarize, symbol: "doc.text") {
+                                service.runSelectionAction(.summarize)
+                            }
+                            chip(strings.selectionTranslate, symbol: "character.book.closed") {
+                                service.runSelectionAction(.translate)
+                            }
+                        }
+                    }
                     HStack(spacing: 8) {
                         chip(strings.researchThisQuestion, symbol: "globe") {
                             service.enableResearchMode()
-                        }
-                        chip(strings.thinkHarder, symbol: "lightbulb") {
-                            service.enableThinkHarder()
                         }
                     }
                     Text(strings.insertWithCommandReturn)
@@ -108,15 +122,19 @@ struct QuickAICommandBarPane: View {
         }
     }
 
-    private func chip(_ title: String, symbol: String, action: @escaping () -> Void) -> some View {
+    private func chip(_ title: String, symbol: String, selected: Bool = false,
+                      action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Label(title, systemImage: symbol)
                 .font(.system(size: 11, weight: .semibold))
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
+                .foregroundStyle(selected ? Color.accentColor : Color.primary)
                 .background(
                     Capsule(style: .continuous)
-                        .fill(Color.primary.opacity(0.08))
+                        .fill(selected
+                              ? Color.accentColor.opacity(0.16)
+                              : Color.primary.opacity(0.08))
                 )
         }
         .buttonStyle(.plain)
