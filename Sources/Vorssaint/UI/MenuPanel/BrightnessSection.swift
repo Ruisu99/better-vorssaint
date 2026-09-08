@@ -10,10 +10,16 @@ struct BrightnessSection: View {
     @ObservedObject private var l10n = L10n.shared
     @ObservedObject private var service = BrightnessService.shared
     @ObservedObject private var permissions = Permissions.shared
+    @ObservedObject private var displayModes = DisplayModesService.shared
     @AppStorage(DefaultsKey.brightnessOSDEnabled) private var brightnessOSDEnabled = false
+    @AppStorage(DefaultsKey.displayModesEnabled) private var displayModesEnabled = false
     var collapsible = true
 
     private var strings: BrightnessFeatureStrings { FeatureStrings.brightness(l10n.language) }
+    private var displayModesStrings: DisplayModesFeatureStrings { FeatureStrings.displayModes(l10n.language) }
+    private var displayModesShown: Bool {
+        AppFeature.displayModes.isAvailable && displayModesEnabled
+    }
 
     var body: some View {
         PanelSection(.brightness, title: strings.pageTitle, collapsible: collapsible) {
@@ -44,9 +50,16 @@ struct BrightnessSection: View {
                             service.syncWithPreferences()
                         }
                 }
+                if AppFeature.extraBrightness.isAvailable {
+                    Divider()
+                    ExtraBrightnessPanelToggle()
+                }
             }
             .panelCard()
-            .onAppear { service.refresh() }
+            .onAppear {
+                service.refresh()
+                if displayModesShown { displayModes.refresh() }
+            }
         }
     }
 
@@ -79,13 +92,69 @@ struct BrightnessSection: View {
                     .disabled(service.isDisplayPending(display.id))
                     .accessibilityLabel(display.name)
             }
+            if displayModesShown, let modesDisplay = matchingModesDisplay(for: display) {
+                resolutionRow(modesDisplay)
+            }
         }
+    }
+
+    private func matchingModesDisplay(for display: BrightnessDisplay) -> DisplayModesDisplay? {
+        displayModes.displays.first { $0.id == display.id }
+    }
+
+    private func resolutionRow(_ display: DisplayModesDisplay) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "rectangle.arrowtriangle.2.outward")
+                .font(.system(size: 9.5, weight: .semibold))
+                .foregroundStyle(.tertiary)
+                .frame(width: 16)
+            if let current = display.currentMode, current.isHiDPI {
+                Text(displayModesStrings.hidpiBadge)
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 1)
+                    .background(Capsule().fill(Color.secondary.opacity(0.14)))
+            }
+            Picker("", selection: Binding(
+                get: { display.currentMode?.id ?? display.modes.first?.id },
+                set: { newID in
+                    guard let option = display.modes.first(where: { $0.id == newID }) else { return }
+                    DisplayModesService.shared.apply(option, to: display.id)
+                })) {
+                ForEach(display.modes) { mode in
+                    Text(mode.fullLabel).tag(Optional(mode.id))
+                }
+            }
+            .labelsHidden()
+            .controlSize(.small)
+            .font(.system(size: 10))
+            .disabled(displayModes.isDisplayPending(display.id))
+        }
+        .help(displayModesStrings.panelCaption)
     }
 
     private func brightnessBinding(_ display: BrightnessDisplay) -> Binding<Double> {
         Binding(get: { display.brightness },
                 set: { service.setBrightness($0, for: display.id,
                                              showOSD: brightnessOSDEnabled) })
+    }
+}
+
+private struct ExtraBrightnessPanelToggle: View {
+    @ObservedObject private var l10n = L10n.shared
+    @ObservedObject private var service = ExtraBrightnessService.shared
+    @AppStorage(DefaultsKey.extraBrightnessEnabled) private var enabled = false
+
+    var body: some View {
+        Toggle(l10n.s.extraBrightnessName, isOn: $enabled)
+            .font(.system(size: 10.5, weight: .medium))
+            .toggleStyle(.switch)
+            .controlSize(.mini)
+            .disabled(!service.supported && !enabled)
+            .help(service.supported ? l10n.s.extraBrightnessCaption : l10n.s.extraBrightnessUnsupported)
+            .onChange(of: enabled) { _, _ in service.syncWithPreferences() }
+            .onAppear { service.syncWithPreferences() }
     }
 }
 

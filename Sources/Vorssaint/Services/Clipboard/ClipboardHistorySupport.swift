@@ -286,8 +286,11 @@ enum ClipboardHistorySearch {
 
     private static func normalized(_ value: String) -> String {
         value
+            // No locale: Turkish folds a dotted I to a dotless one, and a
+            // search that inherited the Mac's locale would stop finding
+            // "ISTANBUL" for someone who typed "istanbul".
             .folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive],
-                     locale: .current)
+                     locale: nil)
             .lowercased()
             .replacingOccurrences(of: "\n", with: " ")
             .replacingOccurrences(of: "\t", with: " ")
@@ -563,5 +566,53 @@ enum ClipboardHistoryImageSupport {
     static func isImageFilePath(_ path: String, fileManager: FileManager = .default) -> Bool {
         guard isImageFileName(path) else { return false }
         return fileManager.fileExists(atPath: path)
+    }
+}
+
+/// Where a history entry's pixels live, and how to name a copy in Downloads.
+enum ClipboardImageExport {
+    enum Source: Equatable {
+        case storedPNG(String)
+        case file(path: String)
+    }
+
+    static func source(for entry: ClipboardHistoryEntry) -> Source? {
+        switch entry.kind {
+        case .text:
+            return nil
+        case .image:
+            guard let name = entry.imageFile, !name.isEmpty else { return nil }
+            return .storedPNG(name)
+        case .files:
+            guard entry.filePaths.count == 1,
+                  let path = entry.filePaths.first,
+                  ClipboardHistoryImageSupport.isImageFileName(path)
+            else { return nil }
+            return .file(path: path)
+        }
+    }
+
+    /// Clipboard images become dated PNGs. Copied image files keep their name
+    /// so a screenshot already named in Finder stays recognizable in Downloads.
+    static func preferredFileName(prefix: String, date: Date, source: Source) -> String {
+        switch source {
+        case .storedPNG:
+            return ScreenshotSupport.fileName(prefix: prefix, date: date, fileExtension: "png")
+        case .file(let path):
+            let original = (path as NSString).lastPathComponent
+            if original.isEmpty || original.hasPrefix(".") {
+                let ext = (path as NSString).pathExtension
+                let safeExt = ext.isEmpty ? "png" : ext
+                return ScreenshotSupport.fileName(prefix: prefix, date: date, fileExtension: safeExt)
+            }
+            return original
+        }
+    }
+
+    static func uniqueURL(in directory: URL,
+                           preferredName: String,
+                           exists: (String) -> Bool) -> URL {
+        let name = ScreenshotSupport.uniqueFileName(preferredName, exists: exists)
+        return directory.appendingPathComponent(name)
     }
 }

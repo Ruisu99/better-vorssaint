@@ -79,33 +79,83 @@ final class ScreenTextService: ObservableObject {
         }
     }
 
-    /// Decides what a captured region holds. A QR code wins over the text:
-    /// it is the thing the user pointed at, and the scan is a fast pass that
-    /// falls through to text recognition when no code is found. Pure enough
-    /// to exercise directly on a known image.
+    /// Decides what a captured region holds. A QR code wins over the text
+    /// for the screen tool: it is the thing the user pointed at, and the
+    /// scan is a fast pass that falls through to text recognition when no
+    /// code is found. Clipboard history prefers words first, then a code,
+    /// because a screenshot of a page often contains an incidental QR.
+    /// Pure enough to exercise directly on a known image.
     static func outcome(for image: CGImage,
                         detectQRCodes: Bool,
                         removeLineBreaks: Bool,
-                        fallbackLanguages: [String] = ["en-US"]) -> Outcome {
-        if detectQRCodes, let reading = BarcodeDetector.read(image) {
+                        fallbackLanguages: [String] = ["en-US"],
+                        preferTextOverCodes: Bool = false) -> Outcome {
+        let prepared = preparedForRecognition(image)
+        if detectQRCodes, !preferTextOverCodes, let reading = BarcodeDetector.read(prepared) {
             return .qr(reading)
         }
 
-        var lines = recognizedLines(in: image,
+        var lines = recognizedLines(in: prepared,
+                                    level: .accurate,
+                                    automaticallyDetectLanguage: false,
+                                    preferredLanguages: fallbackLanguages)
+        if lines.isEmpty {
+            // Auto-detect is a second chance for a language that is not the
+            // UI language (a Japanese screenshot on a German Mac, for example).
+            lines = recognizedLines(in: prepared,
                                     level: .accurate,
                                     automaticallyDetectLanguage: true,
                                     preferredLanguages: fallbackLanguages)
+        }
         if lines.isEmpty {
             // The fast path uses a different recognition model. It is a
             // separate second chance when the accurate model returns no text.
-            lines = recognizedLines(in: image,
+            lines = recognizedLines(in: prepared,
                                     level: .fast,
                                     automaticallyDetectLanguage: false,
                                     preferredLanguages: fallbackLanguages)
         }
         let text = QuickToolsSupport.joinedRecognizedText(lines,
                                                          removingLineBreaks: removeLineBreaks)
-        return text.isEmpty ? .empty : .text(text)
+        if !text.isEmpty { return .text(text) }
+        if detectQRCodes, preferTextOverCodes, let reading = BarcodeDetector.read(prepared) {
+            return .qr(reading)
+        }
+        return .empty
+    }
+
+    /// Vision reads small clipboard screenshots more reliably when the
+    /// shortest side is at least ~720 px, and huge Retina captures stay
+    /// bounded so recognition cannot stall the history window.
+    static func preparedForRecognition(_ image: CGImage) -> CGImage {
+        let width = image.width
+        let height = image.height
+        guard width > 0, height > 0 else { return image }
+        let minSide = min(width, height)
+        let maxSide = max(width, height)
+        var scale = 1.0
+        if minSide < 720 {
+            scale = 720.0 / Double(minSide)
+        }
+        if Double(maxSide) * scale > 4096 {
+            scale = 4096.0 / Double(maxSide)
+        }
+        guard abs(scale - 1) >= 0.01 else { return image }
+        let newWidth = max(1, Int((Double(width) * scale).rounded()))
+        let newHeight = max(1, Int((Double(height) * scale).rounded()))
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        guard let context = CGContext(
+            data: nil,
+            width: newWidth,
+            height: newHeight,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return image }
+        context.interpolationQuality = .high
+        context.draw(image, in: CGRect(x: 0, y: 0, width: newWidth, height: newHeight))
+        return context.makeImage() ?? image
     }
 
     private static func recognizedLines(
@@ -115,6 +165,7 @@ final class ScreenTextService: ObservableObject {
         preferredLanguages: [String] = []
     ) -> [QuickToolsSupport.RecognizedLine] {
         let request = VNRecognizeTextRequest()
+        request.revision = VNRecognizeTextRequest.currentRevision
         request.recognitionLevel = level
         request.usesLanguageCorrection = true
         request.automaticallyDetectsLanguage = automaticallyDetectLanguage

@@ -16,27 +16,45 @@ enum CommandBarSelectionReader {
     /// retype it would be slower than doing it by hand.
     static let maximumLength = 20_000
 
-    /// The selected text of whatever is in front, read through Accessibility.
-    /// Blocking, so callers run it off the main thread. Empty when nothing is
-    /// selected, when the app does not tell Accessibility what is selected, or
-    /// when the front app is us (the field's own text is not a selection).
-    static func readSelectedText() -> String {
+    /// The selected text of the app that had focus when the bar opened.
+    /// Blocking, so callers run it off the main thread. Pass that app
+    /// explicitly: after `makeKey()` the frontmost process can already be
+    /// us, and an empty read then drops Improve writing and the rest.
+    /// Empty when nothing is selected, when the app does not tell
+    /// Accessibility what is selected, or when the target is us.
+    static func readSelectedText(from app: NSRunningApplication? = nil) -> String {
         guard AXIsProcessTrusted() else { return "" }
-        guard let front = NSWorkspace.shared.frontmostApplication,
-              front.bundleIdentifier != Bundle.main.bundleIdentifier else { return "" }
-        // Asked of the app in front, not of the system-wide element: a timeout
-        // set on the system-wide element is the DEFAULT FOR THE WHOLE PROCESS,
-        // and every other Accessibility call in the app would inherit this
-        // short leash for the rest of the session. The app in front is the one
-        // holding the selection anyway; the bar's panel takes keys without
-        // activating, so focus never left it.
-        let app = AXUIElementCreateApplication(front.processIdentifier)
+        let target = resolvedTarget(app)
+        guard let target, target.bundleIdentifier != Bundle.main.bundleIdentifier else { return "" }
+        // Asked of the app that held the selection, not of the system-wide
+        // element: a timeout set on the system-wide element is the DEFAULT
+        // FOR THE WHOLE PROCESS, and every other Accessibility call in the
+        // app would inherit this short leash for the rest of the session.
+        let element = AXUIElementCreateApplication(target.processIdentifier)
         // A hung app must not hold the opening of the bar.
-        AXUIElementSetMessagingTimeout(app, 0.35)
-        guard let focused = copyElement(app, kAXFocusedUIElementAttribute),
-              let text = copyString(focused, kAXSelectedTextAttribute) else { return "" }
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.count <= maximumLength ? trimmed : ""
+        AXUIElementSetMessagingTimeout(element, 0.35)
+        if let focused = copyElement(element, kAXFocusedUIElementAttribute),
+           let text = clippedSelection(copyString(focused, kAXSelectedTextAttribute)) {
+            return text
+        }
+        // Some editors put the caret on a child that has no selected-text
+        // attribute; the focused window still does.
+        if let window = copyElement(element, kAXFocusedWindowAttribute),
+           let text = clippedSelection(copyString(window, kAXSelectedTextAttribute)) {
+            return text
+        }
+        return ""
+    }
+
+    private static func resolvedTarget(_ app: NSRunningApplication?) -> NSRunningApplication? {
+        if let app, !app.isTerminated { return app }
+        return NSWorkspace.shared.frontmostApplication
+    }
+
+    private static func clippedSelection(_ text: String?) -> String? {
+        let trimmed = text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !trimmed.isEmpty, trimmed.count <= maximumLength else { return nil }
+        return trimmed
     }
 
     // MARK: - Accessibility reading

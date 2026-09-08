@@ -31,7 +31,13 @@ Vorssaint opens only a few kinds of connection, and each one belongs to a visibl
 
 3. **Homebrew actions, only when you use the Homebrew manager.** Search, install and uninstall actions run the local `brew` command, which may contact Homebrew, GitHub and package vendor hosts to search metadata or download files. Popularity badges use Homebrew's public aggregate analytics JSON from `formulae.brew.sh`. Vorssaint does not send its own analytics, capture passwords or run `brew` as root.
 
-4. **The app update check, only with App updates switched on.** Finding out which apps are behind uses the sources you leave enabled. The Homebrew source runs the local `brew` command, exactly as above. The App Store source asks Apple's public lookup service at `itunes.apple.com` which version is current, and to do that it sends the bundle identifiers of the apps you installed from the App Store, plus your Mac's region. The Online source downloads the complete public app catalog from `formulae.brew.sh`; it does not send the names, paths or bundle identifiers of apps on your Mac. No account or identifier of yours goes along with either request. The check runs when you open the list or press Check now, and on a schedule only if you set one; the three source switches under App updates control these connections independently. With the App Store source off, no app bundle identifiers are sent to Apple, and with the Online source off, the public catalog is not requested.
+4. **The app update check, only with App updates switched on.** Finding out which apps are behind uses the sources you leave enabled. The Homebrew source runs the local `brew` command, exactly as above. The App Store source sends store identifiers to `uclient-api.itunes.apple.com`, falling back to bundle identifiers at `itunes.apple.com`, along with your Mac's region, to find the current Mac version.
+
+The Online source checks supported public update addresses declared inside installed apps. These requests go to the app developer's server or its release hosting service, including `github.com` and redirected download hosts. The server receives your public IP address and the requested URL, which can reveal which app is being checked. Vorssaint does not add your app inventory, local paths, account details or device identifiers to these requests, and does not use stored cookies or credentials. The declared URL, including any query parameters it already contains, is sent as provided by the app. These services may process ordinary request data under their own privacy policies.
+
+The Online source also downloads the complete public app catalog from `formulae.brew.sh` as a fallback. That catalog request does not send the names, paths or bundle identifiers of apps on your Mac. Version comparisons happen locally; updates from developer feeds are installed by the app's own updater after you open it.
+
+The check runs when you open the list or press Check now, and on a schedule only if you set one. The three source switches under App updates control these connections independently. Turning off the App Store source stops its store and bundle identifier lookups. Turning off the Online source stops both developer feed requests and public catalog requests on subsequent checks.
 
 5. **Temporary screenshot links, only when you choose to create one.** Creating a link sends the rendered PNG and your chosen expiration of 1, 6 or 24 hours to the Vorssaint service over HTTPS. It does not send your name, account, device identifier or MAC address. On your Mac, the feature keeps only the link, expiration and private deletion token while the link is active, so you can copy it or delete it early. The service holds your public IP address in memory for no more than 24 hours to prevent abuse, while network providers may process normal HTTPS request data under their own policies.
 
@@ -45,6 +51,8 @@ The service validates and rebuilds the MP4 without its original metadata. The vi
 
 Feedback is delivered to private support channels visible to the service owner. After delivery, the text and any technical details you selected remain there until the service owner deletes them. The temporary delivery copy is then deleted; if delivery never succeeds, that copy is permanently deleted after 7 days. No contact information is sent, so feedback cannot receive a direct reply.
 
+8. **Quick AI, only when you install it and press Return.** The feature is off until you install it in Features. It talks only to OpenAI at `api.openai.com`, and only with an API key you paste yourself. That key is stored owner-only in the app's local files and is never part of a settings backup. Selected text is attached only when you send a message; the clipboard is never read for this. Optional web search uses OpenAI's own search tool on the same request. Nothing is sent in the background, and chats stay on this Mac.
+
 That is the entire list. There are no hidden beacons or background uploads.
 
 ## Changes to this document
@@ -53,4 +61,4 @@ This page describes how the current version of Vorssaint behaves. If the app's b
 
 ## Questions
 
-If anything here is unclear, open a question in [GitHub issues](https://github.com/vorssaintapp/vorssaint-utils/issues), or have a look at [support](../SUPPORT.md).
+If anything here is unclear, open a question in [GitHub issues](https://github.com/vorssaint/vorssaint-utils/issues), or have a look at [support](../SUPPORT.md).

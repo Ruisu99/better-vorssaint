@@ -110,7 +110,8 @@ struct UninstallFailureNote: View {
                     .font(compact ? .system(size: 9.5) : .caption2)
                     .foregroundStyle(.tertiary)
             }
-            if !permissions.fullDiskAccess {
+            if !permissions.fullDiskAccess,
+               UninstallerSupport.failureNeedsFullDiskAccess(paths: items.map(\.url.path)) {
                 FullDiskAccessNote(compact: compact, reason: l10n.s.uninstallerFailedNeedsFDA)
             }
         }
@@ -137,6 +138,9 @@ struct HUDBackdrop: View {
     enum Contrast {
         case standard
         case high
+        /// The Command Bar: enough plate to keep 18 pt text readable, thin
+        /// enough that Liquid Glass (or the frost behind it) still shows.
+        case spotlight
     }
 
     var cornerRadius: CGFloat = 0
@@ -157,9 +161,30 @@ struct HUDBackdrop: View {
     /// plate alone carries white text to 4.8:1 and black text to 5.3:1, both
     /// past the 4.5:1 the accessibility guidelines ask of body text, and the
     /// real material only ever adds to that.
+    static func plateOpacity(dark: Bool) -> Double { dark ? 0.55 : 0.5 }
+
     private var plateOpacity: Double {
-        guard contrast == .high, !reduceTransparency else { return 0 }
-        return colorScheme == .dark ? 0.55 : 0.5
+        switch contrast {
+        case .standard:
+            return 0
+        case .high:
+            guard !reduceTransparency else { return 0 }
+            return Self.plateOpacity(dark: colorScheme == .dark)
+        case .spotlight:
+            return CommandBarChrome.plateOpacity(
+                liquidGlass: liquidGlassEnabled,
+                reduceTransparency: reduceTransparency,
+                isDark: colorScheme == .dark)
+        }
+    }
+
+    private var edgeStrokeOpacity: Double {
+        switch contrast {
+        case .spotlight:
+            return CommandBarChrome.edgeStrokeOpacity(isDark: colorScheme == .dark)
+        case .standard, .high:
+            return colorScheme == .dark ? 0.12 : 0.08
+        }
     }
 
     var body: some View {
@@ -175,7 +200,10 @@ struct HUDBackdrop: View {
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                        .strokeBorder(colorScheme == .dark ? Color.white.opacity(0.12) : Color.black.opacity(0.08), lineWidth: 0.8)
+                        .strokeBorder(
+                            (colorScheme == .dark ? Color.white : Color.black)
+                                .opacity(edgeStrokeOpacity),
+                            lineWidth: 0.8)
                 )
         } else {
             classicBackdrop
@@ -192,6 +220,13 @@ struct HUDBackdrop: View {
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                     .fill(colorScheme == .dark ? Color.black : Color.white)
                     .opacity(plateOpacity)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .strokeBorder(
+                        (colorScheme == .dark ? Color.white : Color.black)
+                            .opacity(contrast == .spotlight ? edgeStrokeOpacity : 0),
+                        lineWidth: contrast == .spotlight ? 0.8 : 0)
             )
     }
 }

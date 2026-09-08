@@ -247,6 +247,26 @@ struct PanelClipboardView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.mini)
+                if ClipboardImageExport.source(for: entry) != nil {
+                    Button {
+                        ClipboardImageActions.saveToDownloads(entry)
+                    } label: {
+                        Image(systemName: "square.and.arrow.down")
+                            .font(.system(size: 10, weight: .bold))
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.mini)
+                    .help(text.saveToDownloads)
+                    Button {
+                        ClipboardImageActions.extractText(entry)
+                    } label: {
+                        Image(systemName: "text.viewfinder")
+                            .font(.system(size: 10, weight: .bold))
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.mini)
+                    .help(text.extractText)
+                }
                 Button {
                     history.remove(entry)
                 } label: {

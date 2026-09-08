@@ -361,6 +361,8 @@ struct SettingsView: View {
         case .quitProtection: QuitProtectionSettings()
         case .uninstaller: UninstallerView()
         case .killProcess: KillProcessView()
+        case .quickAI: QuickAISettings()
+        case .dictation: DictationSettings()
         case .urlCleaner: URLCleanerSettings()
         case .cleaner: CleanerSettings()
         case .homebrew: HomebrewSettings()
@@ -635,6 +637,7 @@ struct EnergySettings: View {
     @ObservedObject private var permissions = Permissions.shared
     @ObservedObject private var extraBrightness = ExtraBrightnessService.shared
     @ObservedObject private var brightness = BrightnessService.shared
+    @ObservedObject private var displayModes = DisplayModesService.shared
     @AppStorage(DefaultsKey.brightnessControlEnabled) private var brightnessEnabled = false
     @AppStorage(DefaultsKey.brightnessKeysEnabled) private var brightnessKeysEnabled = false
     @AppStorage(DefaultsKey.brightnessOSDEnabled) private var brightnessOSDEnabled = false
@@ -642,11 +645,13 @@ struct EnergySettings: View {
     @AppStorage(DefaultsKey.extraBrightnessLevel) private var extraBrightnessLevel = 100
     @AppStorage(DefaultsKey.bluetoothSleepEnabled) private var bluetoothSleepEnabled = false
     @AppStorage(DefaultsKey.bluetoothSleepRestoreOnWake) private var bluetoothSleepRestoreOnWake = true
+    @AppStorage(DefaultsKey.displayModesEnabled) private var displayModesEnabled = false
     @AppStorage(DefaultsKey.defaultDuration) private var defaultDuration = 0
     @AppStorage(DefaultsKey.batteryLimit) private var batteryLimit = 10
     @AppStorage(DefaultsKey.keepAwakeAutoStart) private var keepAwakeAutoStart = false
     @AppStorage(DefaultsKey.keepAwakeRightClickToggle) private var keepAwakeRightClickToggle = false
     @AppStorage(DefaultsKey.keepAwakeAllowDisplaySleep) private var keepAwakeAllowDisplaySleep = false
+    @AppStorage(DefaultsKey.keepAwakePauseWhenLocked) private var keepAwakePauseWhenLocked = false
     @AppStorage(DefaultsKey.showCountdown) private var showCountdown = false
     @AppStorage(DefaultsKey.keepAwakeIconTint) private var keepAwakeIconTint = KeepAwakeIconTint.orange.rawValue
     @AppStorage(DefaultsKey.keepAwakeActiveIcon) private var keepAwakeActiveIcon = KeepAwakeActiveIcon.vorssaint.rawValue
@@ -684,6 +689,11 @@ struct EnergySettings: View {
                 Section(automationStrings.automationSection) {
                     SettingsCaptionText(automationStrings.automationCaption)
                     KeepAwakeAutomationEditor()
+                }
+                Section {
+                    SettingsToggleWithCaption(title: automationStrings.pauseWhenLockedToggle,
+                                              caption: automationStrings.pauseWhenLockedCaption,
+                                              isOn: $keepAwakePauseWhenLocked)
                 }
                 if PowerSampler.hasInternalBattery {
                     Section(l10n.s.batteryProtectionSection) {
@@ -820,6 +830,33 @@ struct EnergySettings: View {
                 }
                 .settingsSectionAnchor(.bluetoothSleep)
             }
+            if AppFeature.displayModes.isAvailable {
+                let strings = FeatureStrings.displayModes(l10n.language)
+                Section(strings.pageTitle) {
+                    SettingsToggleWithCaption(title: strings.enable,
+                                              caption: strings.enableCaption,
+                                              isOn: $displayModesEnabled)
+                        .onChange(of: displayModesEnabled) { _, _ in
+                            DisplayModesService.shared.syncWithPreferences()
+                        }
+                    if displayModesEnabled {
+                        if displayModes.displays.isEmpty {
+                            SettingsCaptionText(strings.noDisplays)
+                        } else {
+                            ForEach(displayModes.displays) { display in
+                                displayModeRow(display, strings: strings)
+                            }
+                            if let failedID = displayModes.lastFailedDisplayID,
+                               displayModes.displays.contains(where: { $0.id == failedID }) {
+                                Text(strings.applyFailed)
+                                    .font(.caption)
+                                    .foregroundStyle(.red)
+                            }
+                        }
+                    }
+                }
+                .settingsSectionAnchor(.displayModes)
+            }
         }
         .formStyle(.grouped)
         .onAppear {
@@ -833,6 +870,40 @@ struct EnergySettings: View {
             // re-check so the section never shows a stale availability.
             ExtraBrightnessService.shared.syncWithPreferences()
             BrightnessService.shared.refresh()
+            DisplayModesService.shared.refresh()
+        }
+    }
+
+    private func displayModeRow(_ display: DisplayModesDisplay, strings: DisplayModesFeatureStrings) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: display.isBuiltIn ? "laptopcomputer" : "display")
+                .foregroundStyle(.secondary)
+                .frame(width: 18)
+            Text(display.name)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer(minLength: 8)
+            if let current = display.currentMode, current.isHiDPI {
+                Text(strings.hidpiBadge)
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(Capsule().fill(Color.secondary.opacity(0.12)))
+            }
+            Picker("", selection: Binding(
+                get: { display.currentMode?.id ?? display.modes.first?.id },
+                set: { newID in
+                    guard let option = display.modes.first(where: { $0.id == newID }) else { return }
+                    DisplayModesService.shared.apply(option, to: display.id)
+                })) {
+                ForEach(display.modes) { mode in
+                    Text(mode.fullLabel).tag(Optional(mode.id))
+                }
+            }
+            .labelsHidden()
+            .frame(maxWidth: 220)
+            .disabled(displayModes.isDisplayPending(display.id))
         }
     }
 
@@ -1194,6 +1265,7 @@ struct SwitcherSettings: View {
     @ObservedObject private var permissions = Permissions.shared
     @ObservedObject private var dockPreview = DockPreviewService.shared
     @AppStorage(DefaultsKey.switcherEnabled) private var switcherEnabled = true
+    @AppStorage(DefaultsKey.switcherTakeOverSystemShortcuts) private var switcherTakeOverSystemShortcuts = false
     @AppStorage(DefaultsKey.switcherShortcut) private var switcherShortcutStorage = GlobalShortcut.switcherDefault.storageValue
     @AppStorage(DefaultsKey.switcherIconRowMode) private var switcherIconRowMode = false
     @AppStorage(DefaultsKey.switcherSimpleMode) private var switcherSimpleMode = false
@@ -1213,12 +1285,25 @@ struct SwitcherSettings: View {
     @AppStorage(DefaultsKey.dockClickMinimize) private var dockClickMinimize = false
     @AppStorage(DefaultsKey.dockClickHide) private var dockClickHide = false
     @AppStorage(DefaultsKey.dockClickCycleWindows) private var dockClickCycleWindows = false
+    @AppStorage(DefaultsKey.minimalWindowPreviews) private var minimalPreviews = false
     @AppStorage(DefaultsKey.previewSize) private var previewSize = "normal"
 
     private var switcherEngaged: Bool { switcherEnabled && AppFeature.switcher.isAvailable }
     private var dockPreviewEngaged: Bool { dockPreviewEnabled && AppFeature.dockPreview.isAvailable }
     private var switcherShortcutDisplayString: String {
         (GlobalShortcut(storageValue: switcherShortcutStorage) ?? .switcherDefault).displayString
+    }
+    private var switcherWindowlessAppsSelection: Binding<String> {
+        Binding(
+            get: {
+                SwitcherWindowlessApps.mode(
+                    storedValue: switcherWindowlessApps,
+                    takeOverSystemShortcuts: switcherTakeOverSystemShortcuts).rawValue
+            },
+            set: { value in
+                if !switcherTakeOverSystemShortcuts { switcherWindowlessApps = value }
+            }
+        )
     }
 
     var body: some View {
@@ -1243,6 +1328,15 @@ struct SwitcherSettings: View {
                         AppSwitcher.shared.syncWithPreferences()
                     }
                     Text(l10n.s.switcherWindowShortcutCaption)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Toggle(l10n.s.switcherTakeOverSystemShortcuts,
+                           isOn: $switcherTakeOverSystemShortcuts)
+                        .disabled(!switcherEnabled)
+                        .onChange(of: switcherTakeOverSystemShortcuts) { _, _ in
+                            AppSwitcher.shared.syncWithPreferences()
+                        }
+                    Text(l10n.s.switcherTakeOverSystemShortcutsCaption)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Text(String(format: l10n.s.switcherUsageHintFormat,
@@ -1336,12 +1430,13 @@ struct SwitcherSettings: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
-                    Picker(l10n.s.switcherWindowlessApps, selection: $switcherWindowlessApps) {
+                    Picker(l10n.s.switcherWindowlessApps,
+                           selection: switcherWindowlessAppsSelection) {
                         Text(l10n.s.switcherWindowlessAppsOff).tag(SwitcherWindowlessApps.off.rawValue)
                         Text(l10n.s.switcherWindowlessAppsFinder).tag(SwitcherWindowlessApps.finder.rawValue)
                         Text(l10n.s.switcherWindowlessAppsAll).tag(SwitcherWindowlessApps.all.rawValue)
                     }
-                    .disabled(!switcherEnabled)
+                    .disabled(!switcherEnabled || switcherTakeOverSystemShortcuts)
                     Text(l10n.s.switcherWindowlessAppsCaption)
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -1444,6 +1539,8 @@ struct SwitcherSettings: View {
                     .onChange(of: previewSize) { _, _ in
                         AppSwitcher.shared.syncWithPreferences()
                     }
+                    Toggle(l10n.s.minimalWindowPreviews, isOn: $minimalPreviews)
+                    SettingsCaptionText(l10n.s.minimalWindowPreviewsCaption)
                     WindowPreviewExclusionsList()
                 } header: {
                     Text(FeatureStrings.windowPreviewExclusions(l10n.language).sectionTitle)
@@ -1549,6 +1646,10 @@ struct AboutSettings: View {
             VStack(spacing: 3) {
                 Text(AppInfo.name)
                     .font(.title2.bold())
+                Text(AppInfo.forkAttribution)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
                 HStack(spacing: 6) {
                     Text("\(l10n.s.versionPrefix) \(AppInfo.version)")
                         .font(.caption)
@@ -1580,7 +1681,7 @@ struct AboutSettings: View {
                     appDelegate()?.showOnboarding()
                 }
                 Button(l10n.s.reviewHighlights) {
-                    appDelegate()?.showUpdateHighlights(includeSupportIntro: true)
+                    appDelegate()?.showUpdateHighlights()
                 }
                 Link(l10n.s.viewOnGitHub, destination: AppInfo.repositoryURL)
             }
