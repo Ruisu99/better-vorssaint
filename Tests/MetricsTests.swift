@@ -79,6 +79,29 @@ struct MetricsTests {
         expectEqual(MetricFormat.bytesPerSecCompact(1023.6 * 1024), "1.0M", "compact promotes rounded megabyte edge")
         expectEqual(MetricFormat.bytesPerSecCompact(9.96 * 1024 * 1024), "10M", "compact drops redundant decimal at 10M")
 
+        let previousTicks = CPUTickSample(user: 0, system: 0, idle: 0, nice: 0)
+        let currentTicks = CPUTickSample(user: 40, system: 10, idle: 50, nice: 0)
+        let shares = MetricFormat.cpuShares(previous: previousTicks, current: currentTicks)
+        expectClose(shares?.user ?? -1, 0.4, "cpu user share")
+        expectClose(shares?.system ?? -1, 0.1, "cpu system share")
+        expectClose(shares?.idle ?? -1, 0.5, "cpu idle share")
+        expectClose(shares?.used ?? -1, 0.5, "cpu used share")
+        expect(MetricFormat.cpuShares(previous: currentTicks, current: previousTicks) == nil,
+               "cpu shares ignore backwards counters")
+        expectEqual(MetricFormat.loadAverageText((1.5, 1.0, 0.5), locale: Locale(identifier: "en_US_POSIX")),
+                    "1.50  1.00  0.50",
+                    "load average keeps three windows")
+        expect(MetricFormat.peakRate(current: 20, previousPeak: 10) == 20
+                && MetricFormat.peakRate(current: 5, previousPeak: 10) == 10
+                && MetricFormat.peakRate(current: nil, previousPeak: 8) == 8,
+               "network peaks keep the high water mark")
+        expect(NetworkSampler.busiestInterface(
+                previous: ["en0": NetworkCounters(received: 10, sent: 10),
+                           "en1": NetworkCounters(received: 1, sent: 1)],
+                current: ["en0": NetworkCounters(received: 12, sent: 11),
+                          "en1": NetworkCounters(received: 80, sent: 40)]) == "en1",
+               "the busiest NIC is the one whose counters moved most")
+
         // MARK: Disk helpers
 
         expect(DiskSupport.nvmeBytes(low: 2, high: nil) == 1_024_000,
@@ -3880,6 +3903,78 @@ struct MetricsTests {
                "the Shelf provider rejects an untrustworthy status-item frame")
         expect(statusHitTestCode.contains(statusFrameCall) && statusHitTestCode.contains("return false"),
                "status-item hit testing rejects an untrustworthy frame")
+        let popoverDelegateSource = stripCommentLines(statusAnchorAppDelegateSource)
+        expect(popoverDelegateSource.contains("func popoverShouldClose(_ popover: NSPopover) -> Bool {")
+                && popoverDelegateSource.contains("popoverIsClosing")
+                && !popoverDelegateSource.contains("popoverIsClosing || !PanelInteractionState.shared.preventsPopoverDismissal"),
+               "tab switches cannot ask AppKit to close the panel")
+        expect(popoverDelegateSource.contains("shouldIgnorePopoverDismiss(at")
+                && popoverDelegateSource.contains("didConsumeRecentDismissClick")
+                && popoverDelegateSource.contains("MenuBarCollapseController.shared.containsItem"),
+               "menu-bar and in-panel clicks do not dismiss the panel")
+        expect(popoverDelegateSource.contains("PanelInteractionState.shared.consumeDismissClick()"),
+               "status-item clicks claim the dismiss monitor before it can close the panel")
+
+        let bar = CGRect(x: 0, y: 1056, width: 1512, height: 24)
+        let notchExtras = MenuBarCollapseSupport.extrasMinX(menuBar: bar, notchRightMinX: 980)
+        expect(notchExtras == 980, "notched extras start at the right of the camera housing")
+        expect(MenuBarCollapseSupport.extrasMinX(menuBar: bar, notchRightMinX: nil) == bar.minX + bar.width * 0.38,
+               "an un-notched bar never covers the Apple menu")
+        let hidden = MenuBarCollapseSupport.overlayFrame(menuBar: bar,
+                                                         extrasMinX: 980,
+                                                         chevronMinX: 1280,
+                                                         collapsed: true)
+        expect(hidden == CGRect(x: 980, y: 1056, width: 300, height: 24),
+               "collapsed extras sit between the extras start and the chevron")
+        expect(MenuBarCollapseSupport.overlayFrame(menuBar: bar,
+                                                   extrasMinX: 980,
+                                                   chevronMinX: 1280,
+                                                   collapsed: false) == nil,
+               "expanded extras have no overlay")
+        expect(MenuBarCollapseSupport.overlayFrame(menuBar: bar,
+                                                   extrasMinX: 1280,
+                                                   chevronMinX: 1282,
+                                                   collapsed: true) == nil,
+               "a chevron with nothing to its left hides nothing")
+        expect(MenuBarCollapseSupport.spacerLength(collapsed: true, overlayCoversExtras: false)
+                == MenuBarCollapseSupport.collapsedSpacerLength
+                && MenuBarCollapseSupport.spacerLength(collapsed: true, overlayCoversExtras: true) == 0
+                && MenuBarCollapseSupport.spacerLength(collapsed: false, overlayCoversExtras: false) == 0,
+               "the Hidden Bar spacer only pushes when the overlay cannot")
+        expect(MenuBarCollapseSupport.cocoaFrame(fromQuartz: CGRect(x: 980, y: 0, width: 22, height: 24),
+                                                mainDisplayHeight: 1080)
+                == CGRect(x: 980, y: 1056, width: 22, height: 24),
+               "server status-item bounds convert into the AppKit menu-bar band")
+        expect(MenuBarCollapseSupport.overlayLeadingX(menuBar: bar,
+                                                      notchRightMinX: 980,
+                                                      extraMinXs: [990, 1100]) == 990,
+               "notched extras start at the leftmost extra to the right of the notch")
+        expect(MenuBarCollapseSupport.overlayLeadingX(menuBar: bar,
+                                                      notchRightMinX: 980,
+                                                      extraMinXs: [800, 990]) == 980,
+               "a notched overlay never covers the Apple menu left of the camera housing")
+        expect(MenuBarCollapseSupport.overlayLeadingX(menuBar: bar,
+                                                      notchRightMinX: nil,
+                                                      extraMinXs: [720, 900]) == 720,
+               "an un-notched overlay starts at the actual leftmost extra")
+        expect(MenuBarCollapseSupport.overlayLeadingX(menuBar: bar,
+                                                      notchRightMinX: nil,
+                                                      extraMinXs: []) == bar.minX + bar.width * 0.38,
+               "without extra frames the overlay keeps the conservative extras start")
+        let collapseControllerSource = (try? String(
+            contentsOfFile: "Sources/Vorssaint/App/MenuBarCollapseController.swift",
+            encoding: .utf8)) ?? ""
+        expect(collapseControllerSource.contains("serverFrame(windowNumber:")
+                && collapseControllerSource.contains("isTrustworthyStatusFrame")
+                && collapseControllerSource.contains("CGWindowListCopyWindowInfo")
+                && collapseControllerSource.contains("overlayLeadingX"),
+               "collapsed extras follow the window server when AppKit frames lie")
+        let featureRuntimeBindingSource = (try? String(
+            contentsOfFile: "Sources/Vorssaint/App/FeatureRuntime.swift",
+            encoding: .utf8)) ?? ""
+        expect(featureRuntimeBindingSource.contains(
+            ".menuBarCollapse: { MenuBarCollapseController.shared.syncWithPreferences() }"
+        ), "the Features hub owns the menu bar extras collapse lifecycle")
 
         // The panel keeps its top edge and its center while its content resizes.
         let panelArea = CGRect(x: 0, y: 0, width: 1470, height: 932)
@@ -14474,7 +14569,7 @@ struct MetricsTests {
 
         // MARK: Features hub catalog
 
-        expect(AppFeature.allCases.count == 60, "feature catalog has 60 features")
+        expect(AppFeature.allCases.count == 61, "feature catalog has 61 features")
         expect(Set(AppFeature.allCases.map(\.rawValue)).count == AppFeature.allCases.count,
                "feature ids are unique")
         expect(AppFeature.allCases.map(\.rawValue) == [
@@ -14490,7 +14585,7 @@ struct MetricsTests {
             "radialMenu", "scratchpad", "commandBar", "screenRecorder", "killProcess", "quickAI",
             "dictation",
             "monitorCPU", "monitorGPU", "monitorMemory", "monitorNetwork", "monitorDisk", "monitorPower",
-            "fanControl",
+            "fanControl", "menuBarCollapse",
         ], "feature ids are stable (they persist inside availability keys)")
         expect(MouseAccelerationSupport.validatedRegistryID(nil) == nil
                 && MouseAccelerationSupport.validatedRegistryID(0) == nil
@@ -14665,6 +14760,27 @@ struct MetricsTests {
                 && AppFeature.fanControl.isBeta
                 && !AppFeature.monitorPower.isBeta,
                "fan control is an on-demand beta with no broad permission")
+        expect(AppFeature.menuBarCollapse.group == .monitor
+                && AppFeature.menuBarCollapse.enabledKeys.isEmpty
+                && AppFeature.menuBarCollapse.permissions.isEmpty
+                && AppFeature.menuBarCollapse.energyProfile == .idle
+                && !AppFeature.menuBarCollapse.isBeta
+                && AppFeature.menuBarCollapse.settingsDestination == FeatureSettingsDestination(.monitor),
+               "menu bar extras collapse is an on-demand monitor feature")
+        for language in AppLanguage.allCases {
+            let collapse = FeatureStrings.menuBarCollapse(language)
+            let collapseValues = Mirror(reflecting: collapse).children.compactMap { $0.value as? String }
+            expect(collapseValues.count == 5 && collapseValues.allSatisfy { !$0.isEmpty },
+                   "menu bar extras collapse has every localized field for \(language.rawValue)")
+            expect(collapseValues.allSatisfy { !$0.contains("—") },
+                   "menu bar extras collapse text uses human punctuation for \(language.rawValue)")
+            let detail = FeatureStrings.monitorDetail(language)
+            let detailValues = Mirror(reflecting: detail).children.compactMap { $0.value as? String }
+            expect(detailValues.count == 12 && detailValues.allSatisfy { !$0.isEmpty },
+                   "monitor detail has every localized field for \(language.rawValue)")
+            expectFormat(detail.coresFormat, ["d"],
+                         "core count format stays valid for \(language.rawValue)")
+        }
 
         // MARK: Hardware-gated installs
 
@@ -16156,8 +16272,9 @@ struct MetricsTests {
                "every preset installs something")
         expect(FeaturePreset.essential.features.contains(.mixer)
                 && FeaturePreset.essential.features.contains(.keepAwake)
-                && FeaturePreset.essential.features.contains(.monitorPower),
-               "the essential preset covers mixer, monitor and keep awake")
+                && FeaturePreset.essential.features.contains(.monitorPower)
+                && FeaturePreset.essential.features.contains(.menuBarCollapse),
+               "the essential preset covers mixer, monitor, keep awake and menu bar extras")
         expect(FeaturePreset.windows.features.allSatisfy { $0.group == .windowsDock },
                "the windows preset stays inside the windows and Dock group")
         expect(FeaturePreset.battery.features.allSatisfy {
@@ -22885,9 +23002,25 @@ struct MetricsTests {
             encoding: .utf8)) ?? ""
         expect(selectionReaderSource.contains("readSelectedText(from")
                 && selectionReaderSource.contains("kAXFocusedWindowAttribute")
+                && selectionReaderSource.contains("kAXStringForRangeParameterizedAttribute")
+                && selectionReaderSource.contains("kAXParentAttribute")
                 && commandBarServiceSource.contains("readSelectedText(from: target)")
-                && commandBarServiceSource.contains("resolvedSelectedText()"),
+                && commandBarServiceSource.contains("resolvedSelectedText()")
+                && commandBarServiceSource.contains("snapshotSelectedText()"),
                "selection is read from the app that had focus when the bar opened")
+        expect(commandBarServiceSource.contains("readSelectedText(from: pasteTargetApp)"),
+               "the opening snapshot reads the remembered app on the same turn, before present")
+        if let snapshotRange = commandBarServiceSource.range(of: "snapshotSelectedText()"),
+           let presentRange = commandBarServiceSource.range(of: "present(panel)") {
+            expect(snapshotRange.lowerBound < presentRange.lowerBound,
+                   "the bar snapshots selected text before the panel becomes key")
+        } else {
+            expect(false, "the bar snapshots selected text before the panel becomes key")
+        }
+        expect(commandBarServiceSource.contains("if trimmed.isEmpty,")
+                && commandBarServiceSource.contains("!selectedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty")
+                && commandBarServiceSource.contains("retrySelection(for: id)"),
+               "an empty Accessibility retry cannot wipe a selection already captured")
         expect(commandBarServiceSource.contains("runQuickAISelection")
                 && commandBarServiceSource.contains("insertLastQuickAIReply")
                 && commandBarServiceSource.contains("insertQuickAIText")

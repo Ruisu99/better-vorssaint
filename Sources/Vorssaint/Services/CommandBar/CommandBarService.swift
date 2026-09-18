@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Vorssaint
 
 import AppKit
+import ApplicationServices
 import Carbon.HIToolbox
 import QuartzCore
 import SwiftUI
@@ -307,6 +308,7 @@ final class CommandBarService: ObservableObject {
         if presentationLifecycle.completeHomeHydrationForOpening(id) {
             prepareHomeForCurrentPresentation()
         }
+        snapshotSelectedText()
         refreshResults()
         CommandBarQueryHabits.warmInstallationKey { [weak self] in
             DispatchQueue.main.async {
@@ -2518,6 +2520,19 @@ final class CommandBarService: ObservableObject {
         return text
     }
 
+    /// Read the selection while the target app is still frontmost. Once the
+    /// bar becomes key, many editors clear AXSelectedText, which is why the
+    /// Improve chips only appeared on rare timings. This runs on the opening
+    /// thread so the answer is in hand before `present` resigns the target.
+    private func snapshotSelectedText() {
+        guard AXIsProcessTrusted() else { return }
+        let text = CommandBarSelectionReader.readSelectedText(from: pasteTargetApp)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if !text.isEmpty {
+            applySelection(text, for: presentationID)
+        }
+    }
+
     private func rememberPasteTarget() {
         let ownPID = ProcessInfo.processInfo.processIdentifier
         guard let app = NSWorkspace.shared.frontmostApplication,
@@ -2744,6 +2759,10 @@ final class CommandBarService: ObservableObject {
     /// main thread (it asks Accessibility) and only while the bar is open, so
     /// nothing is ever read from anyone's screen in the background.
     private func loadSelection(for id: UUID) {
+        if !selectedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            applySelection(selectedText, for: id)
+            return
+        }
         guard !selectionLoading else { return }
         selectionLoading = true
         let target = pasteTargetApp
@@ -2761,21 +2780,47 @@ final class CommandBarService: ObservableObject {
                     }
                     return
                 }
-                let bar = FeatureStrings.commandBar(L10n.shared.language)
-                self.selectedText = text
-                // Quick AI still attaches the selection when this source is
-                // switched off; the rows themselves honour the switch.
-                self.selectionEntries = self.isEnabled(.selection)
-                    ? CommandBarCatalog.selectionEntries(text, bar: bar) {
-                        [weak self] selected in
-                        // The bar stays open: the point is to convert, add up
-                        // or look the selection up without retyping it.
-                        self?.query = selected
-                    }
-                    : []
-                self.selectionPreview = text.isEmpty ? "" : CommandBarText.preview(text)
-                self.indexEntries()
-                self.refreshResults()
+                self.applySelection(text, for: id)
+            }
+        }
+    }
+
+    private func applySelection(_ text: String, for id: UUID) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty,
+           !selectedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return
+        }
+        let bar = FeatureStrings.commandBar(L10n.shared.language)
+        self.selectedText = text
+        // Quick AI still attaches the selection when this source is
+        // switched off; the rows themselves honour the switch.
+        self.selectionEntries = self.isEnabled(.selection)
+            ? CommandBarCatalog.selectionEntries(text, bar: bar) {
+                [weak self] selected in
+                // The bar stays open: the point is to convert, add up
+                // or look the selection up without retyping it.
+                self?.query = selected
+            }
+            : []
+        self.selectionPreview = text.isEmpty ? "" : CommandBarText.preview(text)
+        self.indexEntries()
+        self.refreshResults()
+        if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            retrySelection(for: id)
+        }
+    }
+
+    private func retrySelection(for id: UUID) {
+        let target = pasteTargetApp
+        DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 0.12) { [weak self] in
+            let text = CommandBarSelectionReader.readSelectedText(from: target)
+            DispatchQueue.main.async {
+                guard let self,
+                      self.presentationLifecycle.acceptsHomeUpdates(id, isVisible: self.isVisible),
+                      self.selectedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                      !text.isEmpty else { return }
+                self.applySelection(text, for: id)
             }
         }
     }

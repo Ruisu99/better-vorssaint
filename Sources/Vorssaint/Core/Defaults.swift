@@ -332,6 +332,7 @@ enum DefaultsKey {
     static let menuBarUsageBarMediumThreshold = "menuBarUsageBarMediumThreshold" // percent
     static let menuBarUsageBarHighThreshold = "menuBarUsageBarHighThreshold" // percent
     static let menuBarHideIconWithMetrics = "menuBarHideIconWithMetrics" // glyph hides while metrics render in the main item
+    static let menuBarExtrasCollapsed = "menuBarExtrasCollapsed" // Hidden Bar-style extras are hidden left of the chevron
     static let menuBarMetricOrder = "menuBarMetricOrder" // comma-separated MenuBarMetric raw values
     static let menuBarCombineTemperatures = "menuBarCombineTemperatures" // usage/charge + temperature in one block when possible
     static let menuBarSeparateMetrics = "menuBarSeparateMetrics" // one status item per active metric
@@ -1141,6 +1142,7 @@ enum Defaults {
         DefaultsKey.menuBarUsageBarMediumThreshold: 70,
         DefaultsKey.menuBarUsageBarHighThreshold: 90,
         DefaultsKey.menuBarHideIconWithMetrics: false,
+        DefaultsKey.menuBarExtrasCollapsed: true,
         DefaultsKey.windowLayoutHiddenActions: "",
         DefaultsKey.windowLayoutWindowGap: 0,
         DefaultsKey.windowLayoutScreenGap: 0,

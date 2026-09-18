@@ -514,6 +514,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     }
 
     private func captureStatusClick() {
+        PanelInteractionState.shared.consumeDismissClick()
         guard let event = NSApp.currentEvent,
               Self.statusClickEventTypes.contains(event.type) else { return }
         lastStatusClick = (NSEvent.mouseLocation.x, Date())
@@ -889,9 +890,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             matching: [.leftMouseDown, .rightMouseDown]
         ) { [weak self] _ in
             guard let self, self.popover.isShown else { return }
-            guard !PanelInteractionState.shared.preventsPopoverDismissal else { return }
-            guard self.statusController.containsStatusItem(at: NSEvent.mouseLocation) == false else { return }
-            self.closePopover()
+            let location = NSEvent.mouseLocation
+            guard !self.shouldIgnorePopoverDismiss(at: location) else { return }
+            // Status-item actions run after this monitor. Give them a turn to
+            // claim the click before treating it as a click outside.
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.popover.isShown else { return }
+                guard !self.shouldIgnorePopoverDismiss(at: location) else { return }
+                self.closePopover()
+            }
         }
 
         // Local events cover our own Settings window. Keep Settings + panel open
@@ -928,8 +935,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         }
     }
 
+    private func shouldIgnorePopoverDismiss(at location: NSPoint) -> Bool {
+        if PanelInteractionState.shared.preventsPopoverDismissal { return true }
+        if PanelInteractionState.shared.didConsumeRecentDismissClick() { return true }
+        if popover.contentViewController?.view.window?.frame.insetBy(dx: -10, dy: -10).contains(location) == true {
+            return true
+        }
+        if statusController.containsStatusItem(at: location) { return true }
+        if MenuBarCollapseController.shared.containsItem(at: location) { return true }
+        return false
+    }
+
     private func shouldDismissPopover(forLocalEvent event: NSEvent) -> Bool {
         guard !PanelInteractionState.shared.preventsPopoverDismissal else { return false }
+        if event.window === popover.contentViewController?.view.window { return false }
         guard event.window === settingsWindow,
               let settingsFrame = settingsWindow?.frame,
               let popoverFrame = popover.contentViewController?.view.window?.frame else {
@@ -1083,7 +1102,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     }
 
     func popoverShouldClose(_ popover: NSPopover) -> Bool {
-        popoverIsClosing || !PanelInteractionState.shared.preventsPopoverDismissal
+        // Tab switches resize the hosting view and can ask AppKit whether the
+        // popover should close. The only close we honour is our own.
+        popoverIsClosing
     }
 
     func popoverDidClose(_ notification: Notification) {

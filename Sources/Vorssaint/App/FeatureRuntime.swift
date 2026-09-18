@@ -275,6 +275,7 @@ final class FeatureRuntime: ObservableObject {
         .monitorNetwork: { FeatureRuntime.syncMonitor() },
         .monitorDisk: { FeatureRuntime.syncMonitor() },
         .monitorPower: { FeatureRuntime.syncMonitor() },
+        .menuBarCollapse: { MenuBarCollapseController.shared.syncWithPreferences() },
         .fanControl: {
             SystemMonitor.shared.planDidChange()
             let defaults = UserDefaults.standard

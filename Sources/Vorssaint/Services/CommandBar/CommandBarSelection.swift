@@ -31,24 +31,81 @@ enum CommandBarSelectionReader {
         // FOR THE WHOLE PROCESS, and every other Accessibility call in the
         // app would inherit this short leash for the rest of the session.
         let element = AXUIElementCreateApplication(target.processIdentifier)
-        // A hung app must not hold the opening of the bar.
-        AXUIElementSetMessagingTimeout(element, 0.35)
-        if let focused = copyElement(element, kAXFocusedUIElementAttribute),
-           let text = clippedSelection(copyString(focused, kAXSelectedTextAttribute)) {
-            return text
-        }
-        // Some editors put the caret on a child that has no selected-text
-        // attribute; the focused window still does.
-        if let window = copyElement(element, kAXFocusedWindowAttribute),
-           let text = clippedSelection(copyString(window, kAXSelectedTextAttribute)) {
-            return text
-        }
+        AXUIElementSetMessagingTimeout(element, 0.55)
+        if let text = selection(fromApplication: element) { return text }
         return ""
     }
 
     private static func resolvedTarget(_ app: NSRunningApplication?) -> NSRunningApplication? {
         if let app, !app.isTerminated { return app }
         return NSWorkspace.shared.frontmostApplication
+    }
+
+    private static func selection(fromApplication app: AXUIElement) -> String? {
+        if let focused = copyElement(app, kAXFocusedUIElementAttribute),
+           let text = selection(fromFocused: focused) {
+            return text
+        }
+        if let window = copyElement(app, kAXFocusedWindowAttribute),
+           let text = selection(fromFocused: window) {
+            return text
+        }
+        return selection(fromFocused: app)
+    }
+
+    private static func selection(fromFocused focused: AXUIElement) -> String? {
+        var current: AXUIElement? = focused
+        for _ in 0..<8 {
+            guard let element = current else { break }
+            if let text = clippedSelection(copyString(element, kAXSelectedTextAttribute)) {
+                return text
+            }
+            if let text = clippedSelection(stringForSelectedRange(element)) {
+                return text
+            }
+            if let child = firstSelectedChild(of: element),
+               let text = clippedSelection(copyString(child, kAXSelectedTextAttribute))
+                ?? clippedSelection(stringForSelectedRange(child)) {
+                return text
+            }
+            current = copyElement(element, kAXParentAttribute)
+        }
+        return nil
+    }
+
+    private static func firstSelectedChild(of element: AXUIElement) -> AXUIElement? {
+        guard let children = copyElements(element, kAXChildrenAttribute) else { return nil }
+        let preferred: Set<String> = [
+            "AXTextArea", "AXTextField", "AXWebArea", "AXGroup", "AXScrollArea",
+        ]
+        for child in children.prefix(24) {
+            let role = copyString(child, kAXRoleAttribute) ?? ""
+            if preferred.contains(role),
+               clippedSelection(copyString(child, kAXSelectedTextAttribute)) != nil
+                || clippedSelection(stringForSelectedRange(child)) != nil {
+                return child
+            }
+        }
+        return children.prefix(12).first { child in
+            clippedSelection(copyString(child, kAXSelectedTextAttribute)) != nil
+                || clippedSelection(stringForSelectedRange(child)) != nil
+        }
+    }
+
+    private static func stringForSelectedRange(_ element: AXUIElement) -> String? {
+        guard let range = copyValue(element, kAXSelectedTextRangeAttribute) else { return nil }
+        var selected: CFTypeRef?
+        let status = AXUIElementCopyParameterizedAttributeValue(
+            element,
+            kAXStringForRangeParameterizedAttribute as CFString,
+            range,
+            &selected
+        )
+        guard status == .success, let selected else { return nil }
+        if CFGetTypeID(selected) == CFStringGetTypeID() {
+            return selected as? String
+        }
+        return nil
     }
 
     private static func clippedSelection(_ text: String?) -> String? {
@@ -63,6 +120,17 @@ enum CommandBarSelectionReader {
         guard let raw = copyValue(element, attribute),
               CFGetTypeID(raw) == AXUIElementGetTypeID() else { return nil }
         return (raw as! AXUIElement)
+    }
+
+    private static func copyElements(_ element: AXUIElement, _ attribute: String) -> [AXUIElement]? {
+        guard let raw = copyValue(element, attribute),
+              CFGetTypeID(raw) == CFArrayGetTypeID() else { return nil }
+        let array = raw as! NSArray
+        return array.compactMap { item -> AXUIElement? in
+            let object = item as AnyObject
+            guard CFGetTypeID(object) == AXUIElementGetTypeID() else { return nil }
+            return (object as! AXUIElement)
+        }
     }
 
     private static func copyString(_ element: AXUIElement, _ attribute: String) -> String? {

@@ -254,6 +254,8 @@ extension AppFeature {
             return FeatureSettingsDestination(.monitor)
         case .fanControl:
             return FeatureSettingsDestination(.monitor, sectionAnchor: .fanControl)
+        case .menuBarCollapse:
+            return FeatureSettingsDestination(.monitor)
         }
     }
 }
@@ -263,7 +265,7 @@ extension AppFeature {
 enum FeatureVisibilitySupport {
     static let monitorFeatures: [AppFeature] = [
         .monitorCPU, .monitorGPU, .monitorMemory, .monitorNetwork, .monitorDisk, .monitorPower,
-        .fanControl,
+        .fanControl, .menuBarCollapse,
     ]
 
     /// Features gating a page; empty means the page is part of the app and

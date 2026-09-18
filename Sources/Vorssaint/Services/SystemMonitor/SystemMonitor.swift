@@ -41,7 +41,16 @@ struct SystemSnapshot {
     /// value is carried over failed reads, and the hot CPU alert has to tell
     /// those repeats apart from fresh readings.
     var cpuUsageReadAt: TimeInterval?
+    var cpuUser: Double?
+    var cpuSystem: Double?
+    var cpuIdle: Double?
+    var cpuLoadAverage: (Double, Double, Double)?
+    var cpuLogicalCores: Int?
+    var cpuCoreUsage: [Double] = []
     var gpuUsage: Double?          // 0...1
+    var gpuRendererUsage: Double?
+    var gpuTilerUsage: Double?
+    var gpuName: String?
     var memoryUsed: UInt64?
     var memoryAppUsed: UInt64?
     var memoryTotal: UInt64?
@@ -56,6 +65,9 @@ struct SystemSnapshot {
     var netUpBytesPerSec: Double?
     var netTotalDown: UInt64?      // since the app started watching
     var netTotalUp: UInt64?
+    var netInterfaceName: String?
+    var netPeakDownBytesPerSec: Double?
+    var netPeakUpBytesPerSec: Double?
 
     // Power
     var power: PowerReading?
@@ -142,13 +154,14 @@ final class SystemMonitor: ObservableObject {
     private var cpuTemperaturePlatform: CPUTemperaturePlatform = .generic
 
     // Samplers
-    private let networkSampler = NetworkSampler()
+    private let networkSampler = NetworkSampler(tracksInterfaces: true)
     private let diskSampler = DiskSampler()
     private let peripheralBatterySampler = PeripheralBatterySampler()
     private var powerSampler: PowerSampler?
 
     // Running state
-    private var previousCPUTicks: (busy: UInt64, total: UInt64)?
+    private var previousCPUTicks: CPUTickSample?
+    private var previousCoreTicks: [CPUTickSample] = []
     private var tickCount = 0
     /// Timer cadence in base ticks (GCD of the needed strides); 1 = every tick.
     private var scheduledWakeTicks = 1
@@ -159,9 +172,17 @@ final class SystemMonitor: ObservableObject {
     private var lastSyncedPlan: SamplingPlan?
     private var lastCPUUsage: Double?
     private var lastCPUUsageReadAt: TimeInterval?
+    private var lastCPUShares: CPUShareReading?
+    private var lastCPULoadAverage: (Double, Double, Double)?
+    private var lastCPUCoreUsage: [Double] = []
     private var missedCPUUsageSamples = 0
     private var lastGPUUsage: Double?
+    private var lastGPURendererUsage: Double?
+    private var lastGPUTilerUsage: Double?
+    private var lastGPUName: String?
     private var missedGPUUsageSamples = 0
+    private var lastNetPeakDown: Double?
+    private var lastNetPeakUp: Double?
     private var memoryCache: CachedMemoryReading?
     private var cpuTemperatureCache: CachedSensorReading?
     private var gpuTemperatureCache: CachedSensorReading?
@@ -626,18 +647,30 @@ final class SystemMonitor: ObservableObject {
             if plan.needCPU {
                 if take(.cpu),
                    let cpu = self.readCPUUsage() {
-                    self.lastCPUUsage = cpu
+                    self.lastCPUUsage = cpu.used
                     self.lastCPUUsageReadAt = now
+                    self.lastCPUShares = cpu
+                    self.lastCPULoadAverage = Self.readLoadAverage()
+                    self.lastCPUCoreUsage = self.readPerCoreUsage() ?? self.lastCPUCoreUsage
                     self.missedCPUUsageSamples = 0
-                    self.cpuHistory.push(cpu)
+                    self.cpuHistory.push(cpu.used)
                 } else if self.missedCPUUsageSamples < 3 {
                     self.missedCPUUsageSamples += 1
                 } else {
                     self.lastCPUUsage = nil
                     self.lastCPUUsageReadAt = nil
+                    self.lastCPUShares = nil
+                    self.lastCPULoadAverage = nil
+                    self.lastCPUCoreUsage = []
                 }
                 next.cpuUsage = self.lastCPUUsage
                 next.cpuUsageReadAt = self.lastCPUUsageReadAt
+                next.cpuUser = self.lastCPUShares?.user
+                next.cpuSystem = self.lastCPUShares?.system
+                next.cpuIdle = self.lastCPUShares?.idle
+                next.cpuLoadAverage = self.lastCPULoadAverage
+                next.cpuLogicalCores = ProcessInfo.processInfo.processorCount
+                next.cpuCoreUsage = self.lastCPUCoreUsage
             }
 
             if plan.needMemory {
@@ -664,6 +697,13 @@ final class SystemMonitor: ObservableObject {
                     next.netUpBytesPerSec = network.upBytesPerSec
                     next.netTotalDown = network.totalDown
                     next.netTotalUp = network.totalUp
+                    next.netInterfaceName = network.interfaceName
+                    self.lastNetPeakDown = MetricFormat.peakRate(current: network.downBytesPerSec,
+                                                                 previousPeak: self.lastNetPeakDown)
+                    self.lastNetPeakUp = MetricFormat.peakRate(current: network.upBytesPerSec,
+                                                               previousPeak: self.lastNetPeakUp)
+                    next.netPeakDownBytesPerSec = self.lastNetPeakDown
+                    next.netPeakUpBytesPerSec = self.lastNetPeakUp
                     if let down = network.downBytesPerSec { self.netDownHistory.push(down) }
                     if let up = network.upBytesPerSec { self.netUpHistory.push(up) }
                 }
@@ -714,18 +754,26 @@ final class SystemMonitor: ObservableObject {
                 let suppressGPUForUI = suppressImmediateGPU || now < suppressGPUReadsUntil
                 let shouldSampleGPU = !suppressGPUForUI && take(.gpuUsage)
                 if shouldSampleGPU {
-                    if let rawGPU = Self.readGPUUsage() {
+                    if let gpu = Self.readGPUUsage() {
                         self.lastGPUUsage = MetricFormat.stabilizedGPUUsage(previous: self.lastGPUUsage,
-                                                                            current: rawGPU)
+                                                                            current: gpu.device)
+                        self.lastGPURendererUsage = gpu.renderer
+                        self.lastGPUTilerUsage = gpu.tiler
+                        if let name = gpu.name, !name.isEmpty { self.lastGPUName = name }
                         self.missedGPUUsageSamples = 0
-                        if let gpu = self.lastGPUUsage { self.gpuHistory.push(gpu) }
+                        if let usage = self.lastGPUUsage { self.gpuHistory.push(usage) }
                     } else if self.missedGPUUsageSamples < 3 {
                         self.missedGPUUsageSamples += 1
                     } else {
                         self.lastGPUUsage = nil
+                        self.lastGPURendererUsage = nil
+                        self.lastGPUTilerUsage = nil
                     }
                 }
                 next.gpuUsage = self.lastGPUUsage
+                next.gpuRendererUsage = self.lastGPURendererUsage
+                next.gpuTilerUsage = self.lastGPUTilerUsage
+                next.gpuName = self.lastGPUName
             }
             // The anti-glitch bridge must span a couple of sampling gaps or it
             // is useless on the slow background cadence (15 s): one bad SMC
@@ -982,7 +1030,7 @@ final class SystemMonitor: ObservableObject {
 
     /// Aggregated load from HOST_CPU_LOAD_INFO; usage is the busy-tick share
     /// since the previous refresh.
-    private func readCPUUsage() -> Double? {
+    private func readCPUUsage() -> CPUShareReading? {
         var info = host_cpu_load_info()
         var count = mach_msg_type_number_t(MemoryLayout<host_cpu_load_info>.stride / MemoryLayout<integer_t>.stride)
         // mach_host_self() returns a send right the caller owns; release it or each
@@ -996,23 +1044,56 @@ final class SystemMonitor: ObservableObject {
         }
         guard kr == KERN_SUCCESS else { return nil }
 
-        let user = UInt64(info.cpu_ticks.0)
-        let system = UInt64(info.cpu_ticks.1)
-        let idle = UInt64(info.cpu_ticks.2)
-        let nice = UInt64(info.cpu_ticks.3)
-        let busy = user + system + nice
-        let total = busy + idle
+        let current = CPUTickSample(user: UInt64(info.cpu_ticks.0),
+                                    system: UInt64(info.cpu_ticks.1),
+                                    idle: UInt64(info.cpu_ticks.2),
+                                    nice: UInt64(info.cpu_ticks.3))
+        defer { previousCPUTicks = current }
+        guard let previous = previousCPUTicks else { return nil }
+        return MetricFormat.cpuShares(previous: previous, current: current)
+    }
 
-        defer { previousCPUTicks = (busy, total) }
-        guard let previous = previousCPUTicks, total > previous.total else { return nil }
-        return Double(busy - previous.busy) / Double(total - previous.total)
+    private func readPerCoreUsage() -> [Double]? {
+        var processorCount: natural_t = 0
+        var infoArray: processor_info_array_t?
+        var infoCount: mach_msg_type_number_t = 0
+        let host = mach_host_self()
+        defer { mach_port_deallocate(mach_task_self_, host) }
+        guard host_processor_info(host, PROCESSOR_CPU_LOAD_INFO,
+                                  &processorCount, &infoArray, &infoCount) == KERN_SUCCESS,
+              let infoArray, processorCount > 0 else { return nil }
+        defer {
+            let bytes = vm_size_t(infoCount) * vm_size_t(MemoryLayout<integer_t>.stride)
+            vm_deallocate(mach_task_self_, vm_address_t(bitPattern: infoArray), bytes)
+        }
+        let ticksPerCore = Int(CPU_STATE_MAX)
+        guard ticksPerCore > 0 else { return nil }
+        var current: [CPUTickSample] = []
+        current.reserveCapacity(Int(processorCount))
+        for core in 0..<Int(processorCount) {
+            let base = core * ticksPerCore
+            guard base + 3 < Int(infoCount) else { break }
+            current.append(CPUTickSample(user: UInt64(infoArray[base + Int(CPU_STATE_USER)]),
+                                         system: UInt64(infoArray[base + Int(CPU_STATE_SYSTEM)]),
+                                         idle: UInt64(infoArray[base + Int(CPU_STATE_IDLE)]),
+                                         nice: UInt64(infoArray[base + Int(CPU_STATE_NICE)])))
+        }
+        defer { previousCoreTicks = current }
+        guard previousCoreTicks.count == current.count else { return nil }
+        return zip(previousCoreTicks, current).compactMap { MetricFormat.cpuShares(previous: $0, current: $1)?.used }
+    }
+
+    private static func readLoadAverage() -> (Double, Double, Double)? {
+        var loads = [Double](repeating: 0, count: 3)
+        guard getloadavg(&loads, 3) == 3 else { return nil }
+        return (loads[0], loads[1], loads[2])
     }
 
     // MARK: - GPU usage
 
     /// "Device Utilization %" published by the graphics accelerator
     /// (AGXAccelerator on Apple Silicon).
-    private static func readGPUUsage() -> Double? {
+    private static func readGPUUsage() -> GPUUsageReading? {
         var iterator = io_iterator_t()
         guard IOServiceGetMatchingServices(kIOMainPortDefault,
                                            IOServiceMatching("IOAccelerator"),
@@ -1032,10 +1113,38 @@ final class SystemMonitor: ObservableObject {
             // sampling for the menu bar expensive.
             guard let ref = IORegistryEntryCreateCFProperty(entry, "PerformanceStatistics" as CFString,
                                                             kCFAllocatorDefault, 0),
-                  let stats = ref.takeRetainedValue() as? [String: Any],
-                  let utilization = stats["Device Utilization %"] as? Int
+                  let stats = ref.takeRetainedValue() as? [String: Any]
             else { continue }
-            return Double(utilization) / 100.0
+            let device = intPercent(stats["Device Utilization %"])
+                ?? intPercent(stats["GPU Activity(%)"])
+            guard let device else { continue }
+            let renderer = intPercent(stats["Renderer Utilization %"])
+            let tiler = intPercent(stats["Tiler Utilization %"])
+            let name = acceleratorName(entry)
+            return GPUUsageReading(device: device, renderer: renderer, tiler: tiler, name: name)
+        }
+        return nil
+    }
+
+    private static func intPercent(_ value: Any?) -> Double? {
+        if let intValue = value as? Int { return Double(intValue) / 100.0 }
+        if let number = value as? NSNumber { return number.doubleValue / 100.0 }
+        return nil
+    }
+
+    private static func acceleratorName(_ entry: io_registry_entry_t) -> String? {
+        let keys = ["model", "IOName", "CFBundleIdentifier"]
+        for key in keys {
+            guard let ref = IORegistryEntryCreateCFProperty(entry, key as CFString,
+                                                            kCFAllocatorDefault, 0)
+            else { continue }
+            let value = ref.takeRetainedValue()
+            if let data = value as? Data, let name = String(data: data, encoding: .utf8)?
+                .trimmingCharacters(in: .controlCharacters.union(.whitespacesAndNewlines)),
+               !name.isEmpty {
+                return name
+            }
+            if let name = value as? String, !name.isEmpty { return name }
         }
         return nil
     }

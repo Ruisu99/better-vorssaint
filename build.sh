@@ -285,6 +285,8 @@ if (( TEST )); then
         Sources/Vorssaint/Core/BluetoothSleepStrings.swift \
         Sources/Vorssaint/Core/PermissionGuideStrings.swift \
         Sources/Vorssaint/Core/FanControlStrings.swift \
+        Sources/Vorssaint/Core/MonitorDetailStrings.swift \
+        Sources/Vorssaint/Core/MenuBarCollapseStrings.swift \
         Sources/Vorssaint/Services/FanControl/FanControlSupport.swift \
         Sources/Vorssaint/Services/Snippets/TextSnippetSupport.swift \
         Sources/Vorssaint/Services/RadialMenu/RadialMenuSupport.swift \
@@ -347,6 +349,7 @@ if (( TEST )); then
         Sources/Vorssaint/UI/Settings/FeatureVisibilitySupport.swift \
         Sources/Vorssaint/App/MenuBarSpacingSupport.swift \
         Sources/Vorssaint/App/StatusItemAnchorSupport.swift \
+        Sources/Vorssaint/App/MenuBarCollapseSupport.swift \
         Sources/Vorssaint/Services/DockClick/DockClickSupport.swift \
         Sources/Vorssaint/Services/Finder/CutPasteProgressSupport.swift \
         Sources/Vorssaint/Services/Finder/CutPastePrivilegeSupport.swift \

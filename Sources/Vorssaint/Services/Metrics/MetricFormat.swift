@@ -10,6 +10,33 @@ struct NetworkCounters: Equatable {
     var sent: UInt64 = 0
 }
 
+/// One sample of HOST_CPU_LOAD_INFO ticks. Deltas between two samples are
+/// the user/system/idle shares shown in the panel.
+struct CPUTickSample: Equatable {
+    var user: UInt64 = 0
+    var system: UInt64 = 0
+    var idle: UInt64 = 0
+    var nice: UInt64 = 0
+
+    var busy: UInt64 { user + system + nice }
+    var total: UInt64 { busy + idle }
+}
+
+struct CPUShareReading: Equatable {
+    var user: Double
+    var system: Double
+    var idle: Double
+    var nice: Double
+    var used: Double
+}
+
+struct GPUUsageReading: Equatable {
+    var device: Double
+    var renderer: Double?
+    var tiler: Double?
+    var name: String?
+}
+
 /// Detects the macOS failure mode where outbound interface counters keep moving
 /// while inbound counters stay frozen. The first suspect sample only primes the
 /// process reader; a second consecutive sample is required before using it.
@@ -399,6 +426,41 @@ enum MetricFormat {
         let excluded = ["lo", "gif", "stf", "awdl", "llw", "nan", "utun", "bridge",
                         "ap", "anpi", "p2p", "XHC", "vmenet", "tap", "tun"]
         return !excluded.contains { name.hasPrefix($0) }
+    }
+
+    /// User/system/idle shares since the previous CPU tick sample. Nil until
+    /// two consecutive samples exist and time has actually advanced.
+    static func cpuShares(previous: CPUTickSample, current: CPUTickSample) -> CPUShareReading? {
+        let user = saturatingDelta(previous.user, current.user)
+        let system = saturatingDelta(previous.system, current.system)
+        let idle = saturatingDelta(previous.idle, current.idle)
+        let nice = saturatingDelta(previous.nice, current.nice)
+        let total = user + system + idle + nice
+        guard total > 0 else { return nil }
+        let scale = 1.0 / Double(total)
+        let userShare = Double(user) * scale
+        let systemShare = Double(system) * scale
+        let idleShare = Double(idle) * scale
+        let niceShare = Double(nice) * scale
+        return CPUShareReading(user: userShare,
+                               system: systemShare,
+                               idle: idleShare,
+                               nice: niceShare,
+                               used: min(1, userShare + systemShare + niceShare))
+    }
+
+    static func loadAverageText(_ load: (Double, Double, Double), locale: Locale = locale) -> String {
+        let format = { (value: Double) in String(format: "%.2f", locale: locale, value) }
+        return "\(format(load.0))  \(format(load.1))  \(format(load.2))"
+    }
+
+    static func peakRate(current: Double?, previousPeak: Double?) -> Double? {
+        guard let current else { return previousPeak }
+        return max(current, previousPeak ?? 0)
+    }
+
+    private static func saturatingDelta(_ previous: UInt64, _ current: UInt64) -> UInt64 {
+        current >= previous ? current - previous : 0
     }
 }
 

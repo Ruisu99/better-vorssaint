@@ -32,7 +32,7 @@ enum FeaturePreset: String, CaseIterable, Identifiable {
         case .essential:
             return [.mixer, .keepAwake,
                     .monitorCPU, .monitorGPU, .monitorMemory,
-                    .monitorNetwork, .monitorDisk, .monitorPower]
+                    .monitorNetwork, .monitorDisk, .monitorPower, .menuBarCollapse]
         case .windows:
             return [.switcher, .windowLayout, .dockPreview, .dockClick, .windowMaximizer]
         case .battery:
@@ -124,7 +124,7 @@ extension AppFeature {
              .musicBlock, .bluetoothSleep, .keepAwake, .brightness, .quickLauncher, .quickToggles, .colorPicker,
              .screenOCR, .cleaningMode, .mediaTools, .cleaner, .uninstaller, .homebrew, .screenshot,
              .cameraPreview, .scratchpad, .commandBar, .screenRecorder, .fanControl,
-             .diskImageInstaller, .killProcess, .quickAI, .displayModes:
+             .diskImageInstaller, .killProcess, .quickAI, .displayModes, .menuBarCollapse:
             return .idle
         case .appUpdates:
             // The list is on demand; only a background schedule keeps a timer.

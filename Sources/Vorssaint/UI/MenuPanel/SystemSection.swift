@@ -309,12 +309,17 @@ struct SystemSection: View {
             if sysCPU, cpuAvailable {
                 usageRow(label: l10n.s.cpuLabel, fraction: monitor.snapshot.cpuUsage,
                          kind: .cpu, editing: editing, visible: $sysCPU)
+                cpuShareBreakdown
                 if graphCPU, monitor.snapshot.cpuHistory.count >= 2 {
                     Sparkline(values: monitor.snapshot.cpuHistory,
                               color: .accentColor,
                               maxValue: 1,
                               showsZeroBaseline: true)
-                        .frame(height: 22)
+                        .frame(height: 28)
+                }
+                cpuMetaRow
+                if !monitor.snapshot.cpuCoreUsage.isEmpty {
+                    CoreUsageGrid(values: monitor.snapshot.cpuCoreUsage)
                 }
                 breakdownList(for: .cpu)
             } else if editing, cpuAvailable {
@@ -323,12 +328,13 @@ struct SystemSection: View {
             if sysGPU, gpuAvailable {
                 usageRow(label: l10n.s.gpuLabel, fraction: monitor.snapshot.gpuUsage,
                          kind: .gpu, editing: editing, visible: $sysGPU)
+                gpuShareBreakdown
                 if graphGPU, monitor.snapshot.gpuHistory.count >= 2 {
                     Sparkline(values: monitor.snapshot.gpuHistory,
                               color: PanelMetricColor.cyan(for: colorScheme),
                               maxValue: 1,
                               showsZeroBaseline: true)
-                        .frame(height: 22)
+                        .frame(height: 28)
                 }
                 breakdownList(for: .gpu)
             } else if editing, gpuAvailable {
@@ -498,6 +504,97 @@ struct SystemSection: View {
         }
     }
 
+    @ViewBuilder
+    private var cpuShareBreakdown: some View {
+        let detail = FeatureStrings.monitorDetail(l10n.language)
+        if let user = monitor.snapshot.cpuUser, let system = monitor.snapshot.cpuSystem {
+            VStack(alignment: .leading, spacing: 4) {
+                SplitUsageBar(user: user, system: system)
+                HStack {
+                    shareLegend(color: .accentColor, title: detail.user, fraction: user)
+                    shareLegend(color: PanelMetricColor.orange(for: colorScheme),
+                                title: detail.system, fraction: system)
+                    if let idle = monitor.snapshot.cpuIdle {
+                        shareLegend(color: Color.primary.opacity(0.22), title: detail.idle, fraction: idle)
+                    }
+                }
+            }
+            .padding(.leading, 16)
+        }
+    }
+
+    @ViewBuilder
+    private var cpuMetaRow: some View {
+        let detail = FeatureStrings.monitorDetail(l10n.language)
+        HStack(spacing: 8) {
+            if let load = monitor.snapshot.cpuLoadAverage {
+                Text("\(detail.loadAverage) \(MetricFormat.loadAverageText(load))")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+                    .monospacedDigit()
+            }
+            Spacer(minLength: 0)
+            if let cores = monitor.snapshot.cpuLogicalCores, cores > 0 {
+                Text(String(format: detail.coresFormat, cores))
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .padding(.leading, 16)
+    }
+
+    @ViewBuilder
+    private var gpuShareBreakdown: some View {
+        let detail = FeatureStrings.monitorDetail(l10n.language)
+        let name = monitor.snapshot.gpuName
+        if (name?.isEmpty == false)
+            || monitor.snapshot.gpuRendererUsage != nil
+            || monitor.snapshot.gpuTilerUsage != nil {
+            VStack(alignment: .leading, spacing: 3) {
+                if let name, !name.isEmpty {
+                    Text(name)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
+                if let renderer = monitor.snapshot.gpuRendererUsage {
+                    miniUsage(label: detail.renderer, fraction: renderer,
+                              color: PanelMetricColor.cyan(for: colorScheme))
+                }
+                if let tiler = monitor.snapshot.gpuTilerUsage {
+                    miniUsage(label: detail.tiler, fraction: tiler,
+                              color: PanelMetricColor.mint(for: colorScheme))
+                }
+            }
+            .padding(.leading, 16)
+        }
+    }
+
+    private func miniUsage(label: String, fraction: Double, color: Color) -> some View {
+        HStack(spacing: 8) {
+            Text(label)
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+                .frame(width: 64, alignment: .leading)
+            UsageBar(fraction: fraction, tint: color)
+            Text(String(format: "%.0f%%", locale: MetricFormat.locale, fraction * 100))
+                .font(.system(size: 10, weight: .medium))
+                .monospacedDigit()
+                .frame(width: 32, alignment: .trailing)
+        }
+    }
+
+    private func shareLegend(color: Color, title: String, fraction: Double) -> some View {
+        HStack(spacing: 4) {
+            Circle().fill(color).frame(width: 6, height: 6)
+            Text("\(title) \(String(format: "%.0f%%", locale: MetricFormat.locale, fraction * 100))")
+                .font(.system(size: 9.5))
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
     private func subsectionLabel(_ text: String) -> some View {
         Text(text)
             .font(.system(size: 10.5, weight: .semibold))
@@ -569,6 +666,40 @@ struct UsageBar: View {
         case ..<0.85: return PanelMetricColor.yellow(for: colorScheme)
         default: return PanelMetricColor.red(for: colorScheme)
         }
+    }
+}
+
+struct SplitUsageBar: View {
+    let user: Double
+    let system: Double
+
+    var body: some View {
+        GeometryReader { proxy in
+            let userWidth = max(0, proxy.size.width * min(1, user))
+            let systemWidth = max(0, proxy.size.width * min(1 - user, system))
+            ZStack(alignment: .leading) {
+                Capsule().fill(Color.primary.opacity(0.08))
+                HStack(spacing: 0) {
+                    Capsule().fill(Color.accentColor).frame(width: userWidth)
+                    Capsule().fill(Color.orange.opacity(0.85)).frame(width: systemWidth)
+                }
+            }
+        }
+        .frame(height: 5)
+    }
+}
+
+struct CoreUsageGrid: View {
+    let values: [Double]
+
+    var body: some View {
+        let columns = Array(repeating: GridItem(.flexible(), spacing: 3), count: min(4, max(2, values.count)))
+        LazyVGrid(columns: columns, spacing: 3) {
+            ForEach(Array(values.enumerated()), id: \.offset) { _, fraction in
+                UsageBar(fraction: fraction)
+            }
+        }
+        .padding(.leading, 16)
     }
 }
 

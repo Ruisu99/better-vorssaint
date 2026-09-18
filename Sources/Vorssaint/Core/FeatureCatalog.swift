@@ -31,7 +31,7 @@ enum AppFeature: String, CaseIterable {
          commandBar, screenRecorder, killProcess, quickAI, dictation
     // System monitor, one entry per metric family (temperatures live with
     // their parent metric: CPU temp with CPU, battery temp with power).
-    case monitorCPU, monitorGPU, monitorMemory, monitorNetwork, monitorDisk, monitorPower, fanControl
+    case monitorCPU, monitorGPU, monitorMemory, monitorNetwork, monitorDisk, monitorPower, fanControl, menuBarCollapse
 }
 
 /// Hub sections, in display order.
@@ -143,7 +143,7 @@ extension AppFeature {
              .scratchpad, .commandBar, .screenRecorder, .killProcess, .quickAI, .dictation:
             return .tools
         case .monitorCPU, .monitorGPU, .monitorMemory, .monitorNetwork, .monitorDisk, .monitorPower,
-             .fanControl:
+             .fanControl, .menuBarCollapse:
             return .monitor
         }
     }
@@ -213,6 +213,7 @@ extension AppFeature {
         case .monitorDisk: return "internaldrive"
         case .monitorPower: return "bolt.fill"
         case .fanControl: return "fanblades.fill"
+        case .menuBarCollapse: return "chevron.right"
         }
     }
 
@@ -274,7 +275,7 @@ extension AppFeature {
              .cleaner, .uninstaller, .homebrew, .appUpdates, .screenshot, .cameraPreview, .scratchpad,
              .commandBar, .screenRecorder, .killProcess, .quickAI,
              .monitorCPU, .monitorGPU, .monitorMemory, .monitorNetwork, .monitorDisk, .monitorPower,
-             .fanControl:
+             .fanControl, .menuBarCollapse:
             return []
         }
     }
@@ -326,7 +327,7 @@ extension AppFeature {
              .soundOutputSwitcher, .musicBlock,
              .extraBrightness, .bluetoothSleep, .quickLauncher, .colorPicker, .micMute, .mediaTools,
              .scratchpad, .monitorGPU, .monitorNetwork, .fanControl, .killProcess, .quickAI,
-             .displayModes:
+             .displayModes, .menuBarCollapse:
             return []
         }
     }

@@ -21,6 +21,12 @@ final class PanelInteractionState {
     /// modal state orphaned and make the next panel unresponsive.
     var isPresentingPopoverModal = false
 
+    /// A click that already belongs to one of our status items. The global
+    /// dismiss monitor otherwise treats menu-bar clicks as outside clicks,
+    /// which is how switching to Network (or any other metric icon) closed
+    /// the panel on macOS 27 when the reported status frame was lying.
+    private var dismissClickConsumedAt = Date.distantPast
+
     /// The one answer every AppKit dismissal path uses. Service state lives
     /// here so the generic popover host does not know about individual tools,
     /// and operations stay protected even after the user switches panel tabs.
@@ -30,6 +36,14 @@ final class PanelInteractionState {
             || HomebrewManager.shared.operationStatus?.isActive == true
             || cleanerIsRunning
             || uninstallerIsRunning
+    }
+
+    func consumeDismissClick() {
+        dismissClickConsumedAt = Date()
+    }
+
+    func didConsumeRecentDismissClick(now: Date = Date()) -> Bool {
+        now.timeIntervalSince(dismissClickConsumedAt) < 0.4
     }
 
     private var cleanerIsRunning: Bool {
