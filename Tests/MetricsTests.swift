@@ -3937,10 +3937,18 @@ struct MetricsTests {
                                                    collapsed: true) == nil,
                "a chevron with nothing to its left hides nothing")
         expect(MenuBarCollapseSupport.spacerLength(collapsed: true, overlayCoversExtras: false)
-                == MenuBarCollapseSupport.collapsedSpacerLength
+                == 0
                 && MenuBarCollapseSupport.spacerLength(collapsed: true, overlayCoversExtras: true) == 0
-                && MenuBarCollapseSupport.spacerLength(collapsed: false, overlayCoversExtras: false) == 0,
-               "the Hidden Bar spacer only pushes when the overlay cannot")
+                && MenuBarCollapseSupport.spacerLength(collapsed: false, overlayCoversExtras: false) == 0
+                && MenuBarCollapseSupport.collapsedSpacerLength == 0,
+               "a huge spacer is never used: it stalls the menu bar on macOS 27")
+        expect(MenuBarCollapseSupport.overlayFrame(menuBar: bar,
+                                                   extrasMinX: 0,
+                                                   chevronMinX: 1400,
+                                                   collapsed: true) == nil,
+               "a lying chevron that would cover the bar is not overlaid")
+        expect(registeredDefaults[DefaultsKey.menuBarExtrasCollapsed] as? Bool == false,
+               "menu bar extras start expanded so a launch cannot hide the app icon")
         expect(MenuBarCollapseSupport.cocoaFrame(fromQuartz: CGRect(x: 980, y: 0, width: 22, height: 24),
                                                 mainDisplayHeight: 1080)
                 == CGRect(x: 980, y: 1056, width: 22, height: 24),
@@ -3967,8 +3975,12 @@ struct MetricsTests {
         expect(collapseControllerSource.contains("serverFrame(windowNumber:")
                 && collapseControllerSource.contains("isTrustworthyStatusFrame")
                 && collapseControllerSource.contains("CGWindowListCopyWindowInfo")
-                && collapseControllerSource.contains("overlayLeadingX"),
-               "collapsed extras follow the window server when AppKit frames lie")
+                && collapseControllerSource.contains("overlayLeadingX")
+                && collapseControllerSource.contains("ownKeepVisibleMinX")
+                && collapseControllerSource.contains("retireLegacySpacer")
+                && collapseControllerSource.contains("DispatchQueue.main.async")
+                && !collapseControllerSource.contains("spacerItem"),
+               "collapsed extras follow the window server and never install a huge spacer")
         let featureRuntimeBindingSource = (try? String(
             contentsOfFile: "Sources/Vorssaint/App/FeatureRuntime.swift",
             encoding: .utf8)) ?? ""

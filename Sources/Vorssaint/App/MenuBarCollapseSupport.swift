@@ -10,7 +10,13 @@ import Foundation
 enum MenuBarCollapseSupport {
     static let minimumHiddenWidth: CGFloat = 8
     static let unnotchedExtrasStartFraction: CGFloat = 0.38
-    static let collapsedSpacerLength: CGFloat = 10_000
+    /// Expanding an NSStatusItem to this length is the classic Hidden Bar
+    /// push. On macOS 15+ it no longer hides extras, and a 10_000pt item at
+    /// launch can stall the menu bar so the app looks like it never started.
+    static let collapsedSpacerLength: CGFloat = 0
+    /// A chevron whose reported frame sits on the far right would paint an
+    /// overlay across the whole extras region, including this app's own icon.
+    static let maximumHiddenFraction: CGFloat = 0.82
 
     static func extrasMinX(menuBar: CGRect, notchRightMinX: CGFloat?) -> CGFloat {
         if let notchRightMinX {
@@ -53,16 +59,13 @@ enum MenuBarCollapseSupport {
         let maxX = min(menuBar.maxX, chevronMinX)
         let width = maxX - minX
         guard width >= minimumHiddenWidth, menuBar.height > 0 else { return nil }
+        guard menuBar.width <= 0 || width <= menuBar.width * maximumHiddenFraction else { return nil }
         return CGRect(x: minX, y: menuBar.minY, width: width, height: menuBar.height)
     }
 
     static func spacerLength(collapsed: Bool, overlayCoversExtras: Bool) -> CGFloat {
-        // The huge-length spacer is the classic Hidden Bar push. On newer
-        // macOS the overlay is what actually hides extras, so the spacer
-        // stays tiny whenever the overlay already covers the region.
-        if collapsed && !overlayCoversExtras {
-            return collapsedSpacerLength
-        }
+        _ = collapsed
+        _ = overlayCoversExtras
         return 0
     }
 }

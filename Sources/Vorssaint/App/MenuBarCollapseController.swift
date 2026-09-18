@@ -12,25 +12,39 @@ final class MenuBarCollapseController {
     static let shared = MenuBarCollapseController()
 
     private var chevronItem: NSStatusItem?
-    private var spacerItem: NSStatusItem?
     private var overlay: NSPanel?
-    private var collapsed = true
+    private var collapsed = false
     private var refreshTimer: Timer?
     private var observers: [NSObjectProtocol] = []
+    private var installScheduled = false
     private static let chevronAutosaveName = "VorssaintMenuBarCollapseChevron"
-    private static let spacerAutosaveName = "VorssaintMenuBarCollapseSpacer"
+    private static let retiredSpacerAutosaveName = "VorssaintMenuBarCollapseSpacer"
 
     private init() {}
 
     func syncWithPreferences() {
         let enabled = AppFeature.menuBarCollapse.isAvailable
         if enabled {
-            installIfNeeded()
-            collapsed = UserDefaults.standard.object(forKey: DefaultsKey.menuBarExtrasCollapsed) as? Bool ?? true
-            applyAppearance()
-            startObserving()
-            refreshOverlay()
+            // Status items created in the middle of applicationDidFinishLaunching
+            // often have no window yet. A 10_000pt spacer or a lying overlay at
+            // that moment is what made the app look like it never started.
+            guard !installScheduled else { return }
+            installScheduled = true
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.installScheduled = false
+                guard AppFeature.menuBarCollapse.isAvailable else {
+                    self.tearDown()
+                    return
+                }
+                self.installIfNeeded()
+                self.collapsed = UserDefaults.standard.object(forKey: DefaultsKey.menuBarExtrasCollapsed) as? Bool ?? false
+                self.applyAppearance()
+                self.startObserving()
+                self.refreshOverlay()
+            }
         } else {
+            installScheduled = false
             tearDown()
         }
     }
@@ -39,14 +53,14 @@ final class MenuBarCollapseController {
         if let overlay, overlay.isVisible, overlay.frame.insetBy(dx: -2, dy: -8).contains(screenPoint) {
             return true
         }
-        let buttons = [chevronItem?.button, spacerItem?.button].compactMap { $0 }
-        return buttons.contains { button in
-            guard let frame = resolvedButtonFrame(button), frame.width > 0, frame.height > 0 else { return false }
-            return frame.insetBy(dx: -4, dy: -8).contains(screenPoint)
-        }
+        guard let button = chevronItem?.button,
+              let frame = resolvedButtonFrame(button),
+              frame.width > 0, frame.height > 0 else { return false }
+        return frame.insetBy(dx: -4, dy: -8).contains(screenPoint)
     }
 
     private func installIfNeeded() {
+        retireLegacySpacer()
         if chevronItem == nil {
             let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
             item.autosaveName = Self.chevronAutosaveName
@@ -60,18 +74,17 @@ final class MenuBarCollapseController {
             }
             chevronItem = item
         }
-        if spacerItem == nil {
-            let item = NSStatusBar.system.statusItem(withLength: 0)
-            item.autosaveName = Self.spacerAutosaveName
-            item.behavior = []
-            item.isVisible = true
-            if let button = item.button {
-                button.image = nil
-                button.title = ""
-                button.appearsDisabled = true
-            }
-            spacerItem = item
-        }
+    }
+
+    /// A previous build persisted a 10_000pt spacer under this name. Creating
+    /// that item again would restore the length and stall the menu bar, so
+    /// only the remembered placement keys are dropped.
+    private func retireLegacySpacer() {
+        let defaults = UserDefaults.standard
+        let name = Self.retiredSpacerAutosaveName
+        defaults.removeObject(forKey: "NSStatusItem Visible \(name)")
+        defaults.removeObject(forKey: "NSStatusItem VisibleCC \(name)")
+        defaults.removeObject(forKey: "NSStatusItem Preferred Position \(name)")
     }
 
     private func tearDown() {
@@ -79,9 +92,7 @@ final class MenuBarCollapseController {
         hideOverlay()
         overlay?.close()
         overlay = nil
-        if let spacerItem { NSStatusBar.system.removeStatusItem(spacerItem) }
         if let chevronItem { NSStatusBar.system.removeStatusItem(chevronItem) }
-        spacerItem = nil
         chevronItem = nil
     }
 
@@ -134,20 +145,16 @@ final class MenuBarCollapseController {
     private func refreshOverlay() {
         guard AppFeature.menuBarCollapse.isAvailable, let chevronItem, chevronItem.isVisible else {
             hideOverlay()
-            spacerItem?.length = 0
             return
         }
-        guard let geometry = currentGeometry() else {
+        guard collapsed, let geometry = currentGeometry() else {
             hideOverlay()
-            spacerItem?.length = collapsed ? MenuBarCollapseSupport.collapsedSpacerLength : 0
             return
         }
         let frame = MenuBarCollapseSupport.overlayFrame(menuBar: geometry.menuBar,
                                                         extrasMinX: geometry.extrasMinX,
                                                         chevronMinX: geometry.chevronMinX,
-                                                        collapsed: collapsed)
-        spacerItem?.length = MenuBarCollapseSupport.spacerLength(collapsed: collapsed,
-                                                                 overlayCoversExtras: frame != nil)
+                                                        collapsed: true)
         if let frame {
             showOverlay(frame)
         } else {
@@ -176,22 +183,36 @@ final class MenuBarCollapseController {
         let extraMinXs = statusItemMinXs(leftOf: chevron.minX,
                                          excluding: window.windowNumber,
                                          menuBar: menuBar)
-        let extrasMinX = MenuBarCollapseSupport.overlayLeadingX(menuBar: menuBar,
+        var extrasMinX = MenuBarCollapseSupport.overlayLeadingX(menuBar: menuBar,
                                                                 notchRightMinX: notchRight,
                                                                 extraMinXs: extraMinXs)
-        return Geometry(menuBar: menuBar, extrasMinX: extrasMinX, chevronMinX: chevron.minX)
+        var chevronMinX = chevron.minX
+        if let keepVisible = ownKeepVisibleMinX(excluding: window.windowNumber, menuBar: menuBar) {
+            chevronMinX = min(chevronMinX, keepVisible)
+        }
+        extrasMinX = min(extrasMinX, chevronMinX)
+        return Geometry(menuBar: menuBar, extrasMinX: extrasMinX, chevronMinX: chevronMinX)
     }
 
     /// macOS 27 can park a status item's AppKit frame at the slot it was born
     /// in. The window server still knows where the icon is actually drawn, so
     /// the overlay and hit testing ask it when the reported frame is lying.
+    /// A lying frame is never used: that is how an overlay covered the icon
+    /// and made a launch look like a failure.
     private func resolvedButtonFrame(_ button: NSStatusBarButton) -> CGRect? {
         guard let window = button.window else { return nil }
         let reported = window.convertToScreen(button.convert(button.bounds, to: nil))
+        let candidate: CGRect
         if StatusItemAnchorSupport.isTrustworthyStatusFrame(window.frame) {
-            return reported
+            candidate = reported
+        } else if let server = serverFrame(windowNumber: window.windowNumber),
+                  StatusItemAnchorSupport.isTrustworthyStatusFrame(server) {
+            candidate = server
+        } else {
+            return nil
         }
-        return serverFrame(windowNumber: window.windowNumber) ?? reported
+        guard StatusItemAnchorSupport.isTrustworthyStatusFrame(candidate) else { return nil }
+        return candidate
     }
 
     private func serverFrame(windowNumber: Int) -> CGRect? {
@@ -211,26 +232,55 @@ final class MenuBarCollapseController {
     private func statusItemMinXs(leftOf chevronMinX: CGFloat,
                                  excluding windowNumber: Int,
                                  menuBar: CGRect) -> [CGFloat] {
+        statusWindows(in: menuBar, excluding: windowNumber)
+            .compactMap { cocoa in
+                guard cocoa.minX < chevronMinX - 1 else { return nil }
+                return cocoa.minX
+            }
+    }
+
+    private func ownKeepVisibleMinX(excluding windowNumber: Int, menuBar: CGRect) -> CGFloat? {
+        let pid = ProcessInfo.processInfo.processIdentifier
+        let overlayNumber = overlay?.windowNumber
+        return WindowServerSupport.onScreenWindowInfo().compactMap { info -> CGFloat? in
+            guard let owner = (info[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value,
+                  owner == pid,
+                  let number = (info[kCGWindowNumber as String] as? NSNumber)?.intValue,
+                  number != windowNumber,
+                  number != overlayNumber,
+                  let layer = (info[kCGWindowLayer as String] as? NSNumber)?.intValue,
+                  layer == Int(CGWindowLevelForKey(.statusWindow)),
+                  let cocoa = cocoaStatusFrame(from: info, menuBar: menuBar)
+            else { return nil }
+            return cocoa.minX
+        }.min()
+    }
+
+    private func statusWindows(in menuBar: CGRect, excluding windowNumber: Int) -> [CGRect] {
         let statusLevel = Int(CGWindowLevelForKey(.statusWindow))
         let overlayNumber = overlay?.windowNumber
-        guard let mainHeight = mainDisplayHeight, mainHeight > 0 else { return [] }
         return WindowServerSupport.onScreenWindowInfo().compactMap { info in
             guard let layer = (info[kCGWindowLayer as String] as? NSNumber)?.intValue,
                   layer == statusLevel,
                   let number = (info[kCGWindowNumber as String] as? NSNumber)?.intValue,
                   number != windowNumber,
                   number != overlayNumber,
-                  let quartz = WindowServerSupport.bounds(from: info)
+                  let cocoa = cocoaStatusFrame(from: info, menuBar: menuBar)
             else { return nil }
-            let cocoa = MenuBarCollapseSupport.cocoaFrame(fromQuartz: quartz, mainDisplayHeight: mainHeight)
-            guard cocoa.minX < chevronMinX - 1,
-                  cocoa.maxY >= menuBar.minY,
-                  cocoa.minY <= menuBar.maxY,
-                  cocoa.height <= 48,
-                  cocoa.width > 0
-            else { return nil }
-            return cocoa.minX
+            return cocoa
         }
+    }
+
+    private func cocoaStatusFrame(from info: [String: Any], menuBar: CGRect) -> CGRect? {
+        guard let quartz = WindowServerSupport.bounds(from: info),
+              let mainHeight = mainDisplayHeight, mainHeight > 0 else { return nil }
+        let cocoa = MenuBarCollapseSupport.cocoaFrame(fromQuartz: quartz, mainDisplayHeight: mainHeight)
+        guard cocoa.maxY >= menuBar.minY,
+              cocoa.minY <= menuBar.maxY,
+              cocoa.height <= 48,
+              cocoa.width > 0
+        else { return nil }
+        return cocoa
     }
 
     private func showOverlay(_ frame: CGRect) {
