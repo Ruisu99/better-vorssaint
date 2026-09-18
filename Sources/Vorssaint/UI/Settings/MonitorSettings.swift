@@ -71,6 +71,12 @@ struct MonitorSettings: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+                if AppFeature.menuBarCollapse.isAvailable {
+                    let collapse = FeatureStrings.menuBarCollapse(l10n.language)
+                    Text(collapse.settingsCaption)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 MenuBarMetricOrderEditor()
                 Text(l10n.s.monitorMenuBarCaption)
                     .font(.caption)

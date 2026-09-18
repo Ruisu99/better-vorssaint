@@ -11,13 +11,13 @@ enum MetricDetailKind: String, Equatable, Identifiable {
 
     var panelSection: PanelSectionID {
         switch self {
-        case .cpu, .gpu, .memory, .battery:
+        case .cpu, .gpu, .memory:
             return .system
         case .network:
             return .network
         case .disk:
             return .disk
-        case .power:
+        case .battery, .power:
             return .power
         case .fan:
             return .fanControl
@@ -205,6 +205,13 @@ struct MetricDetailView: View {
                 }
                 Spacer(minLength: 0)
             }
+            if kind == .cpu, let user = monitor.snapshot.cpuUser, let system = monitor.snapshot.cpuSystem {
+                SplitUsageBar(user: user, system: system)
+                if !monitor.snapshot.cpuCoreUsage.isEmpty {
+                    CoreUsageGrid(values: monitor.snapshot.cpuCoreUsage)
+                        .padding(.leading, 0)
+                }
+            }
             graph
         }
         .panelCard()
@@ -243,7 +250,7 @@ struct MetricDetailView: View {
                       color: color,
                       maxValue: maxValue,
                       showsZeroBaseline: true)
-                .frame(height: 38)
+                .frame(height: 52)
         }
     }
 
@@ -260,7 +267,7 @@ struct MetricDetailView: View {
                           maxValue: peak,
                           fillOpacity: 0.08)
             }
-            .frame(height: 38)
+            .frame(height: 52)
         }
     }
 
@@ -355,16 +362,44 @@ struct MetricDetailView: View {
         let snapshot = monitor.snapshot
         switch kind {
         case .cpu:
-            return [
+            let detail = FeatureStrings.monitorDetail(l10n.language)
+            var rows = [
                 row(l10n.s.usageSection, snapshot.cpuUsage.map(MetricFormat.percent) ?? l10n.s.networkMeasuring),
-                row(l10n.s.temperatures, snapshot.cpuTemperature.map(formatTemperature) ?? l10n.s.monitorUnavailable),
-                row(l10n.s.systemUptime, SystemSection.uptimeString()),
             ]
+            if let user = snapshot.cpuUser {
+                rows.append(row(detail.user, MetricFormat.percent(user)))
+            }
+            if let system = snapshot.cpuSystem {
+                rows.append(row(detail.system, MetricFormat.percent(system)))
+            }
+            if let idle = snapshot.cpuIdle {
+                rows.append(row(detail.idle, MetricFormat.percent(idle)))
+            }
+            if let load = snapshot.cpuLoadAverage {
+                rows.append(row(detail.loadAverage, MetricFormat.loadAverageText(load)))
+            }
+            if let cores = snapshot.cpuLogicalCores, cores > 0 {
+                rows.append(row(detail.chip, String(format: detail.coresFormat, cores)))
+            }
+            rows.append(row(l10n.s.temperatures, snapshot.cpuTemperature.map(formatTemperature) ?? l10n.s.monitorUnavailable))
+            rows.append(row(l10n.s.systemUptime, SystemSection.uptimeString()))
+            return rows
         case .gpu:
-            return [
+            let detail = FeatureStrings.monitorDetail(l10n.language)
+            var rows = [
                 row(l10n.s.usageSection, snapshot.gpuUsage.map(MetricFormat.percent) ?? l10n.s.networkMeasuring),
-                row(l10n.s.temperatures, snapshot.gpuTemperature.map(formatTemperature) ?? l10n.s.monitorUnavailable),
             ]
+            if let name = snapshot.gpuName, !name.isEmpty {
+                rows.append(row(detail.chip, name, wrapsValue: true))
+            }
+            if let renderer = snapshot.gpuRendererUsage {
+                rows.append(row(detail.renderer, MetricFormat.percent(renderer)))
+            }
+            if let tiler = snapshot.gpuTilerUsage {
+                rows.append(row(detail.tiler, MetricFormat.percent(tiler)))
+            }
+            rows.append(row(l10n.s.temperatures, snapshot.gpuTemperature.map(formatTemperature) ?? l10n.s.monitorUnavailable))
+            return rows
         case .memory:
             let metric = MonitorMemoryMetric.current
             let memoryValue = metric.value(in: snapshot)
@@ -385,13 +420,24 @@ struct MetricDetailView: View {
             }
             return rows
         case .network:
-            return [
+            let detail = FeatureStrings.monitorDetail(l10n.language)
+            var rows = [
                 row(l10n.s.networkDownload,
                     snapshot.netDownBytesPerSec.map(MetricFormat.bytesPerSec) ?? l10n.s.networkMeasuring),
                 row(l10n.s.networkUpload,
                     snapshot.netUpBytesPerSec.map(MetricFormat.bytesPerSec) ?? l10n.s.networkMeasuring),
-                row(l10n.s.networkThisSession, sessionNetworkText(snapshot)),
             ]
+            if let peakDown = snapshot.netPeakDownBytesPerSec {
+                rows.append(row(detail.peakDownload, MetricFormat.bytesPerSec(peakDown)))
+            }
+            if let peakUp = snapshot.netPeakUpBytesPerSec {
+                rows.append(row(detail.peakUpload, MetricFormat.bytesPerSec(peakUp)))
+            }
+            if let name = snapshot.netInterfaceName, !name.isEmpty {
+                rows.append(row(detail.interface, name))
+            }
+            rows.append(row(l10n.s.networkThisSession, sessionNetworkText(snapshot)))
+            return rows
         case .disk:
             guard let disk = primaryDisk(from: snapshot.disk) else {
                 return [row(l10n.s.diskSection, l10n.s.diskNoDisks)]
@@ -681,7 +727,7 @@ struct MetricDetailView: View {
             let up = row.networkUpBytesPerSec ?? 0
             return "↓\(MetricFormat.bytesPerSecCompact(down)) ↑\(MetricFormat.bytesPerSecCompact(up))"
         default:
-            return String(format: "%.1f%%", row.value)
+            return String(format: "%.1f%%", locale: MetricFormat.locale, row.value)
         }
     }
 
@@ -748,7 +794,8 @@ struct MetricDetailView: View {
     }
 
     private func mbps(_ value: Double) -> String {
-        value >= 100 ? String(format: "%.0f", value) : String(format: "%.1f", value)
+        value >= 100 ? String(format: "%.0f", locale: MetricFormat.locale, value)
+                     : String(format: "%.1f", locale: MetricFormat.locale, value)
     }
 
     private static let memoryFormatter: ByteCountFormatter = {

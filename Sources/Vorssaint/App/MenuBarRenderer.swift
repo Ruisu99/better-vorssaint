@@ -198,6 +198,7 @@ enum MenuBarSegment {
     case networkBlock(down: String, up: String, style: MenuBarBlockStyle)
     case diskActivityBlock(read: String, write: String, style: MenuBarBlockStyle)
     case batteryBlock(percent: Int, isCharging: Bool, style: MenuBarBlockStyle)
+    case batteryGlyph(percent: Int, isCharging: Bool)
     case dot(MemoryPressure)
     case separator
 }
@@ -416,10 +417,11 @@ enum MenuBarRenderer {
                 }
             case .battery:
                 if let charge = snapshot.power?.chargePercent {
-                    let symbol = (snapshot.power?.isCharging ?? false) ? "battery.100.bolt" : metric.symbolName
+                    let isCharging = snapshot.power?.isCharging ?? false
                     let text = "BAT " + percent(Double(charge) / 100.0)
                     items.append(MetricItem(metric: metric,
-                                            segments: [.symbol(symbol), .text(" " + text)],
+                                            segments: [.batteryGlyph(percent: charge, isCharging: isCharging),
+                                                       .text(" " + text)],
                                             width: reservedWidth(for: metric, preset: preset)))
                 }
             case .batteryTime:
@@ -855,6 +857,10 @@ enum MenuBarRenderer {
                 result.append(batteryBlockAttachment(percent: percent,
                                                      isCharging: isCharging,
                                                      style: style))
+            case let .batteryGlyph(percent, isCharging):
+                result.append(batteryGlyphAttachment(percent: percent,
+                                                     isCharging: isCharging,
+                                                     stacked: stacked))
             case let .dot(pressure):
                 result.append(NSAttributedString(string: "●", attributes: [.foregroundColor: nsColor(for: pressure)]))
             case .separator:
@@ -1181,70 +1187,43 @@ enum MenuBarRenderer {
         return ceil(contentWidth + (style == .readable ? 1.5 : 1.0))
     }
 
+    private static func batteryGlyphAttachment(percent: Int,
+                                               isCharging: Bool,
+                                               stacked: Bool) -> NSAttributedString {
+        let scale = MenuBarBatterySupport.Scale.inline(stacked: stacked, enlarged: false)
+        let image = MenuBarBatterySupport.glyphImage(percent: percent,
+                                                     isCharging: isCharging,
+                                                     scale: scale)
+        let attachment = NSTextAttachment()
+        attachment.image = image
+        let size = image.size
+        attachment.bounds = NSRect(x: 0,
+                                   y: stacked ? -1.0 : -1.8,
+                                   width: size.width,
+                                   height: size.height)
+        return NSAttributedString(attachment: attachment)
+    }
+
     private static func batteryBlockImage(percent: Int,
                                           isCharging: Bool,
                                           style: MenuBarBlockStyle) -> NSImage {
         let clampedPercent = max(0, min(100, percent))
-        let cacheKey = "battery|\(clampedPercent)|\(isCharging)|\(style)" as NSString
-        if let cached = blockImageCache.object(forKey: cacheKey) { return cached }
-
-        let symbolName = batterySymbol(for: percent, isCharging: isCharging)
-        let symbolPointSize: CGFloat = style == .readable ? 17.0 : 15.5
         let valueFont = NSFont.monospacedDigitSystemFont(ofSize: style == .readable ? 13.0 : 12.0,
                                                          weight: .semibold)
         let value = "\(clampedPercent)%"
-        let sizingValueAttrs: [NSAttributedString.Key: Any] = [.font: valueFont]
-        let valueSize = (value as NSString).size(withAttributes: sizingValueAttrs)
-        let reservedValueSize = max(valueSize.width, ("100%" as NSString).size(withAttributes: sizingValueAttrs).width)
-        let symbolWidth: CGFloat = style == .readable ? 20 : 18
-        let gap: CGFloat = style == .readable ? 5 : 4
-        let height: CGFloat = style == .readable ? 22 : 20
-        let imageSize = NSSize(width: ceil(symbolWidth + gap + reservedValueSize), height: height)
-        let image = NSImage(size: imageSize, flipped: false) { rect in
-            NSColor.clear.setFill()
-            rect.fill()
-            let symbolConfig = NSImage.SymbolConfiguration(pointSize: symbolPointSize, weight: .regular)
-                .applying(NSImage.SymbolConfiguration(paletteColors: [.labelColor]))
-            if let symbol = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)?
-                .withSymbolConfiguration(symbolConfig) {
-                let symbolSize = symbol.size
-                // draw(in:) stretches the image to exactly fill the rect, so
-                // clamping only the width while leaving height at
-                // the symbol's full natural size squished wide glyphs like
-                // the battery icon. Scale both dimensions together to keep
-                // the glyph's own proportions.
-                let scale = min(symbolWidth / symbolSize.width, 1)
-                let drawSize = NSSize(width: symbolSize.width * scale, height: symbolSize.height * scale)
-                let symbolRect = NSRect(x: 0,
-                                        y: (height - drawSize.height) / 2,
-                                        width: drawSize.width,
-                                        height: drawSize.height)
-                symbol.draw(in: symbolRect)
-            }
-            let valueAttrs = dynamicTextAttributes(font: valueFont)
-            let valueY = (height - valueSize.height) / 2
-            (value as NSString).draw(at: NSPoint(x: symbolWidth + gap, y: valueY),
-                                     withAttributes: valueAttrs)
-            return true
-        }
-        image.isTemplate = false
-        blockImageCache.setObject(image, forKey: cacheKey, cost: blockImageCost(image))
-        return image
+        let reserved = MenuBarMetricSpacing.current == .compact
+            ? MenuBarSpacingSupport.compactReserve(label: "BAT%", value: value)
+            : "100%"
+        return MenuBarBatterySupport.blockImage(percent: clampedPercent,
+                                                isCharging: isCharging,
+                                                percentText: value,
+                                                reservedPercentText: reserved,
+                                                font: valueFont,
+                                                readable: style == .readable)
     }
 
     private static func dynamicTextAttributes(font: NSFont) -> [NSAttributedString.Key: Any] {
         [.font: font, .foregroundColor: NSColor.labelColor]
-    }
-
-    static func batterySymbol(for percent: Int, isCharging: Bool) -> String {
-        if isCharging { return "battery.100.bolt" }
-        switch percent {
-        case 85...: return "battery.100"
-        case 60..<85: return "battery.75"
-        case 35..<60: return "battery.50"
-        case 10..<35: return "battery.25"
-        default: return "battery.0"
-        }
     }
 
     private static func estimatedSnapshot(fanCount: Int) -> SystemSnapshot {

@@ -266,15 +266,23 @@ final class Permissions: ObservableObject {
     /// user's own entries with no privilege, and is the command Apple
     /// documents for the purpose.
     func startOver(_ kind: PermissionKind) {
-        guard kind == .accessibility || kind == .screenRecording,
-              let bundleID = Bundle.main.bundleIdentifier else { return }
+        guard kind == .accessibility || kind == .screenRecording else { return }
         let service = kind == .accessibility ? "Accessibility" : "ScreenCapture"
+        let ids = PermissionTCCReset.bundleIDs(
+            current: Bundle.main.bundleIdentifier,
+            isPersonalFork: AppInfo.isPersonalFork,
+            officialInstalled: PermissionTCCReset.officialVorssaintIsInstalled)
+        guard !ids.isEmpty else { return }
         // Off the main thread through the bounded runner, like
         // `SelfUninstall.resetTCC`: a stuck tccutil must not hang the UI. The
         // hop back also lets the button's click finish before the card that
-        // holds the button is rebuilt by the new request.
+        // holds the button is rebuilt by the new request. Legacy fork ids
+        // are cleared too, or Settings keeps a Vorssaint switch that is on
+        // while this process still has no grant.
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            _ = Shell.run("/usr/bin/tccutil", ["reset", service, bundleID])
+            for id in ids {
+                _ = Shell.run("/usr/bin/tccutil", ["reset", service, id])
+            }
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.refreshActivePermissions()

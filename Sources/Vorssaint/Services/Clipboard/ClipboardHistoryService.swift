@@ -452,10 +452,6 @@ final class ClipboardHistoryService: ObservableObject {
         save()
     }
 
-    func removeSelectedQuickEntry() {
-        removeSelectedQuickEntries()
-    }
-
     /// Where the pointer sat when the keyboard last moved the selection. Rows
     /// scrolling under a still pointer report hover, and hover would otherwise
     /// take the preview back from the row the arrow keys chose.
@@ -546,7 +542,7 @@ final class ClipboardHistoryService: ObservableObject {
     /// What the background pasteboard read hands back to the main thread.
     private enum CapturedContent {
         case files([String])
-        case image((data: Data, width: Int, height: Int))
+        case image((data: Data, width: Int, height: Int), title: String)
         case text(String)
     }
 
@@ -611,7 +607,7 @@ final class ClipboardHistoryService: ObservableObject {
                 guard self.isRunning, !excludedSource, let content else { return }
                 switch content {
                 case .files(let paths): self.promoteFiles(paths)
-                case .image(let image): self.promoteImage(image)
+                case .image(let image, let title): self.promoteImage(image, title: title)
                 case .text(let text): self.promote(text)
                 }
             }
@@ -629,19 +625,29 @@ final class ClipboardHistoryService: ObservableObject {
         if ClipboardHistorySensitiveText.isConcealed((pasteboard.types ?? []).map(\.rawValue)) {
             return nil
         }
-        // Files first: a Finder copy also carries name strings, and a browser
-        // image copy also carries URL text, so richer content wins over its
-        // own textual fallbacks.
+        let title = ClipboardHistoryCaptureSupport.imageTitle(
+            from: ClipboardHistoryPasteboardText.preferredText(
+                webURLString: webURLString(from: pasteboard),
+                plainText: pasteboard.string(forType: .string)
+            )
+        )
+        // Pixels first: a screenshot or browser image also carries a file URL
+        // and leftover text. Keeping the file URL stored a timestamped name
+        // with no picture; keeping the text stored the leftover words alone.
         if includeImagesFiles {
-            if let paths = copiedFilePaths(from: pasteboard) {
-                if ClipboardHistoryCapturePolicy.isCopiedScreenshot(
-                    paths, in: ScreenshotSupport.copiedFilesDirectory()) {
-                    guard let image = copiedPNGImage(from: pasteboard) else { return nil }
-                    return .image(image)
-                }
+            let paths = copiedFilePaths(from: pasteboard)
+            let isScreenshot = ClipboardHistoryCapturePolicy.isCopiedScreenshot(
+                paths ?? [], in: ScreenshotSupport.copiedFilesDirectory())
+            if let image = copiedPNGImage(from: pasteboard)
+                ?? pngImage(fromScreenshotFile: isScreenshot ? paths?.first : nil) {
+                return .image(image, title: title ?? "")
+            }
+            if isScreenshot {
+                return nil
+            }
+            if let paths {
                 return .files(paths)
             }
-            if let image = copiedPNGImage(from: pasteboard) { return .image(image) }
         }
         guard let text = ClipboardHistoryPasteboardText.preferredText(
             webURLString: webURLString(from: pasteboard),
@@ -651,8 +657,8 @@ final class ClipboardHistoryService: ObservableObject {
     }
 
     private static let maxCopiedFiles = 100
-    private static let maxImageBytes = 16 * 1024 * 1024
-    private static let maxRawImageBytes = 64 * 1024 * 1024
+    private static let maxImageBytes = ClipboardHistoryCaptureSupport.maxStoredImageBytes
+    private static let maxRawImageBytes = ClipboardHistoryCaptureSupport.maxRawImageBytes
 
     private static func copiedFilePaths(from pasteboard: NSPasteboard) -> [String]? {
         guard let urls = pasteboard.readObjects(forClasses: [NSURL.self],
@@ -671,24 +677,71 @@ final class ClipboardHistoryService: ObservableObject {
               let rep = NSBitmapImageRep(data: source),
               rep.pixelsWide > 0, rep.pixelsHigh > 0
         else { return nil }
-        let data: Data
-        if let png {
-            data = png
-        } else if let converted = rep.representation(using: .png, properties: [:]) {
-            data = converted
-        } else {
-            return nil
-        }
-        guard data.count <= maxImageBytes else { return nil }
-        return (data, rep.pixelsWide, rep.pixelsHigh)
+        return storedPNG(from: rep, preferredPNG: png)
     }
 
-    private func promoteImage(_ image: (data: Data, width: Int, height: Int)) {
+    private static func pngImage(fromScreenshotFile path: String?)
+        -> (data: Data, width: Int, height: Int)? {
+        guard let path,
+              ClipboardHistoryImageSupport.isImageFilePath(path),
+              let source = try? Data(contentsOf: URL(fileURLWithPath: path)),
+              source.count <= maxRawImageBytes,
+              let rep = NSBitmapImageRep(data: source),
+              rep.pixelsWide > 0, rep.pixelsHigh > 0
+        else { return nil }
+        return storedPNG(from: rep, preferredPNG: source)
+    }
+
+    /// Keep the pixels even when the encoded PNG is larger than the old 16 MB
+    /// budget: a Retina window shot is often 20 MB and used to vanish, leaving
+    /// only leftover pasteboard text.
+    private static func storedPNG(from rep: NSBitmapImageRep,
+                                  preferredPNG: Data?) -> (data: Data, width: Int, height: Int)? {
+        if let preferredPNG, preferredPNG.count <= maxImageBytes {
+            return (preferredPNG, rep.pixelsWide, rep.pixelsHigh)
+        }
+        if let png = rep.representation(using: .png, properties: [:]),
+           png.count <= maxImageBytes {
+            return (png, rep.pixelsWide, rep.pixelsHigh)
+        }
+        return downsampledPNG(from: rep)
+    }
+
+    private static func downsampledPNG(from rep: NSBitmapImageRep)
+        -> (data: Data, width: Int, height: Int)? {
+        guard let cg = rep.cgImage else { return nil }
+        var width = cg.width
+        var height = cg.height
+        for _ in 0..<6 {
+            width = max(1, width / 2)
+            height = max(1, height / 2)
+            guard let context = CGContext(data: nil,
+                                          width: width,
+                                          height: height,
+                                          bitsPerComponent: 8,
+                                          bytesPerRow: 0,
+                                          space: CGColorSpaceCreateDeviceRGB(),
+                                          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+            else { continue }
+            context.interpolationQuality = .medium
+            context.draw(cg, in: CGRect(x: 0, y: 0, width: width, height: height))
+            guard let scaled = context.makeImage() else { continue }
+            let out = NSBitmapImageRep(cgImage: scaled)
+            guard let png = out.representation(using: .png, properties: [:]),
+                  png.count <= maxImageBytes
+            else { continue }
+            return (png, cg.width, cg.height)
+        }
+        return nil
+    }
+
+    private func promoteImage(_ image: (data: Data, width: Int, height: Int), title: String) {
         let hash = Self.sha256Hex(image.data)
+        let label = ClipboardHistoryCaptureSupport.imageTitle(from: title) ?? ""
         if let existing = entries.first(where: { $0.kind == .image && $0.imageHash == hash }) {
             entries.removeAll { $0.id == existing.id }
             insertPromoted(ClipboardHistoryEntry(id: existing.id,
-                                                 text: "",
+                                                 text: label.isEmpty ? existing.text : label,
                                                  copiedAt: Date(),
                                                  pinnedAt: existing.pinnedAt,
                                                  kind: .image,
@@ -698,7 +751,7 @@ final class ClipboardHistoryService: ObservableObject {
                                                  imageHeight: existing.imageHeight))
         } else {
             guard let name = ClipboardImageStore.store(image.data) else { return }
-            insertPromoted(ClipboardHistoryEntry(text: "",
+            insertPromoted(ClipboardHistoryEntry(text: label,
                                                  kind: .image,
                                                  imageFile: name,
                                                  imageHash: hash,
@@ -869,7 +922,8 @@ final class ClipboardHistoryService: ObservableObject {
         normalizeEntryOrder()
         trimToLimit()
         // Sweep image files that lost their entry (crash between write and save).
-        ClipboardImageStore.cleanup(keeping: Set(entries.compactMap(\.imageFile)))
+        ClipboardImageStore.cleanup(keeping: Set(entries.compactMap(\.imageFile)),
+                                    filePaths: Set(entries.flatMap(\.filePaths)))
         // A history read from the legacy blob migrates right away instead of
         // waiting for the next copy: launching once is enough to leave
         // UserDefaults behind.
@@ -910,7 +964,8 @@ final class ClipboardHistoryService: ObservableObject {
                        encoded.entries != snapshot {
                         self.entries = encoded.entries
                     }
-                    ClipboardImageStore.cleanup(keeping: Set(self.entries.compactMap(\.imageFile)))
+                    ClipboardImageStore.cleanup(keeping: Set(self.entries.compactMap(\.imageFile)),
+                                                filePaths: Set(self.entries.flatMap(\.filePaths)))
                 }
             }
             guard let url = Self.storeURL else {
@@ -1201,6 +1256,21 @@ final class ClipboardHistoryService: ObservableObject {
                 self.copySelectedQuickEntryOnly()
                 return nil
             }
+            if let entry = self.selectedQuickEntry,
+               ClipboardImageExport.source(for: entry) != nil {
+                if modifiers == [.command], key == "s" {
+                    ClipboardImageActions.saveToDownloads(entry)
+                    return nil
+                }
+                if modifiers == [.command, .shift], key == "s" {
+                    ClipboardImageActions.saveAs(entry)
+                    return nil
+                }
+                if modifiers == [.command], key == "e" {
+                    ClipboardImageActions.extractText(entry)
+                    return nil
+                }
+            }
             if modifiers == [.command], key == "a",
                ClipboardHistoryBatch.listOwnsSelectAllShortcut(
                    batchCount: self.quickBatchCount,
@@ -1396,10 +1466,17 @@ enum ClipboardImageStore {
         if let cached = fileIcons.object(forKey: path as NSString) { return cached }
         let icon = NSWorkspace.shared.icon(forFile: path)
         fileIcons.setObject(icon, forKey: path as NSString)
+        fileIconPaths = fileIconPaths.filter { fileIcons.object(forKey: $0 as NSString) != nil }
+        fileIconPaths.insert(path)
         return icon
     }
 
-    private static let fileIcons = NSCache<NSString, NSImage>()
+    private static var fileIconPaths: Set<String> = []
+    private static let fileIcons: NSCache<NSString, NSImage> = {
+        let cache = NSCache<NSString, NSImage>()
+        cache.countLimit = 120
+        return cache
+    }()
 
     static func isImageFile(atPath path: String) -> Bool {
         ClipboardHistoryImageSupport.isImageFilePath(path)
@@ -1456,7 +1533,11 @@ enum ClipboardImageStore {
         return ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
     }
 
-    static func cleanup(keeping names: Set<String>) {
+    static func cleanup(keeping names: Set<String>, filePaths: Set<String>) {
+        for path in fileIconPaths where !filePaths.contains(path) {
+            fileIcons.removeObject(forKey: path as NSString)
+        }
+        fileIconPaths.formIntersection(filePaths)
         guard let directory,
               let files = try? FileManager.default.contentsOfDirectory(at: directory,
                                                                        includingPropertiesForKeys: nil)

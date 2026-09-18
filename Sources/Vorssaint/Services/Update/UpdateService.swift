@@ -27,7 +27,7 @@ final class UpdateService: ObservableObject {
     /// preview. Set alongside `.available`; cleared otherwise.
     @Published private(set) var availableNotes: String?
 
-    private let repository = "vorssaintapp/vorssaint-utils"
+    private let repository = "vorssaint/vorssaint-utils"
     private var downloadURL: URL?
     /// Size the release advertises for the asset, used to bound the download.
     private var downloadExpectedBytes: Int64?
@@ -62,6 +62,14 @@ final class UpdateService: ObservableObject {
     /// Called at launch: checks shortly after start and then daily, if enabled.
     func startAutomaticChecks() {
         consumeInstallResult()
+        // Official GitHub releases would replace this fork with Vorssaint.app.
+        // Better Vorssaint is updated by the personal zip, never by that DMG.
+        if AppInfo.isPersonalFork {
+            UserDefaults.standard.set(false, forKey: DefaultsKey.autoCheckUpdates)
+            state = .upToDate
+            availableNotes = nil
+            return
+        }
         if AppInfo.isBeta && UserDefaults.standard.object(forKey: DefaultsKey.includeBetaUpdates) == nil {
             UserDefaults.standard.set(true, forKey: DefaultsKey.includeBetaUpdates)
         }
@@ -100,6 +108,12 @@ final class UpdateService: ObservableObject {
     // MARK: - Check
 
     func check(manual: Bool) {
+        if AppInfo.isPersonalFork {
+            state = .upToDate
+            availableNotes = nil
+            lastChecked = Date()
+            return
+        }
         if AppInfo.isDeveloperBuild {
             // No real update target; reflect the simulation default so the
             // notification UI can be exercised locally.
@@ -193,6 +207,7 @@ final class UpdateService: ObservableObject {
     /// or the panel opens, so a new release surfaces promptly without hammering the
     /// API. The hourly timer is the floor; this makes it feel immediate.
     func checkIfStale(maxAge: TimeInterval = 15 * 60) {
+        if AppInfo.isPersonalFork { return }
         if AppInfo.isDeveloperBuild { return }
         guard autoCheckEnabled else { return }
         switch state {
@@ -206,6 +221,7 @@ final class UpdateService: ObservableObject {
     // MARK: - Download & install
 
     func downloadAndInstall() {
+        if AppInfo.isPersonalFork { return }
         if AppInfo.isDeveloperBuild { return }  // never replace the local dev build over itself
         guard let downloadURL else { return }
         // Pre-flight BEFORE spending the download: a translocated app or one
@@ -474,7 +490,10 @@ final class UpdateService: ObservableObject {
     }
 }
 
-private final class BoundedUpdateDownloadDelegate: NSObject, URLSessionDataDelegate {
+/// Writes a response to a scratch file and abandons it once it passes
+/// `byteLimit`, so a body that never ends cannot fill the disk. Shared by the
+/// app update download and the What's New showcase video.
+final class BoundedUpdateDownloadDelegate: NSObject, URLSessionDataDelegate {
     private let byteLimit: Int64
     private let progress: (Int64, Int64?) -> Void
     private let completion: (URL?, URLResponse?, Error?) -> Void

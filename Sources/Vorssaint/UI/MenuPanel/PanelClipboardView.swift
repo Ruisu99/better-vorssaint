@@ -157,9 +157,17 @@ struct PanelClipboardView: View {
                         .frame(maxWidth: 110, maxHeight: 40)
                         .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
                 }
-                Text("\(text.imageEntryLabel) · \(entry.imageDimensionsLabel)")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    if !entry.text.isEmpty {
+                        Text(entry.preview)
+                            .font(.system(size: 10.5))
+                            .lineLimit(2)
+                            .truncationMode(.tail)
+                    }
+                    Text("\(text.imageEntryLabel) · \(entry.imageDimensionsLabel)")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                }
             }
         case .files:
             if entry.filePaths.count == 1,
@@ -247,6 +255,26 @@ struct PanelClipboardView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.mini)
+                if ClipboardImageExport.source(for: entry) != nil {
+                    Button {
+                        ClipboardImageActions.saveToDownloads(entry)
+                    } label: {
+                        Image(systemName: "square.and.arrow.down")
+                            .font(.system(size: 10, weight: .bold))
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.mini)
+                    .help(text.saveToDownloads)
+                    Button {
+                        ClipboardImageActions.extractText(entry)
+                    } label: {
+                        Image(systemName: "text.viewfinder")
+                            .font(.system(size: 10, weight: .bold))
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.mini)
+                    .help(text.extractText)
+                }
                 Button {
                     history.remove(entry)
                 } label: {

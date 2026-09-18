@@ -379,12 +379,22 @@ private struct QuickEntryRow: View, Equatable {
                         .frame(maxWidth: 240, maxHeight: 120)
                         .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                 }
-                Text("\(text.imageEntryLabel) · \(entry.imageDimensionsLabel)")
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    if !entry.text.isEmpty {
+                        Text(entry.preview)
+                            .font(.system(size: 12))
+                            .lineLimit(2)
+                            .truncationMode(.tail)
+                    }
+                    Text("\(text.imageEntryLabel) · \(entry.imageDimensionsLabel)")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(.secondary)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .help("\(text.imageEntryLabel) · \(entry.imageDimensionsLabel)")
+            .help(entry.text.isEmpty
+                  ? "\(text.imageEntryLabel) · \(entry.imageDimensionsLabel)"
+                  : "\(entry.preview)\n\(text.imageEntryLabel) · \(entry.imageDimensionsLabel)")
         case .files:
             if entry.filePaths.count == 1,
                let path = entry.filePaths.first,
@@ -446,6 +456,28 @@ private struct QuickEntryRow: View, Equatable {
                 }
                 .buttonStyle(.plain)
                 .help(text.copy)
+                if ClipboardImageExport.source(for: entry) != nil {
+                    Button {
+                        ClipboardImageActions.saveToDownloads(entry)
+                    } label: {
+                        Image(systemName: "square.and.arrow.down")
+                            .font(.system(size: 10.5, weight: .semibold))
+                            .frame(width: 24, height: 24)
+                            .background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 6))
+                    }
+                    .buttonStyle(.plain)
+                    .help(text.saveToDownloads)
+                    Button {
+                        ClipboardImageActions.extractText(entry)
+                    } label: {
+                        Image(systemName: "text.viewfinder")
+                            .font(.system(size: 10.5, weight: .semibold))
+                            .frame(width: 24, height: 24)
+                            .background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 6))
+                    }
+                    .buttonStyle(.plain)
+                    .help(text.extractText)
+                }
                 Menu {
                     entryActions(entry)
                 } label: {
@@ -479,6 +511,17 @@ private struct QuickEntryRow: View, Equatable {
         }
         Button(text.copy) {
             history.copyOnlyQuickEntry(entry)
+        }
+        if ClipboardImageExport.source(for: entry) != nil {
+            Button(text.saveToDownloads) {
+                ClipboardImageActions.saveToDownloads(entry)
+            }
+            Button(text.saveAs) {
+                ClipboardImageActions.saveAs(entry)
+            }
+            Button(text.extractText) {
+                ClipboardImageActions.extractText(entry)
+            }
         }
         Divider()
         Button(entry.isPinned ? text.unpin : text.pin) {

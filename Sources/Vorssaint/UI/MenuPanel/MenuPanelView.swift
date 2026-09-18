@@ -83,7 +83,6 @@ struct MenuPanelView: View {
     @State private var updateBannerHeight: CGFloat = 0
     @State private var selectedSection: PanelSectionID = PanelLayout.order.first ?? .keepAwake
     @State private var selectedMetric: MetricDetailKind?
-    @FocusState private var focusedSection: PanelSectionID?
 
     /// Cap the panel to the usable screen height so it never overflows the menu
     /// bar; taller content scrolls inside. Measured against the display the
@@ -126,9 +125,6 @@ struct MenuPanelView: View {
         .onChange(of: panelFocus.request) { _, request in
             applyFocus(request)
         }
-        .onChange(of: focusedSection) { _, section in
-            if let section { selectedSection = section }
-        }
     }
 
     private var monitorNeeds: SystemMonitorPanelNeeds {
@@ -157,9 +153,7 @@ struct MenuPanelView: View {
             guard isSectionVisible(section) else { return }
             selectedMetric = nil
             selectedSection = section
-            focusedSection = section
         case .metric(let metric):
-            focusedSection = nil
             selectedMetric = metric
             selectedSection = metric.panelSection
         }
@@ -256,8 +250,8 @@ struct MenuPanelView: View {
         case .keepAwake: return 250
         case .brightness: return 140
         case .mixer: return 250
-        case .system: return 460
-        case .network: return 190
+        case .system: return 560
+        case .network: return 260
         case .disk: return 360
         case .power: return 170
         case .fanControl: return 220
@@ -270,8 +264,8 @@ struct MenuPanelView: View {
     private var estimatedMetricContentHeight: CGFloat {
         guard let selectedMetric else { return 320 }
         switch selectedMetric {
-        case .cpu, .gpu, .memory: return 430
-        case .network: return 330
+        case .cpu, .gpu, .memory: return 520
+        case .network: return 400
         case .disk: return 360
         case .battery, .power: return 360
         case .fan: return 240
@@ -323,7 +317,6 @@ struct MenuPanelView: View {
                 let isActive = activeSection == id
                 Button {
                     selectedSection = id
-                    focusedSection = id
                 } label: {
                     Image(systemName: id.symbolName)
                         .font(.system(size: 13.5, weight: .semibold))
@@ -332,7 +325,7 @@ struct MenuPanelView: View {
                         .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 }
                 .buttonStyle(.plain)
-                .focused($focusedSection, equals: id)
+                .focusable(false)
                 .foregroundStyle(isActive ? Color.accentColor : Color.secondary.opacity(0.86))
                 .background(
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -500,7 +493,7 @@ private enum UtilityPanelItem: String, PanelOrderItem, Identifiable {
     // are migrated once without disturbing the rest of the user's layout.
     case screenshot, quickLauncher, appUpdates, cleaner, homebrew, media, clipboard, windowLayout,
          uninstaller, cleanURL, cleaning, screenOCR, colorPicker, cameraPreview, scratchpad,
-         commandBar, screenRecorder
+         commandBar, screenRecorder, quickAI
 
     var id: String { rawValue }
 
@@ -525,6 +518,7 @@ private enum UtilityPanelItem: String, PanelOrderItem, Identifiable {
         case .cameraPreview: return .cameraPreview
         case .scratchpad: return .scratchpad
         case .commandBar: return .commandBar
+        case .quickAI: return .quickAI
         }
     }
 }
@@ -558,6 +552,7 @@ struct UtilitiesSection: View {
     @AppStorage(DefaultsKey.panelUtilityCameraPreview) private var showCameraPreview = true
     @AppStorage(DefaultsKey.panelUtilityScratchpad) private var showScratchpad = true
     @AppStorage(DefaultsKey.panelUtilityCommandBar) private var showCommandBar = true
+    @AppStorage(DefaultsKey.panelUtilityQuickAI) private var showQuickAI = true
     @AppStorage(DefaultsKey.panelUtilityScreenRecorder) private var showScreenRecorder = true
     @ObservedObject private var recorder = ScreenRecorderService.shared
     @AppStorage(DefaultsKey.clipboardHistoryEnabled) private var clipboardEnabled = false
@@ -714,6 +709,7 @@ struct UtilitiesSection: View {
         case .cameraPreview: return showCameraPreview
         case .scratchpad: return showScratchpad
         case .commandBar: return showCommandBar
+        case .quickAI: return showQuickAI
         case .quickLauncher: return showQuickLauncher
         case .screenshot: return showScreenshot
         case .screenRecorder: return showScreenRecorder
@@ -789,7 +785,7 @@ struct UtilitiesSection: View {
         case .cleaner:
             UtilityActionButton(title: l10n.s.cleanerName,
                                 caption: l10n.s.cleanerPanelCaption,
-                                systemImage: "sparkle",
+                                systemImage: "sparkles",
                                 isEditing: editing,
                                 showsDragHandle: true,
                                 visibility: $showCleanerAction,
@@ -949,6 +945,19 @@ struct UtilitiesSection: View {
                                     appDelegate()?.closePopover()
                                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
                                         CommandBarService.shared.show()
+                                    }
+                                })
+        case .quickAI:
+            UtilityActionButton(title: FeatureStrings.quickAI(l10n.language).pageTitle,
+                                caption: FeatureStrings.quickAI(l10n.language).panelCaption,
+                                systemImage: "sparkle",
+                                isEditing: editing,
+                                showsDragHandle: true,
+                                visibility: $showQuickAI,
+                                action: {
+                                    appDelegate()?.closePopover()
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                                        QuickAIService.shared.showWindow()
                                     }
                                 })
         }
@@ -2401,6 +2410,8 @@ struct KeepAwakeCard: View {
     @AppStorage(DefaultsKey.keepAwakeAllowDisplaySleep) private var keepAwakeAllowDisplaySleep = false
     @AppStorage(DefaultsKey.keepAwakeExternalDisplay) private var keepAwakeExternalDisplay = false
     @AppStorage(DefaultsKey.keepAwakeConnectedToPower) private var keepAwakeConnectedToPower = false
+    @AppStorage(DefaultsKey.keepAwakeRunningApps) private var keepAwakeRunningApps = false
+    @AppStorage(DefaultsKey.keepAwakePauseWhenLocked) private var keepAwakePauseWhenLocked = false
     @AppStorage(DefaultsKey.keepAwakeIconTint) private var keepAwakeIconTint = KeepAwakeIconTint.orange.rawValue
     @AppStorage(DefaultsKey.keepAwakeActiveIcon) private var keepAwakeActiveIcon = KeepAwakeActiveIcon.vorssaint.rawValue
     @AppStorage(DefaultsKey.keepAwakeMouseJiggleEnabled) private var keepAwakeMouseJiggle = false
@@ -2543,8 +2554,15 @@ struct KeepAwakeCard: View {
             .buttonStyle(.plain)
 
             if automationExpanded {
-                KeepAwakeAutomationEditor(compact: true)
-                    .padding(.leading, 22)
+                VStack(alignment: .leading, spacing: 8) {
+                    KeepAwakeAutomationEditor(compact: true)
+                    compactOptionToggle(
+                        icon: "lock.fill",
+                        title: automationStrings.pauseWhenLockedToggle,
+                        isOn: $keepAwakePauseWhenLocked
+                    )
+                }
+                .padding(.leading, 22)
             }
         }
     }
@@ -2552,7 +2570,9 @@ struct KeepAwakeCard: View {
     @ViewBuilder
     private var automationSummaryBadges: some View {
         if !keepAwakeExternalDisplay,
-           !keepAwakeConnectedToPower {
+           !keepAwakeConnectedToPower,
+           !keepAwakeRunningApps,
+           !keepAwakePauseWhenLocked {
             Text(automationStrings.automationOff)
                 .font(.system(size: 9.5, weight: .medium))
                 .foregroundStyle(.tertiary)
@@ -2563,6 +2583,12 @@ struct KeepAwakeCard: View {
                 }
                 if keepAwakeConnectedToPower {
                     automationSystemBadge("powerplug.fill")
+                }
+                if keepAwakeRunningApps {
+                    automationSystemBadge("app.fill")
+                }
+                if keepAwakePauseWhenLocked {
+                    automationSystemBadge("lock.fill")
                 }
             }
         }

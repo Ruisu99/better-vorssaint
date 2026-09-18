@@ -120,6 +120,12 @@ struct ClipboardEntryPreviewSidebar: View {
                     .frame(maxWidth: .infinity)
                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             }
+            if !entry.text.isEmpty {
+                Text(entry.text)
+                    .font(.system(size: 12))
+                    .textSelection(.enabled)
+                    .lineLimit(4)
+            }
             Text("\(text.imageEntryLabel) · \(entry.imageDimensionsLabel)")
                 .font(.system(size: 10.5))
                 .foregroundStyle(.secondary)
@@ -274,6 +280,20 @@ struct ClipboardEntryPreviewSidebar: View {
                     Button(text.edit) {
                         beginEditing(entry)
                     }
+                }
+                if ClipboardImageExport.source(for: entry) != nil {
+                    Button {
+                        ClipboardImageActions.saveToDownloads(entry)
+                    } label: {
+                        Image(systemName: "square.and.arrow.down")
+                    }
+                    .help(text.saveToDownloads)
+                    Button {
+                        ClipboardImageActions.extractText(entry)
+                    } label: {
+                        Image(systemName: "text.viewfinder")
+                    }
+                    .help(text.extractText)
                 }
                 Button(text.copy) {
                     ClipboardHistoryService.shared.copyOnlyQuickEntry(entry)

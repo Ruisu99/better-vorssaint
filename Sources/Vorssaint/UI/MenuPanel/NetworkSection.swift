@@ -23,7 +23,7 @@ struct NetworkSection: View {
     @State private var lastAppRefresh = Date.distantPast
     @State private var appRefreshSerial = 0
     @State private var networkMonitoringActive = false
-    private let appLimit = 6
+    private let appLimit = 10
 
     var body: some View {
         PanelSection(.network, title: l10n.s.networkSection, collapsible: collapsible,
@@ -173,20 +173,26 @@ struct NetworkSection: View {
                         PanelInlineHideButton(isVisible: $netSpeed)
                     }
                 }
-                HStack(spacing: 10) {
-                    rateColumn(icon: "arrow.down",
-                               label: l10n.s.networkDownload,
-                               value: monitor.snapshot.netDownBytesPerSec,
-                               color: .accentColor)
-                    Divider().frame(height: 28)
-                    rateColumn(icon: "arrow.up",
-                               label: l10n.s.networkUpload,
-                               value: monitor.snapshot.netUpBytesPerSec,
-                               color: PanelMetricColor.green(for: colorScheme))
-                }
-                if showGraph, monitor.snapshot.netDownHistory.count >= 2 {
-                    graph
-                }
+            HStack(spacing: 10) {
+                rateColumn(icon: "arrow.down",
+                           label: l10n.s.networkDownload,
+                           value: monitor.snapshot.netDownBytesPerSec,
+                           color: .accentColor)
+                Divider().frame(height: 28)
+                rateColumn(icon: "arrow.up",
+                           label: l10n.s.networkUpload,
+                           value: monitor.snapshot.netUpBytesPerSec,
+                           color: PanelMetricColor.green(for: colorScheme))
+            }
+            if let name = monitor.snapshot.netInterfaceName, !name.isEmpty {
+                Text("\(FeatureStrings.monitorDetail(l10n.language).interface)  \(name)")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+            }
+            peakRow
+            if showGraph, monitor.snapshot.netDownHistory.count >= 2 {
+                graph
+            }
             }
         }
     }
@@ -222,7 +228,28 @@ struct NetworkSection: View {
                       maxValue: peak,
                       fillOpacity: 0.08)
         }
-        .frame(height: 30)
+        .frame(height: 44)
+    }
+
+    @ViewBuilder
+    private var peakRow: some View {
+        let detail = FeatureStrings.monitorDetail(l10n.language)
+        let peakDown = monitor.snapshot.netPeakDownBytesPerSec
+        let peakUp = monitor.snapshot.netPeakUpBytesPerSec
+        if peakDown != nil || peakUp != nil {
+            HStack {
+                if let peakDown {
+                    Text("\(detail.peakDownload) \(MetricFormat.bytesPerSecCompact(peakDown))")
+                }
+                Spacer(minLength: 0)
+                if let peakUp {
+                    Text("\(detail.peakUpload) \(MetricFormat.bytesPerSecCompact(peakUp))")
+                }
+            }
+            .font(.system(size: 10))
+            .foregroundStyle(.tertiary)
+            .monospacedDigit()
+        }
     }
 
     @ViewBuilder
@@ -301,7 +328,8 @@ struct NetworkSection: View {
     }
 
     private func mbps(_ value: Double) -> String {
-        value >= 100 ? String(format: "%.0f", value) : String(format: "%.1f", value)
+        value >= 100 ? String(format: "%.0f", locale: MetricFormat.locale, value)
+                     : String(format: "%.1f", locale: MetricFormat.locale, value)
     }
 
     private func startNetworkMonitoringIfNeeded() {

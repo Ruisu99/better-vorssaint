@@ -10,6 +10,7 @@ struct NetworkReading {
     var upBytesPerSec: Double?
     var totalDown: UInt64          // accumulated since the app started watching
     var totalUp: UInt64
+    var interfaceName: String?
 }
 
 /// Samples cumulative interface byte counters and derives speed + session totals.
@@ -17,32 +18,45 @@ struct NetworkReading {
 /// monitor's serial queue, so no extra synchronization is needed.
 final class NetworkSampler {
     private var previous: (counters: NetworkCounters, time: TimeInterval)?
+    private var previousByName: [String: NetworkCounters] = [:]
+    private var lastInterfaceName: String?
     private var totalDown: UInt64 = 0
     private var totalUp: UInt64 = 0
     private var counterFallback = NetworkCounterFallback()
     private var processDeltaTracker = NetworkProcessDeltaTracker(maxGap: 30)
-    private let counterReader: () -> NetworkCounters
+    private let counterReader: () -> NetworkCounters?
     private let processReader: () -> [NetworkProcessSample]?
+    private let tracksInterfaces: Bool
 
     /// After a gap longer than this (sampling was paused), the previous reading
     /// is treated as a fresh baseline instead of producing a misleading spike.
     private static let maxGap: TimeInterval = 10
 
-    init(counterReader: @escaping () -> NetworkCounters = NetworkSampler.readCounters,
+    init(counterReader: @escaping () -> NetworkCounters? = NetworkSampler.readCounters,
          processReader: @escaping () -> [NetworkProcessSample]? = {
              NetworkProcessSupport.currentExternalActivitySamples()
-         }) {
+         },
+         tracksInterfaces: Bool = false) {
         self.counterReader = counterReader
         self.processReader = processReader
+        self.tracksInterfaces = tracksInterfaces
     }
 
     func sample(now: TimeInterval) -> NetworkReading {
-        let counters = counterReader()
+        let snapshot = tracksInterfaces ? Self.readInterfaceSnapshot() : nil
+        guard let counters = snapshot?.totals ?? counterReader() else {
+            return NetworkReading(downBytesPerSec: nil, upBytesPerSec: nil,
+                                  totalDown: totalDown, totalUp: totalUp,
+                                  interfaceName: lastInterfaceName)
+        }
         defer { previous = (counters, now) }
 
         guard let prev = previous, now > prev.time, now - prev.time <= Self.maxGap else {
+            counterFallback.reset()
+            processDeltaTracker.reset()
             return NetworkReading(downBytesPerSec: nil, upBytesPerSec: nil,
-                                  totalDown: totalDown, totalUp: totalUp)
+                                  totalDown: totalDown, totalUp: totalUp,
+                                  interfaceName: lastInterfaceName)
         }
 
         let elapsed = now - prev.time
@@ -70,9 +84,15 @@ final class NetworkSampler {
         if counters.sent >= prev.counters.sent {
             totalUp += counters.sent - prev.counters.sent
         }
+        if let snapshot {
+            lastInterfaceName = Self.busiestInterface(previous: previousByName, current: snapshot.byName)
+                ?? lastInterfaceName
+            previousByName = snapshot.byName
+        }
         return NetworkReading(downBytesPerSec: processDown ?? interfaceSpeed.down,
                               upBytesPerSec: interfaceSpeed.up,
-                              totalDown: totalDown, totalUp: totalUp)
+                              totalDown: totalDown, totalUp: totalUp,
+                              interfaceName: lastInterfaceName)
     }
 
     private func accumulate(rate: Double, elapsed: TimeInterval, into total: inout UInt64) {
@@ -90,19 +110,49 @@ final class NetworkSampler {
     /// Sums received/sent bytes across the physical interfaces via the routing
     /// socket (`NET_RT_IFLIST2`), which reports 64-bit counters in `if_data64` —
     /// unlike `getifaddrs`, whose 32-bit counters wrap and corrupt totals.
-    static func readCounters() -> NetworkCounters {
+    static func readCounters() -> NetworkCounters? {
+        readInterfaceSnapshot()?.totals
+    }
+
+    static func busiestInterface(previous: [String: NetworkCounters],
+                                 current: [String: NetworkCounters]) -> String? {
+        var bestName: String?
+        var bestDelta: UInt64 = 0
+        for (name, counters) in current {
+            let prior = previous[name]
+            let down = counters.received >= (prior?.received ?? counters.received)
+                ? counters.received - (prior?.received ?? counters.received) : 0
+            let up = counters.sent >= (prior?.sent ?? counters.sent)
+                ? counters.sent - (prior?.sent ?? counters.sent) : 0
+            let delta = down + up
+            if delta > bestDelta {
+                bestDelta = delta
+                bestName = name
+            }
+        }
+        if bestDelta > 0 { return bestName }
+        return current.max { lhs, rhs in
+            (lhs.value.received + lhs.value.sent) < (rhs.value.received + rhs.value.sent)
+        }?.key
+    }
+
+    /// Sums received/sent bytes across the physical interfaces via the routing
+    /// socket (`NET_RT_IFLIST2`), which reports 64-bit counters in `if_data64` —
+    /// unlike `getifaddrs`, whose 32-bit counters wrap and corrupt totals.
+    static func readInterfaceSnapshot() -> (totals: NetworkCounters, byName: [String: NetworkCounters])? {
         var mib: [Int32] = [CTL_NET, PF_ROUTE, 0, 0, NET_RT_IFLIST2, 0]
         var length = 0
         guard sysctl(&mib, 6, nil, &length, nil, 0) == 0, length > 0 else {
-            return NetworkCounters()
+            return nil
         }
 
         var buffer = [UInt8](repeating: 0, count: length)
         guard sysctl(&mib, 6, &buffer, &length, nil, 0) == 0 else {
-            return NetworkCounters()
+            return nil
         }
 
         var result = NetworkCounters()
+        var byName: [String: NetworkCounters] = [:]
         buffer.withUnsafeBytes { raw in
             guard let base = raw.baseAddress else { return }
             var offset = 0
@@ -121,14 +171,17 @@ final class NetworkSampler {
                     if if_indextoname(UInt32(info.ifm_index), &nameBuffer) != nil {
                         let name = String(cString: nameBuffer)
                         if MetricFormat.includeNetworkInterface(name) {
-                            result.received += info.ifm_data.ifi_ibytes
-                            result.sent += info.ifm_data.ifi_obytes
+                            let received = info.ifm_data.ifi_ibytes
+                            let sent = info.ifm_data.ifi_obytes
+                            result.received += received
+                            result.sent += sent
+                            byName[name] = NetworkCounters(received: received, sent: sent)
                         }
                     }
                 }
                 offset += messageLength
             }
         }
-        return result
+        return (result, byName)
     }
 }

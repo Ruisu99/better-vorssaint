@@ -19,7 +19,7 @@ enum BreakdownKind {
 
 /// The "System" section of the panel: component temperatures, hardware usage
 /// and memory pressure, only the readings that matter, presented cleanly.
-/// Tapping CPU, GPU, Battery or Memory expands the top consumers of that resource.
+/// Tapping CPU, GPU or Memory expands the top consumers of that resource.
 struct SystemSection: View {
     @ObservedObject private var l10n = L10n.shared
     @ObservedObject private var monitor = SystemMonitor.shared
@@ -35,13 +35,10 @@ struct SystemSection: View {
     @AppStorage(DefaultsKey.monitorGraphCPU) private var graphCPU = true
     @AppStorage(DefaultsKey.monitorGraphGPU) private var graphGPU = true
     @AppStorage(DefaultsKey.monitorGraphMemory) private var graphMemory = true
-    @AppStorage(DefaultsKey.monitorGraphBattery) private var graphBattery = true
     @AppStorage(DefaultsKey.temperatureUnit) private var temperatureUnit = TemperatureUnit.celsius.rawValue
-    @AppStorage(DefaultsKey.menuBarPeripheralBattery) private var menuBarPeripheralBattery = false
     @AppStorage(DefaultsKey.monitorSysTemps) private var sysTemps = true
     @AppStorage(DefaultsKey.monitorSysCPU) private var sysCPU = true
     @AppStorage(DefaultsKey.monitorSysGPU) private var sysGPU = true
-    @AppStorage(DefaultsKey.monitorSysBattery) private var sysBattery = true
     @AppStorage(DefaultsKey.monitorSysMemory) private var sysMemory = true
     @AppStorage(DefaultsKey.monitorSysAlerts) private var sysAlerts = true
     @AppStorage(DefaultsKey.monitorSysUptime) private var sysUptime = true
@@ -96,14 +93,9 @@ struct SystemSection: View {
     private var cpuAvailable: Bool { AppFeature.monitorCPU.isAvailable }
     private var gpuAvailable: Bool { AppFeature.monitorGPU.isAvailable }
     private var memoryAvailable: Bool { AppFeature.monitorMemory.isAvailable }
-    private var powerAvailable: Bool { AppFeature.monitorPower.isAvailable }
-    private var batteryAvailable: Bool {
-        powerAvailable && PowerSampler.hasInternalBattery
-    }
 
     private var usageVisible: Bool {
         (sysCPU && cpuAvailable) || (sysGPU && gpuAvailable)
-            || (sysBattery && batteryAvailable && monitor.snapshot.power?.chargePercent != nil)
     }
 
     private var visibleBlocks: [Block] {
@@ -116,7 +108,7 @@ struct SystemSection: View {
 
     private func isBlockAvailable(_ block: Block) -> Bool {
         switch block {
-        case .temps, .usage: return cpuAvailable || gpuAvailable || batteryAvailable
+        case .temps, .usage: return cpuAvailable || gpuAvailable
         case .memory: return memoryAvailable
         case .alerts, .uptime: return true
         }
@@ -153,7 +145,6 @@ struct SystemSection: View {
         sysTemps = true
         sysCPU = true
         sysGPU = true
-        sysBattery = true
         sysMemory = true
         sysAlerts = true
         sysUptime = true
@@ -237,7 +228,8 @@ struct SystemSection: View {
     }
 
     private func breakdownValue(_ row: ProcessUsage, for kind: BreakdownKind) -> String {
-        kind == .memory ? formatMemory(UInt64(row.value)) : String(format: "%.1f%%", row.value)
+        kind == .memory ? formatMemory(UInt64(row.value))
+                        : String(format: "%.1f%%", locale: MetricFormat.locale, row.value)
     }
 
     // MARK: Temperatures
@@ -266,14 +258,9 @@ struct SystemSection: View {
                         temperatureCell(icon: "memorychip", label: l10n.s.gpuLabel,
                                         value: monitor.snapshot.gpuTemperature)
                     }
-                    if batteryAvailable {
-                        temperatureCell(icon: "battery.100", label: l10n.s.batteryLabel,
-                                        value: monitor.snapshot.batteryTemperature)
-                    }
                 }
                 if monitor.snapshot.cpuTemperature == nil,
-                   monitor.snapshot.gpuTemperature == nil,
-                   monitor.snapshot.batteryTemperature == nil {
+                   monitor.snapshot.gpuTemperature == nil {
                     Text(l10n.s.monitorUnavailable)
                         .font(.system(size: 10))
                         .foregroundStyle(.tertiary)
@@ -322,12 +309,17 @@ struct SystemSection: View {
             if sysCPU, cpuAvailable {
                 usageRow(label: l10n.s.cpuLabel, fraction: monitor.snapshot.cpuUsage,
                          kind: .cpu, editing: editing, visible: $sysCPU)
+                cpuShareBreakdown
                 if graphCPU, monitor.snapshot.cpuHistory.count >= 2 {
                     Sparkline(values: monitor.snapshot.cpuHistory,
                               color: .accentColor,
                               maxValue: 1,
                               showsZeroBaseline: true)
-                        .frame(height: 22)
+                        .frame(height: 28)
+                }
+                cpuMetaRow
+                if !monitor.snapshot.cpuCoreUsage.isEmpty {
+                    CoreUsageGrid(values: monitor.snapshot.cpuCoreUsage)
                 }
                 breakdownList(for: .cpu)
             } else if editing, cpuAvailable {
@@ -336,133 +328,22 @@ struct SystemSection: View {
             if sysGPU, gpuAvailable {
                 usageRow(label: l10n.s.gpuLabel, fraction: monitor.snapshot.gpuUsage,
                          kind: .gpu, editing: editing, visible: $sysGPU)
+                gpuShareBreakdown
                 if graphGPU, monitor.snapshot.gpuHistory.count >= 2 {
                     Sparkline(values: monitor.snapshot.gpuHistory,
                               color: PanelMetricColor.cyan(for: colorScheme),
                               maxValue: 1,
                               showsZeroBaseline: true)
-                        .frame(height: 22)
+                        .frame(height: 28)
                 }
                 breakdownList(for: .gpu)
             } else if editing, gpuAvailable {
                 PanelHiddenItemRow(title: l10n.s.gpuLabel, systemImage: "memorychip", isVisible: $sysGPU)
             }
-            if sysBattery, batteryAvailable {
-                batteryUsageRow(editing: editing)
-            } else if editing, batteryAvailable {
-                PanelHiddenItemRow(title: l10n.s.batteryLabel,
-                                   systemImage: "battery.100",
-                                   isVisible: $sysBattery)
-            }
-            if menuBarPeripheralBattery, powerAvailable, !monitor.snapshot.peripheralBatteries.isEmpty {
-                peripheralBatteryRows
-            }
         }
     }
 
-    // MARK: Battery (charge level, next to CPU/GPU) and uptime
-
-    @ViewBuilder
-    private func batteryUsageRow(editing: Bool) -> some View {
-        if let charge = monitor.snapshot.power?.chargePercent {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 8) {
-                    Image(systemName: (monitor.snapshot.power?.isCharging ?? false) ? "bolt.fill" : "battery.100")
-                        .font(.system(size: 9))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 10)
-                    Text(l10n.s.batteryLabel)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                        .frame(width: 52, alignment: .leading)
-                    UsageBar(fraction: Double(charge) / 100, tint: chargeTint(charge))
-                    Text("\(charge)%")
-                        .font(.system(size: 11, weight: .medium))
-                        .monospacedDigit()
-                        .frame(width: 38, alignment: .trailing)
-                    if editing {
-                        PanelInlineHideButton(isVisible: $sysBattery)
-                    }
-                }
-                if graphBattery, monitor.snapshot.batteryHistory.count >= 2 {
-                    Sparkline(values: monitor.snapshot.batteryHistory,
-                              color: PanelMetricColor.green(for: colorScheme),
-                              maxValue: 1,
-                              showsZeroBaseline: true)
-                        .frame(height: 22)
-                }
-                energyAppsHeader
-                breakdownList(for: .energy)
-            }
-        }
-    }
-
-    private var peripheralBatteryRows: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            subsectionLabel(l10n.s.monitorShowPeripheralBattery)
-            ForEach(PeripheralBatterySupport.sorted(monitor.snapshot.peripheralBatteries).prefix(5)) { device in
-                HStack(spacing: 8) {
-                    Image(systemName: peripheralIcon(for: device.kind))
-                        .font(.system(size: 9))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 10)
-                    Text(device.name)
-                        .font(.system(size: 10.5, weight: .medium))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                    Spacer(minLength: 8)
-                    Text("\(device.percent)%")
-                        .font(.system(size: 10.5, weight: .semibold))
-                        .monospacedDigit()
-                }
-            }
-            let extra = max(0, monitor.snapshot.peripheralBatteries.count - 5)
-            if extra > 0 {
-                Text("+\(extra)")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.tertiary)
-            }
-        }
-    }
-
-    private func peripheralIcon(for kind: PeripheralBatteryKind) -> String {
-        switch kind {
-        case .keyboard: return "keyboard"
-        case .mouse: return "computermouse"
-        case .trackpad: return "rectangle.and.hand.point.up.left"
-        case .audio: return "headphones"
-        case .device: return "battery.100"
-        }
-    }
-
-    private var energyAppsHeader: some View {
-        Button {
-            toggleBreakdown(.energy)
-        } label: {
-            HStack(spacing: 8) {
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 8, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .rotationEffect(.degrees(expanded == .energy ? 90 : 0))
-                Text(l10n.s.energyAppsTitle)
-                    .font(.system(size: 10.5, weight: .medium))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                Spacer()
-            }
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func chargeTint(_ charge: Int) -> Color {
-        if charge < 20 { return PanelMetricColor.red(for: colorScheme) }
-        if charge < 40 { return PanelMetricColor.yellow(for: colorScheme) }
-        return PanelMetricColor.green(for: colorScheme)
-    }
+    // MARK: Uptime
 
     @ViewBuilder
     private func uptimeRow(editing: Bool) -> some View {
@@ -532,7 +413,7 @@ struct SystemSection: View {
                 .minimumScaleFactor(0.8)
                 .frame(width: 52, alignment: .leading)
             UsageBar(fraction: fraction ?? 0)
-            Text(fraction.map { String(format: "%.0f%%", $0 * 100) } ?? "-")
+            Text(fraction.map { String(format: "%.0f%%", locale: MetricFormat.locale, $0 * 100) } ?? "-")
                 .font(.system(size: 11, weight: .medium))
                 .monospacedDigit()
                 .frame(width: 38, alignment: .trailing)
@@ -623,6 +504,97 @@ struct SystemSection: View {
         }
     }
 
+    @ViewBuilder
+    private var cpuShareBreakdown: some View {
+        let detail = FeatureStrings.monitorDetail(l10n.language)
+        if let user = monitor.snapshot.cpuUser, let system = monitor.snapshot.cpuSystem {
+            VStack(alignment: .leading, spacing: 4) {
+                SplitUsageBar(user: user, system: system)
+                HStack {
+                    shareLegend(color: .accentColor, title: detail.user, fraction: user)
+                    shareLegend(color: PanelMetricColor.orange(for: colorScheme),
+                                title: detail.system, fraction: system)
+                    if let idle = monitor.snapshot.cpuIdle {
+                        shareLegend(color: Color.primary.opacity(0.22), title: detail.idle, fraction: idle)
+                    }
+                }
+            }
+            .padding(.leading, 16)
+        }
+    }
+
+    @ViewBuilder
+    private var cpuMetaRow: some View {
+        let detail = FeatureStrings.monitorDetail(l10n.language)
+        HStack(spacing: 8) {
+            if let load = monitor.snapshot.cpuLoadAverage {
+                Text("\(detail.loadAverage) \(MetricFormat.loadAverageText(load))")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+                    .monospacedDigit()
+            }
+            Spacer(minLength: 0)
+            if let cores = monitor.snapshot.cpuLogicalCores, cores > 0 {
+                Text(String(format: detail.coresFormat, cores))
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .padding(.leading, 16)
+    }
+
+    @ViewBuilder
+    private var gpuShareBreakdown: some View {
+        let detail = FeatureStrings.monitorDetail(l10n.language)
+        let name = monitor.snapshot.gpuName
+        if (name?.isEmpty == false)
+            || monitor.snapshot.gpuRendererUsage != nil
+            || monitor.snapshot.gpuTilerUsage != nil {
+            VStack(alignment: .leading, spacing: 3) {
+                if let name, !name.isEmpty {
+                    Text(name)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
+                if let renderer = monitor.snapshot.gpuRendererUsage {
+                    miniUsage(label: detail.renderer, fraction: renderer,
+                              color: PanelMetricColor.cyan(for: colorScheme))
+                }
+                if let tiler = monitor.snapshot.gpuTilerUsage {
+                    miniUsage(label: detail.tiler, fraction: tiler,
+                              color: PanelMetricColor.mint(for: colorScheme))
+                }
+            }
+            .padding(.leading, 16)
+        }
+    }
+
+    private func miniUsage(label: String, fraction: Double, color: Color) -> some View {
+        HStack(spacing: 8) {
+            Text(label)
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+                .frame(width: 64, alignment: .leading)
+            UsageBar(fraction: fraction, tint: color)
+            Text(String(format: "%.0f%%", locale: MetricFormat.locale, fraction * 100))
+                .font(.system(size: 10, weight: .medium))
+                .monospacedDigit()
+                .frame(width: 32, alignment: .trailing)
+        }
+    }
+
+    private func shareLegend(color: Color, title: String, fraction: Double) -> some View {
+        HStack(spacing: 4) {
+            Circle().fill(color).frame(width: 6, height: 6)
+            Text("\(title) \(String(format: "%.0f%%", locale: MetricFormat.locale, fraction * 100))")
+                .font(.system(size: 9.5))
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
     private func subsectionLabel(_ text: String) -> some View {
         Text(text)
             .font(.system(size: 10.5, weight: .semibold))
@@ -670,7 +642,7 @@ struct SystemSection: View {
 }
 
 /// Thin capacity bar for CPU/GPU usage.
-private struct UsageBar: View {
+struct UsageBar: View {
     @Environment(\.colorScheme) private var colorScheme
     let fraction: Double
     var tint: Color? = nil
@@ -694,6 +666,40 @@ private struct UsageBar: View {
         case ..<0.85: return PanelMetricColor.yellow(for: colorScheme)
         default: return PanelMetricColor.red(for: colorScheme)
         }
+    }
+}
+
+struct SplitUsageBar: View {
+    let user: Double
+    let system: Double
+
+    var body: some View {
+        GeometryReader { proxy in
+            let userWidth = max(0, proxy.size.width * min(1, user))
+            let systemWidth = max(0, proxy.size.width * min(1 - user, system))
+            ZStack(alignment: .leading) {
+                Capsule().fill(Color.primary.opacity(0.08))
+                HStack(spacing: 0) {
+                    Capsule().fill(Color.accentColor).frame(width: userWidth)
+                    Capsule().fill(Color.orange.opacity(0.85)).frame(width: systemWidth)
+                }
+            }
+        }
+        .frame(height: 5)
+    }
+}
+
+struct CoreUsageGrid: View {
+    let values: [Double]
+
+    var body: some View {
+        let columns = Array(repeating: GridItem(.flexible(), spacing: 3), count: min(4, max(2, values.count)))
+        LazyVGrid(columns: columns, spacing: 3) {
+            ForEach(Array(values.enumerated()), id: \.offset) { _, fraction in
+                UsageBar(fraction: fraction)
+            }
+        }
+        .padding(.leading, 16)
     }
 }
 

@@ -16,27 +16,102 @@ enum CommandBarSelectionReader {
     /// retype it would be slower than doing it by hand.
     static let maximumLength = 20_000
 
-    /// The selected text of whatever is in front, read through Accessibility.
-    /// Blocking, so callers run it off the main thread. Empty when nothing is
-    /// selected, when the app does not tell Accessibility what is selected, or
-    /// when the front app is us (the field's own text is not a selection).
-    static func readSelectedText() -> String {
+    /// The selected text of the app that had focus when the bar opened.
+    /// Blocking, so callers run it off the main thread. Pass that app
+    /// explicitly: after `makeKey()` the frontmost process can already be
+    /// us, and an empty read then drops Improve writing and the rest.
+    /// Empty when nothing is selected, when the app does not tell
+    /// Accessibility what is selected, or when the target is us.
+    static func readSelectedText(from app: NSRunningApplication? = nil) -> String {
         guard AXIsProcessTrusted() else { return "" }
-        guard let front = NSWorkspace.shared.frontmostApplication,
-              front.bundleIdentifier != Bundle.main.bundleIdentifier else { return "" }
-        // Asked of the app in front, not of the system-wide element: a timeout
-        // set on the system-wide element is the DEFAULT FOR THE WHOLE PROCESS,
-        // and every other Accessibility call in the app would inherit this
-        // short leash for the rest of the session. The app in front is the one
-        // holding the selection anyway; the bar's panel takes keys without
-        // activating, so focus never left it.
-        let app = AXUIElementCreateApplication(front.processIdentifier)
-        // A hung app must not hold the opening of the bar.
-        AXUIElementSetMessagingTimeout(app, 0.35)
-        guard let focused = copyElement(app, kAXFocusedUIElementAttribute),
-              let text = copyString(focused, kAXSelectedTextAttribute) else { return "" }
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.count <= maximumLength ? trimmed : ""
+        let target = resolvedTarget(app)
+        guard let target, target.bundleIdentifier != Bundle.main.bundleIdentifier else { return "" }
+        // Asked of the app that held the selection, not of the system-wide
+        // element: a timeout set on the system-wide element is the DEFAULT
+        // FOR THE WHOLE PROCESS, and every other Accessibility call in the
+        // app would inherit this short leash for the rest of the session.
+        let element = AXUIElementCreateApplication(target.processIdentifier)
+        AXUIElementSetMessagingTimeout(element, 0.55)
+        if let text = selection(fromApplication: element) { return text }
+        return ""
+    }
+
+    private static func resolvedTarget(_ app: NSRunningApplication?) -> NSRunningApplication? {
+        if let app, !app.isTerminated { return app }
+        return NSWorkspace.shared.frontmostApplication
+    }
+
+    private static func selection(fromApplication app: AXUIElement) -> String? {
+        if let focused = copyElement(app, kAXFocusedUIElementAttribute),
+           let text = selection(fromFocused: focused) {
+            return text
+        }
+        if let window = copyElement(app, kAXFocusedWindowAttribute),
+           let text = selection(fromFocused: window) {
+            return text
+        }
+        return selection(fromFocused: app)
+    }
+
+    private static func selection(fromFocused focused: AXUIElement) -> String? {
+        var current: AXUIElement? = focused
+        for _ in 0..<8 {
+            guard let element = current else { break }
+            if let text = clippedSelection(copyString(element, kAXSelectedTextAttribute)) {
+                return text
+            }
+            if let text = clippedSelection(stringForSelectedRange(element)) {
+                return text
+            }
+            if let child = firstSelectedChild(of: element),
+               let text = clippedSelection(copyString(child, kAXSelectedTextAttribute))
+                ?? clippedSelection(stringForSelectedRange(child)) {
+                return text
+            }
+            current = copyElement(element, kAXParentAttribute)
+        }
+        return nil
+    }
+
+    private static func firstSelectedChild(of element: AXUIElement) -> AXUIElement? {
+        guard let children = copyElements(element, kAXChildrenAttribute) else { return nil }
+        let preferred: Set<String> = [
+            "AXTextArea", "AXTextField", "AXWebArea", "AXGroup", "AXScrollArea",
+        ]
+        for child in children.prefix(24) {
+            let role = copyString(child, kAXRoleAttribute) ?? ""
+            if preferred.contains(role),
+               clippedSelection(copyString(child, kAXSelectedTextAttribute)) != nil
+                || clippedSelection(stringForSelectedRange(child)) != nil {
+                return child
+            }
+        }
+        return children.prefix(12).first { child in
+            clippedSelection(copyString(child, kAXSelectedTextAttribute)) != nil
+                || clippedSelection(stringForSelectedRange(child)) != nil
+        }
+    }
+
+    private static func stringForSelectedRange(_ element: AXUIElement) -> String? {
+        guard let range = copyValue(element, kAXSelectedTextRangeAttribute) else { return nil }
+        var selected: CFTypeRef?
+        let status = AXUIElementCopyParameterizedAttributeValue(
+            element,
+            kAXStringForRangeParameterizedAttribute as CFString,
+            range,
+            &selected
+        )
+        guard status == .success, let selected else { return nil }
+        if CFGetTypeID(selected) == CFStringGetTypeID() {
+            return selected as? String
+        }
+        return nil
+    }
+
+    private static func clippedSelection(_ text: String?) -> String? {
+        let trimmed = text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !trimmed.isEmpty, trimmed.count <= maximumLength else { return nil }
+        return trimmed
     }
 
     // MARK: - Accessibility reading
@@ -45,6 +120,17 @@ enum CommandBarSelectionReader {
         guard let raw = copyValue(element, attribute),
               CFGetTypeID(raw) == AXUIElementGetTypeID() else { return nil }
         return (raw as! AXUIElement)
+    }
+
+    private static func copyElements(_ element: AXUIElement, _ attribute: String) -> [AXUIElement]? {
+        guard let raw = copyValue(element, attribute),
+              CFGetTypeID(raw) == CFArrayGetTypeID() else { return nil }
+        let array = raw as! NSArray
+        return array.compactMap { item -> AXUIElement? in
+            let object = item as AnyObject
+            guard CFGetTypeID(object) == AXUIElementGetTypeID() else { return nil }
+            return (object as! AXUIElement)
+        }
     }
 
     private static func copyString(_ element: AXUIElement, _ attribute: String) -> String? {

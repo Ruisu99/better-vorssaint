@@ -40,7 +40,7 @@ struct ScreenshotShareResponse: Decodable {
 
 enum ScreenshotSharingSupport {
     static let productionEndpoint = URL(string: "https://screenshots.vorssaint.com")!
-    static let developerBundleIdentifier = "com.vorssaint.utils.dev"
+    static let developerBundleIdentifier = "com.ruisu99.bettervorssaint.dev"
     static let maximumUploadBytes = 25 * 1_024 * 1_024
 
     static func endpoint(bundleIdentifier: String?, developerOverride: String?) -> URL {

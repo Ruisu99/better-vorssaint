@@ -10,10 +10,21 @@ import SwiftUI
 struct CommandBarView: View {
     /// Short enough to sit on one line, chosen to show three different things
     /// the bar can do that a list of commands would never reveal.
-    static var examples: [String] {
-        ["100 km to mi", "2+2*3", "battery", "fire"].filter {
-            $0 != "battery" || PowerSampler.hasInternalBattery
+    ///
+    /// The battery one is the localized word, because that is the word the
+    /// answer is titled with. As a fixed English "battery" the chip matched
+    /// nothing in the other twelve languages and led to an empty list, which
+    /// teaches the opposite of what an example is for. The other three hold
+    /// everywhere: the maths is language-free, the conversion parser already
+    /// takes each language's own word for "to", and the emoji names come from
+    /// Unicode, which spells them in English on purpose.
+    static func examples(_ text: CommandBarFeatureStrings) -> [String] {
+        var examples = ["100 km to mi", "2+2*3"]
+        if PowerSampler.hasInternalBattery {
+            examples.append(text.answerBatteryLabel.lowercased())
         }
+        examples.append("fire")
+        return examples
     }
     /// As tall as the list is ever allowed to be, so the panel never grows
     /// past what a laptop screen can show above the fold.
@@ -103,7 +114,7 @@ struct CommandBarView: View {
             switch service.mode {
             case .search:
                 if showsCategoryChips {
-                    Divider()
+                    hairline
                     categoryChipsRow
                 }
                 if service.rows.isEmpty {
@@ -111,46 +122,51 @@ struct CommandBarView: View {
                     // fruitless search gets, or the panel is a room with no
                     // door in it.
                     if !trimmedQuery.isEmpty || service.activeCategory != nil {
-                        Divider()
+                        hairline
                         emptyState
                     }
                 } else {
-                    if !showsCategoryChips { Divider() }
+                    if !showsCategoryChips { hairline }
                     resultsList
                 }
             case .argument(let entryID):
-                Divider()
+                hairline
                 argumentCard(entryID: entryID)
             case .confirm(let entryID):
-                Divider()
+                hairline
                 confirmCard(entryID: entryID)
             case .actions:
-                Divider()
+                hairline
                 actionsList
             case .naming(let entryID):
-                Divider()
+                hairline
                 namingCard(entryID: entryID)
             case .capturingShortcut(let entryID):
-                Divider()
+                hairline
                 shortcutCard(entryID: entryID)
+            case .quickAI:
+                hairline
+                QuickAICommandBarPane()
             }
             // A footer under a bare field reads as a second row of chrome on
             // something meant to be one strip.
             if !service.isCompactHome {
-                Divider()
+                hairline
                 footer
             }
         }
-        .frame(width: 560)
-        .background(HUDBackdrop(cornerRadius: 22, contrast: .high))
-        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .frame(width: CommandBarChrome.width)
+        .background(HUDBackdrop(cornerRadius: CommandBarChrome.cornerRadius, contrast: .spotlight))
+        .clipShape(RoundedRectangle(cornerRadius: CommandBarChrome.cornerRadius, style: .continuous))
         .onAppear { focusSearch() }
         .onChange(of: service.presentationID) { _, _ in focusSearch() }
         .onChange(of: service.mode) { _, _ in focusSearch() }
     }
 
     private func focusSearch() {
+        searchFocused = true
         DispatchQueue.main.async { searchFocused = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { searchFocused = true }
     }
 
     // MARK: - Field
@@ -192,7 +208,7 @@ struct CommandBarView: View {
             }
             TextField(fieldPlaceholder, text: $service.query)
                 .textFieldStyle(.plain)
-                .font(.system(size: 16))
+                .font(.system(size: CommandBarChrome.fieldFontSize, weight: .regular))
                 .focused($searchFocused)
                 .disableAutocorrection(true)
                 .accessibilityLabel(text.pageTitle)
@@ -208,8 +224,14 @@ struct CommandBarView: View {
                 .buttonStyle(.plain)
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 16)
+    }
+
+    private var hairline: some View {
+        Rectangle()
+            .fill(Color.primary.opacity(CommandBarChrome.hairlineOpacity(isDark: colorScheme == .dark)))
+            .frame(height: CommandBarChrome.hairlineHeight)
     }
 
     /// The collapsed bar has no footer, so the keys that still work (↓ to
@@ -262,13 +284,13 @@ struct CommandBarView: View {
                         }
                         .padding(.horizontal, 9)
                         .padding(.vertical, 7)
-                        .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                         .background(
-                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
                                 .fill(index == service.actionIndex
                                       ? (action.isDestructive
                                          ? Color.red.opacity(0.12)
-                                         : Color.accentColor.opacity(0.14))
+                                         : Color.primary.opacity(CommandBarChrome.selectionOpacity(isDark: colorScheme == .dark)))
                                       : .clear)
                         )
                     }
@@ -326,9 +348,10 @@ struct CommandBarView: View {
                 .padding(.horizontal, 17)
                 .padding(.top, 12)
             }
-            Text(text.shortcutCaptureHint)
+            Text(service.aliasWarning ?? text.shortcutCaptureHint)
                 .font(.system(size: 10.5))
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(service.aliasWarning == nil
+                                 ? AnyShapeStyle(.tertiary) : AnyShapeStyle(Color.orange))
                 .padding(.horizontal, 17)
                 .padding(.bottom, 12)
         }
@@ -340,6 +363,9 @@ struct CommandBarView: View {
             return String(format: text.argumentRangeFormat, range.lowerBound, range.upperBound)
         }
         if case .naming = service.mode { return text.aliasPlaceholder }
+        if case .quickAI = service.mode {
+            return FeatureStrings.quickAI(l10n.language).askPlaceholder
+        }
         return text.searchPlaceholder
     }
 
@@ -392,7 +418,7 @@ struct CommandBarView: View {
                         .font(.system(size: 9, weight: .bold))
                         .tracking(0.5)
                         .foregroundStyle(.tertiary)
-                    ForEach(CommandBarView.examples, id: \.self) { example in
+                    ForEach(CommandBarView.examples(text), id: \.self) { example in
                         Button {
                             service.query = example
                         } label: {
@@ -534,11 +560,13 @@ struct CommandBarView: View {
                     .opacity(isSelected ? 1 : 0)
             }
             .padding(.horizontal, 9)
-            .padding(.vertical, entry.isAnswer ? 9 : 7)
-            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .padding(.vertical, entry.isAnswer ? 9 : 8)
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(isSelected ? Color.accentColor.opacity(0.14) : .clear)
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(isSelected
+                          ? Color.primary.opacity(CommandBarChrome.selectionOpacity(isDark: colorScheme == .dark))
+                          : .clear)
             )
         }
         .buttonStyle(.plain)
@@ -789,24 +817,45 @@ struct CommandBarView: View {
                 .font(.system(size: 9, weight: .semibold, design: .rounded))
                 .foregroundStyle(.tertiary)
             Spacer()
-            if service.canOpenActions {
-                Text("⌘K")
-                    .font(.system(size: 9, weight: .semibold, design: .rounded))
+            if service.mode == .quickAI {
+                Image(systemName: "return")
+                    .font(.system(size: 8))
                     .foregroundStyle(.tertiary)
-                Text(text.actionsHint)
+                Text(FeatureStrings.quickAI(l10n.language).send)
                     .font(.system(size: 9))
                     .foregroundStyle(.tertiary)
-                    .padding(.trailing, 4)
+                Text("Esc")
+                    .font(.system(size: 9, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.tertiary)
+            } else {
+                if AppFeature.quickAI.isAvailable {
+                    Text(QuickAIService.shared.commandBarKey().displayName)
+                        .font(.system(size: 9, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.tertiary)
+                    Text(FeatureStrings.quickAI(l10n.language).pageTitle)
+                        .font(.system(size: 9))
+                        .foregroundStyle(.tertiary)
+                        .padding(.trailing, 4)
+                }
+                if service.canOpenActions {
+                    Text("⌘K")
+                        .font(.system(size: 9, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.tertiary)
+                    Text(text.actionsHint)
+                        .font(.system(size: 9))
+                        .foregroundStyle(.tertiary)
+                        .padding(.trailing, 4)
+                }
+                Text(service.isShowingSuggestions && !service.categoryChips.isEmpty ? "⌃P ⌃N ↑↓ ←→" : "⌃P ⌃N ↑↓")
+                    .font(.system(size: 9, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.tertiary)
+                Image(systemName: "return")
+                    .font(.system(size: 8))
+                    .foregroundStyle(.tertiary)
+                Text("Esc")
+                    .font(.system(size: 9, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.tertiary)
             }
-            Text(service.isShowingSuggestions && !service.categoryChips.isEmpty ? "⌃P ⌃N ↑↓ ←→" : "⌃P ⌃N ↑↓")
-                .font(.system(size: 9, weight: .semibold, design: .rounded))
-                .foregroundStyle(.tertiary)
-            Image(systemName: "return")
-                .font(.system(size: 8))
-                .foregroundStyle(.tertiary)
-            Text("Esc")
-                .font(.system(size: 9, weight: .semibold, design: .rounded))
-                .foregroundStyle(.tertiary)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
