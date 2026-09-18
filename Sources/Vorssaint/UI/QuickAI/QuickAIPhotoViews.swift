@@ -115,6 +115,7 @@ struct QuickAIAttachMenu: View {
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
+        .fixedSize()
         .help(strings.attachPhoto)
         .disabled(service.isSending
                   || service.pendingImages.count >= QuickAISupport.maximumImagesPerMessage)

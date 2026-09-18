@@ -89,6 +89,7 @@ struct QuickAIChatView: View {
             }
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
+            .fixedSize()
             .help(strings.savedChats)
             Button {
                 service.hideWindow()
