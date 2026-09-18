@@ -3920,11 +3920,11 @@ struct MetricsTests {
         expect(notchExtras == 980, "notched extras start at the right of the camera housing")
         expect(MenuBarCollapseSupport.extrasMinX(menuBar: bar, notchRightMinX: nil) == bar.minX + bar.width * 0.38,
                "an un-notched bar never covers the Apple menu")
-        let hidden = MenuBarCollapseSupport.overlayFrame(menuBar: bar,
-                                                         extrasMinX: 980,
-                                                         chevronMinX: 1280,
-                                                         collapsed: true)
-        expect(hidden == CGRect(x: 980, y: 1056, width: 300, height: 24),
+        let collapsedExtrasFrame = MenuBarCollapseSupport.overlayFrame(menuBar: bar,
+                                                                      extrasMinX: 980,
+                                                                      chevronMinX: 1280,
+                                                                      collapsed: true)
+        expect(collapsedExtrasFrame == CGRect(x: 980, y: 1056, width: 300, height: 24),
                "collapsed extras sit between the extras start and the chevron")
         expect(MenuBarCollapseSupport.overlayFrame(menuBar: bar,
                                                    extrasMinX: 980,
