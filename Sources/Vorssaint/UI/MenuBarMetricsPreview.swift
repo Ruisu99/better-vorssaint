@@ -55,7 +55,10 @@ struct MenuBarMetricsPreview: View {
             Image(systemName: "wifi")
                 .foregroundStyle(.white.opacity(0.5))
             if PowerSampler.hasInternalBattery {
-                Image(systemName: "battery.75")
+                Image(nsImage: MenuBarBatterySupport.glyphImage(percent: 75,
+                                                                isCharging: false,
+                                                                scale: .inline(stacked: false, enlarged: false)))
+                    .renderingMode(.template)
                     .foregroundStyle(.white.opacity(0.5))
             }
             HStack(spacing: 5) {
@@ -165,17 +168,25 @@ struct MenuBarMetricsPreview: View {
                    height: style == .readable ? 22 : 20,
                    alignment: .center)
         case let .batteryBlock(percent, isCharging, style):
-            HStack(spacing: style == .readable ? 5 : 4) {
-                Image(systemName: MenuBarRenderer.batterySymbol(for: percent, isCharging: isCharging))
-                    .font(.system(size: style == .readable ? 17 : 15.5, weight: .regular))
-                Text("\(max(0, min(100, percent)))%")
+            let clamped = max(0, min(100, percent))
+            HStack(spacing: MenuBarBatterySupport.percentGap(readable: style == .readable)) {
+                Image(nsImage: MenuBarBatterySupport.glyphImage(percent: clamped,
+                                                                isCharging: isCharging,
+                                                                scale: .block(readable: style == .readable)))
+                    .renderingMode(.template)
+                Text("\(clamped)%")
                     .font(.system(size: style == .readable ? 13 : 12,
                                   weight: .semibold,
                                   design: .monospaced))
-                    .frame(minWidth: style == .readable ? 33 : 30, alignment: .leading)
             }
             .foregroundStyle(.white)
             .fixedSize(horizontal: true, vertical: true)
+        case let .batteryGlyph(percent, isCharging):
+            Image(nsImage: MenuBarBatterySupport.glyphImage(percent: percent,
+                                                            isCharging: isCharging,
+                                                            scale: .inline(stacked: stacked, enlarged: false)))
+                .renderingMode(.template)
+                .foregroundStyle(.white)
         case let .dot(pressure):
             Circle()
                 .fill(dotColor(pressure))

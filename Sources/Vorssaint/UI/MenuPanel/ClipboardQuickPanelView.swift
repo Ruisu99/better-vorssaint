@@ -379,12 +379,22 @@ private struct QuickEntryRow: View, Equatable {
                         .frame(maxWidth: 240, maxHeight: 120)
                         .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                 }
-                Text("\(text.imageEntryLabel) · \(entry.imageDimensionsLabel)")
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    if !entry.text.isEmpty {
+                        Text(entry.preview)
+                            .font(.system(size: 12))
+                            .lineLimit(2)
+                            .truncationMode(.tail)
+                    }
+                    Text("\(text.imageEntryLabel) · \(entry.imageDimensionsLabel)")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(.secondary)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .help("\(text.imageEntryLabel) · \(entry.imageDimensionsLabel)")
+            .help(entry.text.isEmpty
+                  ? "\(text.imageEntryLabel) · \(entry.imageDimensionsLabel)"
+                  : "\(entry.preview)\n\(text.imageEntryLabel) · \(entry.imageDimensionsLabel)")
         case .files:
             if entry.filePaths.count == 1,
                let path = entry.filePaths.first,

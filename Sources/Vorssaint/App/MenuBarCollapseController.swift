@@ -290,25 +290,97 @@ final class MenuBarCollapseController {
                                 backing: .buffered,
                                 defer: false)
             panel.isReleasedWhenClosed = false
-            panel.isOpaque = false
-            panel.backgroundColor = .clear
+            // Opaque so extras cannot shine through. A clear panel with
+            // behind-window menu material sampled the wallpaper without the
+            // menu bar's darkening and read as a coloured slab.
+            panel.isOpaque = true
+            panel.backgroundColor = .windowBackgroundColor
             panel.hasShadow = false
             panel.hidesOnDeactivate = false
+            panel.animationBehavior = .none
             panel.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.statusWindow)) + 1)
             panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
             panel.ignoresMouseEvents = false
-            let effect = NSVisualEffectView(frame: panel.contentView?.bounds ?? .zero)
-            effect.autoresizingMask = [.width, .height]
-            effect.material = .menu
-            effect.blendingMode = .behindWindow
-            effect.state = .active
-            panel.contentView = effect
+            let view = MenuBarCollapseOverlayView(frame: NSRect(origin: .zero, size: frame.size))
             let click = NSClickGestureRecognizer(target: self, action: #selector(overlayClicked))
-            effect.addGestureRecognizer(click)
+            view.addGestureRecognizer(click)
+            panel.contentView = view
             overlay = panel
         }
         overlay?.setFrame(frame, display: true)
+        applyOverlayFill(frame)
         overlay?.orderFrontRegardless()
+    }
+
+    private func applyOverlayFill(_ frame: CGRect) {
+        guard let panel = overlay,
+              let view = panel.contentView as? MenuBarCollapseOverlayView else { return }
+        let screen = panel.screen
+            ?? NSScreen.screens.first { $0.frame.intersects(frame) }
+            ?? NSScreen.withMenuBar
+        guard let screen else {
+            view.apply(image: nil, alreadyMatchesMenuBar: false)
+            return
+        }
+        panel.appearance = NSApp.effectiveAppearance
+        if let wallpaper = captureWindowImage(layer: Int(CGWindowLevelForKey(.desktopWindow)),
+                                              overlay: frame,
+                                              screen: screen,
+                                              ownerNames: ["Wallpaper", "Dock"])
+            ?? cropDesktopFile(overlay: frame, screen: screen) {
+            view.apply(image: wallpaper, alreadyMatchesMenuBar: false)
+            return
+        }
+        view.apply(image: nil, alreadyMatchesMenuBar: false)
+    }
+
+    private func captureWindowImage(layer: Int,
+                                    overlay: CGRect,
+                                    screen: NSScreen,
+                                    ownerNames: Set<String>?) -> NSImage? {
+        guard let mainHeight = mainDisplayHeight, mainHeight > 0 else { return nil }
+        let quartz = MenuBarCollapseSupport.quartzRect(fromCocoa: overlay, mainDisplayHeight: mainHeight)
+        guard quartz.width >= 1, quartz.height >= 1 else { return nil }
+        let infos = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
+        for info in infos {
+            guard let windowLayer = (info[kCGWindowLayer as String] as? NSNumber)?.intValue,
+                  windowLayer == layer,
+                  let number = (info[kCGWindowNumber as String] as? NSNumber)?.uint32Value,
+                  number != CGWindowID(self.overlay?.windowNumber ?? 0),
+                  let bounds = WindowServerSupport.bounds(from: info)
+            else { continue }
+            if let ownerNames {
+                let owner = info[kCGWindowOwnerName as String] as? String ?? ""
+                guard ownerNames.contains(owner) else { continue }
+            }
+            let cocoa = MenuBarCollapseSupport.cocoaFrame(fromQuartz: bounds, mainDisplayHeight: mainHeight)
+            guard cocoa.intersects(overlay.insetBy(dx: -2, dy: -2)),
+                  cocoa.intersects(screen.frame)
+            else { continue }
+            guard let image = CGWindowListCreateImage(quartz,
+                                                       [.optionIncludingWindow],
+                                                       number,
+                                                       [.bestResolution, .boundsIgnoreFraming]),
+                  image.width > 8, image.height > 2
+            else { continue }
+            return NSImage(cgImage: image, size: overlay.size)
+        }
+        return nil
+    }
+
+    private func cropDesktopFile(overlay: CGRect, screen: NSScreen) -> NSImage? {
+        guard let url = NSWorkspace.shared.desktopImageURL(for: screen),
+              let source = NSImage(contentsOf: url),
+              let cg = source.cgImage(forProposedRect: nil, context: nil, hints: nil)
+        else { return nil }
+        let imageSize = CGSize(width: cg.width, height: cg.height)
+        let crop = MenuBarCollapseSupport.wallpaperCrop(imageSize: imageSize,
+                                                        overlay: overlay,
+                                                        screen: screen.frame).integral
+        guard crop.width >= 1, crop.height >= 1,
+              let cropped = cg.cropping(to: crop)
+        else { return nil }
+        return NSImage(cgImage: cropped, size: overlay.size)
     }
 
     private func hideOverlay() {
@@ -322,5 +394,44 @@ final class MenuBarCollapseController {
         UserDefaults.standard.set(false, forKey: DefaultsKey.menuBarExtrasCollapsed)
         applyAppearance()
         refreshOverlay()
+    }
+}
+
+/// Wallpaper (or a captured menu-bar strip) plus the titlebar material used
+/// on the real bar. behind-window blending is never used: that is what made
+/// the overlay look like a coloured slab sitting on the extras.
+private final class MenuBarCollapseOverlayView: NSView {
+    private let wallpaperLayer = CALayer()
+    private let effectView = NSVisualEffectView()
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.addSublayer(wallpaperLayer)
+        wallpaperLayer.contentsGravity = .resize
+        wallpaperLayer.frame = bounds
+
+        effectView.frame = bounds
+        effectView.autoresizingMask = [.width, .height]
+        effectView.material = .titlebar
+        effectView.blendingMode = .withinWindow
+        effectView.state = .active
+        effectView.isEmphasized = true
+        addSubview(effectView)
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override func layout() {
+        super.layout()
+        wallpaperLayer.frame = bounds
+        effectView.frame = bounds
+    }
+
+    func apply(image: NSImage?, alreadyMatchesMenuBar: Bool) {
+        wallpaperLayer.contents = image?.cgImage(forProposedRect: nil, context: nil, hints: nil)
+        effectView.isHidden = alreadyMatchesMenuBar && image != nil
     }
 }

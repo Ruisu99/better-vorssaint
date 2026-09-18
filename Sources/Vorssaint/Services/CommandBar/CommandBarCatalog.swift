@@ -1594,14 +1594,12 @@ enum CommandBarCatalog {
         guard CommandBarClipboardAccess.canUseHistory(
             captureEnabled: UserDefaults.standard.bool(forKey: DefaultsKey.clipboardHistoryEnabled),
             hasSavedItems: !history.entries.isEmpty) else { return [] }
-        let imageLabel = FeatureStrings.clipboard(L10n.shared.language).imageEntryLabel
         return history.filteredEntries(matching: query)
             .prefix(limit)
-            .map { clipboardRow($0, imageLabel: imageLabel, bar: bar, paste: paste) }
+            .map { clipboardRow($0, bar: bar, paste: paste) }
     }
 
     private static func clipboardRow(_ entry: ClipboardHistoryEntry,
-                                     imageLabel: String,
                                      bar: CommandBarFeatureStrings,
                                      paste: @escaping (ClipboardHistoryEntry) -> Void)
         -> CommandBarEntry {
@@ -1613,9 +1611,7 @@ enum CommandBarCatalog {
         }
         return CommandBarEntry(
             id: "clipboard.\(entry.id.uuidString)",
-            title: entry.kind == .image
-                ? entry.searchableText(imageLabel: imageLabel)
-                : entry.preview,
+            title: entry.preview,
             subtitle: bar.kindClipboard,
             icon: icon,
             trouble: Permissions.shared.accessibility ? nil : .needsPermission,
@@ -1636,9 +1632,8 @@ enum CommandBarCatalog {
         guard CommandBarClipboardAccess.canUseHistory(
             captureEnabled: UserDefaults.standard.bool(forKey: DefaultsKey.clipboardHistoryEnabled),
             hasSavedItems: !history.entries.isEmpty) else { return [] }
-        let imageLabel = FeatureStrings.clipboard(L10n.shared.language).imageEntryLabel
         return history.entries.prefix(limit).map { entry in
-            clipboardRow(entry, imageLabel: imageLabel, bar: bar, paste: paste)
+            clipboardRow(entry, bar: bar, paste: paste)
         }
     }
 

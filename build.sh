@@ -350,6 +350,7 @@ if (( TEST )); then
         Sources/Vorssaint/App/MenuBarSpacingSupport.swift \
         Sources/Vorssaint/App/StatusItemAnchorSupport.swift \
         Sources/Vorssaint/App/MenuBarCollapseSupport.swift \
+        Sources/Vorssaint/App/MenuBarBatterySupport.swift \
         Sources/Vorssaint/Services/DockClick/DockClickSupport.swift \
         Sources/Vorssaint/Services/Finder/CutPasteProgressSupport.swift \
         Sources/Vorssaint/Services/Finder/CutPastePrivilegeSupport.swift \

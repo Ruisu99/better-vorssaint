@@ -639,6 +639,17 @@ struct MetricsTests {
         }
         expectEqual(imageEntry.preview, "1470×956",
                     "clipboard image preview shows the dimensions")
+        let titledImage = ClipboardHistoryEntry(text: "awdawdawd",
+                                                kind: .image,
+                                                imageFile: "a.png",
+                                                imageHash: "h1",
+                                                imageWidth: 3652,
+                                                imageHeight: 2014)
+        expectEqual(titledImage.preview, "awdawdawd",
+                    "clipboard image preview keeps accompanying pasteboard text")
+        expect(titledImage.searchableText(imageLabel: "Bild").contains("awdawdawd")
+                && titledImage.searchableText(imageLabel: "Bild").contains("Bild"),
+               "clipboard image search matches the title and the image word")
         expect(imageEntry.searchableText(imageLabel: "Imagem").contains("Imagem"),
                "clipboard image entries match the localized image word in search")
         expect(imageEntry.matchesContent(of: ClipboardHistoryEntry(text: "",
@@ -736,6 +747,41 @@ struct MetricsTests {
                                                                  plainText: "/tmp/example.txt") ?? "",
                     "/tmp/example.txt",
                     "clipboard history ignores non-web URL pasteboard types")
+        expect(ClipboardHistoryCaptureSupport.kind(hasImage: true, hasFiles: true, isCopiedScreenshot: false)
+                == .image
+                && ClipboardHistoryCaptureSupport.kind(hasImage: false, hasFiles: true, isCopiedScreenshot: true)
+                == .image
+                && ClipboardHistoryCaptureSupport.kind(hasImage: false, hasFiles: true, isCopiedScreenshot: false)
+                == .files
+                && ClipboardHistoryCaptureSupport.kind(hasImage: false, hasFiles: false, isCopiedScreenshot: false)
+                == .text,
+               "clipboard capture keeps pixels over file URLs and leftover text")
+        expectEqual(ClipboardHistoryCaptureSupport.imageTitle(from: "awdawdawd") ?? "",
+                    "awdawdawd",
+                    "clipboard image titles keep accompanying pasteboard text")
+        expect(ClipboardHistoryCaptureSupport.imageTitle(from: "/tmp/2026-09-18_11-37-25.png") == nil
+                && ClipboardHistoryCaptureSupport.imageTitle(from: "file:///tmp/shot.png") == nil
+                && ClipboardHistoryCaptureSupport.imageTitle(from: "   ") == nil,
+               "clipboard image titles ignore file paths and empty strings")
+        expect(ClipboardHistoryCaptureSupport.acceptsByteCount(20 * 1_024 * 1_024, isPNG: true)
+                && !ClipboardHistoryCaptureSupport.acceptsByteCount(40 * 1_024 * 1_024, isPNG: true)
+                && ClipboardHistoryCaptureSupport.acceptsByteCount(40 * 1_024 * 1_024, isPNG: false),
+               "clipboard image capture accepts a Retina screenshot that used to exceed 16 MB")
+        let clipboardCaptureSource = (try? String(
+            contentsOfFile: "Sources/Vorssaint/Services/Clipboard/ClipboardHistoryService.swift",
+            encoding: .utf8)) ?? ""
+        let imageRead = clipboardCaptureSource.range(of: "if let image = copiedPNGImage(from: pasteboard)")
+        let filesReturn = clipboardCaptureSource.range(of: "return .files(paths)")
+        let pixelsBeforeFiles: Bool
+        if let imageRead, let filesReturn {
+            pixelsBeforeFiles = imageRead.lowerBound < filesReturn.lowerBound
+        } else {
+            pixelsBeforeFiles = false
+        }
+        expect(pixelsBeforeFiles
+                && clipboardCaptureSource.contains("pngImage(fromScreenshotFile:")
+                && clipboardCaptureSource.contains("ClipboardHistoryCaptureSupport.imageTitle"),
+               "clipboard history records screenshot pixels before leftover file names or text")
         expect(!ClipboardHistorySensitiveText.looksSensitive("http://localhost:3000/page"),
                "clipboard history does not treat normal web URLs as secrets")
         expect(ClipboardHistorySensitiveText.looksSensitive("https://example.com/callback?token=abc"),
@@ -3953,6 +3999,19 @@ struct MetricsTests {
                                                 mainDisplayHeight: 1080)
                 == CGRect(x: 980, y: 1056, width: 22, height: 24),
                "server status-item bounds convert into the AppKit menu-bar band")
+        expect(MenuBarCollapseSupport.quartzRect(fromCocoa: CGRect(x: 980, y: 1056, width: 22, height: 24),
+                                                mainDisplayHeight: 1080)
+                == CGRect(x: 980, y: 0, width: 22, height: 24),
+               "overlay crops are asked of the window server in Quartz space")
+        expect(MenuBarCollapseSupport.aspectFillRect(imageSize: CGSize(width: 4000, height: 1964),
+                                                    canvasSize: CGSize(width: 1512, height: 982))
+                == CGRect(x: 488, y: 0, width: 3024, height: 1964),
+               "a wider wallpaper is cropped on the sides to fill the display")
+        expect(MenuBarCollapseSupport.wallpaperCrop(imageSize: CGSize(width: 3024, height: 1964),
+                                                   overlay: CGRect(x: 980, y: 958, width: 300, height: 24),
+                                                   screen: CGRect(x: 0, y: 0, width: 1512, height: 982))
+                == CGRect(x: 1960, y: 0, width: 600, height: 48),
+               "the overlay band is the top strip of a 2x wallpaper")
         expect(MenuBarCollapseSupport.overlayLeadingX(menuBar: bar,
                                                       notchRightMinX: 980,
                                                       extraMinXs: [990, 1100]) == 990,
@@ -3979,8 +4038,26 @@ struct MetricsTests {
                 && collapseControllerSource.contains("ownKeepVisibleMinX")
                 && collapseControllerSource.contains("retireLegacySpacer")
                 && collapseControllerSource.contains("DispatchQueue.main.async")
+                && collapseControllerSource.contains("isOpaque = true")
+                && collapseControllerSource.contains("blendingMode = .withinWindow")
+                && collapseControllerSource.contains("material = .titlebar")
+                && collapseControllerSource.contains("wallpaperCrop")
+                && !collapseControllerSource.contains("blendingMode = .behindWindow")
                 && !collapseControllerSource.contains("spacerItem"),
-               "collapsed extras follow the window server and never install a huge spacer")
+               "collapsed extras match the menu bar instead of covering it with wallpaper")
+        expect(MenuBarBatterySupport.fillFraction(percent: 52) == 0.52
+                && MenuBarBatterySupport.fillFraction(percent: -3) == 0
+                && MenuBarBatterySupport.fillFraction(percent: 140) == 1,
+               "the menu-bar battery fill follows the charge")
+        expect(MenuBarBatterySupport.percentGap(readable: false) == 2.5
+                && MenuBarBatterySupport.percentGap(readable: true) == 3,
+               "the percent sits close to the battery body")
+        expect(MenuBarBatterySupport.glyphSize(scale: .block(readable: false)).width
+                < 24
+                && MenuBarBatterySupport.blockWidth(percentTextWidth: 30, readable: false)
+                == ceil(MenuBarBatterySupport.glyphSize(scale: .block(readable: false)).width
+                        + 2.5 + 30),
+               "the battery block no longer reserves SF Symbol side padding")
         let featureRuntimeBindingSource = (try? String(
             contentsOfFile: "Sources/Vorssaint/App/FeatureRuntime.swift",
             encoding: .utf8)) ?? ""

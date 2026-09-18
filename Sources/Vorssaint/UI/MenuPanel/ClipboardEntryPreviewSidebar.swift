@@ -120,6 +120,12 @@ struct ClipboardEntryPreviewSidebar: View {
                     .frame(maxWidth: .infinity)
                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             }
+            if !entry.text.isEmpty {
+                Text(entry.text)
+                    .font(.system(size: 12))
+                    .textSelection(.enabled)
+                    .lineLimit(4)
+            }
             Text("\(text.imageEntryLabel) · \(entry.imageDimensionsLabel)")
                 .font(.system(size: 10.5))
                 .foregroundStyle(.secondary)

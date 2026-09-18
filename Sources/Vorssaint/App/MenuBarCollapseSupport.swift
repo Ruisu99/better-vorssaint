@@ -35,6 +35,47 @@ enum MenuBarCollapseSupport {
               height: rect.height)
     }
 
+    /// Inverse of `cocoaFrame`. Window-server screenshots and desktop captures
+    /// speak Quartz, so the overlay crop has to be asked for in that space.
+    static func quartzRect(fromCocoa rect: CGRect, mainDisplayHeight: CGFloat) -> CGRect {
+        cocoaFrame(fromQuartz: rect, mainDisplayHeight: mainDisplayHeight)
+    }
+
+    /// The portion of a wallpaper image that aspect-fills `canvasSize`.
+    /// Image coordinates are top-left, matching `CGImage.cropping`.
+    static func aspectFillRect(imageSize: CGSize, canvasSize: CGSize) -> CGRect {
+        guard imageSize.width > 0, imageSize.height > 0,
+              canvasSize.width > 0, canvasSize.height > 0 else { return .zero }
+        let imageAspect = imageSize.width / imageSize.height
+        let canvasAspect = canvasSize.width / canvasSize.height
+        if imageAspect > canvasAspect {
+            let width = imageSize.height * canvasAspect
+            return CGRect(x: (imageSize.width - width) / 2,
+                          y: 0,
+                          width: width,
+                          height: imageSize.height)
+        }
+        let height = imageSize.width / canvasAspect
+        return CGRect(x: 0,
+                      y: (imageSize.height - height) / 2,
+                      width: imageSize.width,
+                      height: height)
+    }
+
+    /// Pixel crop of a full-screen wallpaper for the overlay band. Frames are
+    /// Cocoa (bottom-left); the result is top-left in image pixels so it can
+    /// be passed to `CGImage.cropping`.
+    static func wallpaperCrop(imageSize: CGSize, overlay: CGRect, screen: CGRect) -> CGRect {
+        let filled = aspectFillRect(imageSize: imageSize, canvasSize: screen.size)
+        guard screen.width > 0, screen.height > 0,
+              filled.width > 0, filled.height > 0 else { return .zero }
+        let x = filled.minX + (overlay.minX - screen.minX) / screen.width * filled.width
+        let y = filled.minY + (screen.maxY - overlay.maxY) / screen.height * filled.height
+        let width = overlay.width / screen.width * filled.width
+        let height = overlay.height / screen.height * filled.height
+        return CGRect(x: x, y: y, width: width, height: height)
+    }
+
     /// On a notched bar extras never start left of the camera housing. On an
     /// un-notched bar the actual leftmost extra wins, so the overlay does not
     /// sit on the Apple menu when the 0.38 fallback is too far left.

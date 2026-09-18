@@ -65,18 +65,23 @@ struct ClipboardHistoryEntry: Codable, Equatable, Identifiable {
     var preview: String {
         switch kind {
         case .text:
-            let prefix = text.prefix(ClipboardHistoryEditing.previewCharacters)
-            let collapsed = prefix
-                .replacingOccurrences(of: "\n", with: " ")
-                .replacingOccurrences(of: "\t", with: " ")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            let visible = collapsed.isEmpty ? String(prefix) : collapsed
-            return prefix.endIndex == text.endIndex ? visible : visible + "…"
+            return Self.collapsedPreview(text)
         case .image:
+            if !text.isEmpty { return Self.collapsedPreview(text) }
             return imageDimensionsLabel
         case .files:
             return fileNames.joined(separator: ", ")
         }
+    }
+
+    private static func collapsedPreview(_ text: String) -> String {
+        let prefix = text.prefix(ClipboardHistoryEditing.previewCharacters)
+        let collapsed = prefix
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\t", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let visible = collapsed.isEmpty ? String(prefix) : collapsed
+        return prefix.endIndex == text.endIndex ? visible : visible + "…"
     }
 
     /// Same clipboard content, regardless of when it was copied: re-copying
@@ -95,7 +100,12 @@ struct ClipboardHistoryEntry: Codable, Equatable, Identifiable {
     func searchableText(imageLabel: String) -> String {
         switch kind {
         case .text: return text
-        case .image: return "\(imageLabel) png \(imageDimensionsLabel)"
+        case .image:
+            let title = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if title.isEmpty {
+                return "\(imageLabel) png \(imageDimensionsLabel)"
+            }
+            return "\(title) \(imageLabel) png \(imageDimensionsLabel)"
         case .files:
             let names = fileNames.joined(separator: " ")
             let hasImage = filePaths.contains { ClipboardHistoryImageSupport.isImageFileName($0) }
@@ -442,6 +452,41 @@ enum ClipboardHistoryCapturePolicy {
         guard paths.count == 1,
               let directory else { return false }
         return ScreenshotSupport.isCopiedScreenshot(URL(fileURLWithPath: paths[0]), in: directory)
+    }
+}
+
+/// What to keep from a pasteboard that often carries several representations
+/// of the same copy. Browser and screenshot copies put pixels, a file URL and
+/// leftover text on together; taking the file URL first stored a timestamped
+/// PNG name and dropped the picture, and taking the text first stored
+/// "awdawdawd" with no image at all.
+enum ClipboardHistoryCaptureSupport {
+    static let maxStoredImageBytes = 32 * 1_024 * 1_024
+    static let maxRawImageBytes = 128 * 1_024 * 1_024
+
+    enum Kind: Equatable {
+        case image, files, text
+    }
+
+    static func kind(hasImage: Bool, hasFiles: Bool, isCopiedScreenshot: Bool) -> Kind {
+        if hasImage || isCopiedScreenshot { return .image }
+        if hasFiles { return .files }
+        return .text
+    }
+
+    static func acceptsByteCount(_ count: Int, isPNG: Bool) -> Bool {
+        count > 0 && count <= (isPNG ? maxStoredImageBytes : maxRawImageBytes)
+    }
+
+    /// Accompanying text is the title of the image (as other clipboard apps
+    /// show it). File paths and empty strings are not titles.
+    static func imageTitle(from preferredText: String?) -> String? {
+        guard let raw = preferredText else { return nil }
+        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return nil }
+        if text.hasPrefix("/"), !text.contains(where: \.isWhitespace) { return nil }
+        if text.lowercased().hasPrefix("file:") { return nil }
+        return text
     }
 }
 
