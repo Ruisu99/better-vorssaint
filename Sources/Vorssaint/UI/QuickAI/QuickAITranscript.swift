@@ -16,8 +16,12 @@ struct QuickAIMessageBubble: View {
     let message: QuickAISupport.Message
     var compact: Bool = false
     var isStreaming: Bool = false
+    @State private var expanded = false
 
     private var strings: QuickAIFeatureStrings { FeatureStrings.quickAI(L10n.shared.language) }
+    private var collapsed: Bool {
+        QuickAITranscript.isUser(message) && QuickAISupport.shouldCollapseMessage(message.content)
+    }
 
     var body: some View {
         let isUser = QuickAITranscript.isUser(message)
@@ -31,12 +35,23 @@ struct QuickAIMessageBubble: View {
                     .padding(.bottom, 6)
             }
             VStack(alignment: isUser ? .trailing : .leading, spacing: compact ? 6 : 8) {
+                if message.hasPhotos {
+                    HStack(spacing: 6) {
+                        ForEach(message.images) { photo in
+                            QuickAIPhotoThumb(
+                                fileName: photo.fileName,
+                                title: photo.title,
+                                size: compact ? 52 : 72
+                            )
+                        }
+                    }
+                }
                 Group {
                     if message.content.isEmpty && isStreaming {
                         QuickAITypingDots()
                             .padding(.horizontal, compact ? 10 : 12)
                             .padding(.vertical, compact ? 8 : 10)
-                    } else {
+                    } else if !message.content.isEmpty {
                         HStack(alignment: .bottom, spacing: 4) {
                             bubbleBody(isUser: isUser)
                             if isStreaming {
@@ -54,6 +69,15 @@ struct QuickAIMessageBubble: View {
                               ? Color.accentColor.opacity(0.16)
                               : Color.primary.opacity(0.07))
                 )
+                if isUser, collapsed {
+                    Button(expanded ? strings.collapseMessage : strings.showMore) {
+                        expanded.toggle()
+                    }
+                    .font(.system(size: compact ? 10 : 11, weight: .semibold))
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 4)
+                }
                 if !isUser, !isStreaming, !message.content.isEmpty {
                     HStack(spacing: 12) {
                         Button(strings.copyResult) {
@@ -75,14 +99,17 @@ struct QuickAIMessageBubble: View {
 
     @ViewBuilder
     private func bubbleBody(isUser: Bool) -> some View {
+        let text = (collapsed && !expanded)
+            ? String(message.content.prefix(220)) + (message.content.count > 220 ? "…" : "")
+            : message.content
         if isUser {
-            Text(QuickAISupport.formattedReply(message.content))
+            Text(QuickAISupport.formattedReply(text))
                 .font(.system(size: compact ? 13 : 14))
                 .multilineTextAlignment(.trailing)
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
         } else {
-            QuickAIReplyBlocks(text: message.content, compact: compact)
+            QuickAIReplyBlocks(text: text, compact: compact)
         }
     }
 }

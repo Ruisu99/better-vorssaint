@@ -20,15 +20,18 @@ enum QuickAIClient {
 
         let useResponses = QuickAISupport.usesResponsesAPI(model: chat.model, webSearch: chat.webSearch)
         let url = useResponses ? QuickAISupport.responsesURL() : QuickAISupport.chatURL()
+        let imagesByMessage = QuickAIStore.resolvedImages(for: chat)
         let body = useResponses
             ? QuickAISupport.responsesBody(chat: chat,
                                            languageCode: languageCode,
                                            reasoningEffort: reasoningEffort,
-                                           stream: true)
+                                           stream: true,
+                                           imagesByMessage: imagesByMessage)
             : QuickAISupport.chatCompletionsBody(chat: chat,
                                                  languageCode: languageCode,
                                                  reasoningEffort: reasoningEffort,
-                                                 stream: true)
+                                                 stream: true,
+                                                 imagesByMessage: imagesByMessage)
         guard let body else { return .failure(.parse) }
 
         let request = QuickAISupport.request(url: url, apiKey: key, body: body, stream: true)

@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Vorssaint
 
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// The Command Bar's Quick AI face: the same field, a short transcript, and
 /// keys for follow-ups, keep, and the longer window.
@@ -36,9 +37,17 @@ struct QuickAICommandBarPane: View {
             .padding(.horizontal, 16)
             .padding(.top, 8)
 
+            if !service.pendingImages.isEmpty {
+                QuickAIPendingPhotos(compact: true)
+                    .padding(.horizontal, 16)
+            }
+
             if service.draft.messages.isEmpty, service.lastError == nil, !service.isSending {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(strings.followUpHint)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                    Text(strings.emptyChatHint)
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                     if !service.draft.contextNote.isEmpty {
@@ -96,10 +105,14 @@ struct QuickAICommandBarPane: View {
                         proxy.scrollTo("quick-ai-bar-end", anchor: .bottom)
                         CommandBarService.shared.refreshPanelLayout()
                     }
+                    .onChange(of: service.pendingImages.count) { _, _ in
+                        CommandBarService.shared.refreshPanelLayout()
+                    }
                 }
             }
 
             HStack(spacing: 10) {
+                QuickAIAttachMenu(compact: true)
                 Button(strings.keepChat) { service.persistDraft() }
                     .disabled(service.draft.messages.isEmpty)
                 Button(strings.openChats) { service.keepAndOpenWindow() }
@@ -119,6 +132,12 @@ struct QuickAICommandBarPane: View {
             .foregroundStyle(.secondary)
             .padding(.horizontal, 16)
             .padding(.bottom, 8)
+        }
+        .onChange(of: service.pendingImages.count) { _, _ in
+            CommandBarService.shared.refreshPanelLayout()
+        }
+        .onDrop(of: QuickAIImageCodec.dropTypes, isTargeted: .constant(false)) { providers in
+            service.attachDropProviders(providers)
         }
     }
 

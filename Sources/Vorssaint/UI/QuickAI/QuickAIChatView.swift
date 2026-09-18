@@ -2,116 +2,113 @@
 // Copyright (C) 2026 Vorssaint
 
 import SwiftUI
+import UniformTypeIdentifiers
 
-/// The longer chat window: sidebar of saved threads, a transcript, and a
-/// field that keeps follow-ups in the same conversation.
+/// Compact floating chat, in the same family as the Command Bar: one glass
+/// plate, the transcript, and a composer that takes photos as well as text.
 struct QuickAIChatView: View {
     @ObservedObject private var l10n = L10n.shared
     @ObservedObject private var service = QuickAIService.shared
     @State private var draftText = ""
+    @State private var isDropTargeted = false
 
     private var strings: QuickAIFeatureStrings { FeatureStrings.quickAI(l10n.language) }
 
     var body: some View {
-        NavigationSplitView {
-            sidebar
-                .frame(minWidth: 196)
-        } detail: {
-            VStack(spacing: 0) {
-                toolbar
-                Divider()
-                transcript
-                composer
-            }
+        VStack(spacing: 0) {
+            header
+            Divider().opacity(0.35)
+            transcript
+            composer
         }
-        .frame(minWidth: 680, minHeight: 460)
-    }
-
-    private var sidebar: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Button {
-                service.resetDraft(keepingContext: false)
-                draftText = ""
-            } label: {
-                Label(strings.newChat, systemImage: "plus")
-            }
-            .buttonStyle(.borderless)
-            .padding(.horizontal, 12)
-            .padding(.top, 10)
-
-            if service.savedChats.isEmpty {
-                Text(strings.emptyChats)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .padding(12)
-                Spacer()
-            } else {
-                List(service.savedChats, selection: chatSelection) { chat in
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(chat.title.isEmpty ? strings.pageTitle : chat.title)
-                            .lineLimit(1)
-                        Text(chat.updatedAt, style: .relative)
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                    }
-                    .padding(.vertical, 2)
-                    .contextMenu {
-                        Button(strings.deleteChat, role: .destructive) {
-                            service.deleteChat(chat.id)
-                        }
-                    }
-                }
-                .listStyle(.sidebar)
-            }
-        }
-        .navigationTitle(strings.savedChats)
-    }
-
-    private var chatSelection: Binding<UUID?> {
-        Binding(
-            get: { service.selectedChatID },
-            set: { id in
-                if let id { service.loadChat(id) }
-            }
+        .frame(minWidth: 440, minHeight: 420)
+        .background(HUDBackdrop(cornerRadius: CommandBarChrome.cornerRadius, contrast: .spotlight))
+        .clipShape(RoundedRectangle(cornerRadius: CommandBarChrome.cornerRadius, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: CommandBarChrome.cornerRadius, style: .continuous)
+                .strokeBorder(isDropTargeted ? Color.accentColor.opacity(0.7) : Color.clear, lineWidth: 2)
         )
+        .onDrop(of: QuickAIImageCodec.dropTypes, isTargeted: $isDropTargeted) { providers in
+            service.attachDropProviders(providers)
+        }
     }
 
-    private var toolbar: some View {
+    private var header: some View {
         HStack(spacing: 10) {
+            Image(systemName: "sparkle")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Color.accentColor)
+            Text(strings.pageTitle)
+                .font(.system(size: 13, weight: .semibold))
+            Spacer(minLength: 8)
             Picker(strings.modelLabel, selection: $service.model) {
                 ForEach(QuickAISupport.Model.allCases) { model in
                     Text(model.displayName).tag(model.rawValue)
                 }
             }
-            .frame(maxWidth: 180)
+            .labelsHidden()
+            .frame(maxWidth: 150)
             if !QuickAISupport.ReasoningEffort.options(for: service.model).isEmpty {
                 Picker(strings.intensityLabel, selection: $service.reasoningEffort) {
                     ForEach(QuickAISupport.ReasoningEffort.allCases) { effort in
                         Text(effort.displayName).tag(effort.rawValue)
                     }
                 }
-                .frame(maxWidth: 140)
+                .labelsHidden()
+                .frame(maxWidth: 110)
             }
             Toggle(service.webSearch ? strings.webSearchOn : strings.webSearchOff,
                    isOn: $service.webSearch)
                 .toggleStyle(.checkbox)
-            Spacer()
-            Button(strings.copyResult) { service.copyLastAssistantReply() }
-                .disabled(service.lastAssistantReply() == nil)
-            Button(strings.insertReply) { service.insertLastAssistantReplyAtCaret() }
-                .disabled(service.isSending || service.lastAssistantReply() == nil)
-            if !service.draft.messages.isEmpty {
-                Button(strings.keepChat) { service.persistDraft() }
+                .font(.caption)
+            Menu {
+                Button(strings.newChat) {
+                    service.resetDraft(keepingContext: false)
+                    draftText = ""
+                }
+                if !service.savedChats.isEmpty {
+                    Divider()
+                    ForEach(service.savedChats) { chat in
+                        Button {
+                            service.loadChat(chat.id)
+                        } label: {
+                            Text(chat.title.isEmpty ? strings.pageTitle : chat.title)
+                        }
+                    }
+                }
+                if service.selectedChatID != nil || !service.draft.messages.isEmpty {
+                    Divider()
+                    Button(strings.deleteChat, role: .destructive) {
+                        service.deleteChat(service.draft.id)
+                    }
+                }
+            } label: {
+                Image(systemName: "clock")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
             }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .help(strings.savedChats)
+            Button {
+                service.hideWindow()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 22, height: 22)
+                    .background(Circle().fill(Color.primary.opacity(0.08)))
+            }
+            .buttonStyle(.plain)
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 10)
+        .padding(.vertical, 12)
     }
 
     private var transcript: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 18) {
+                LazyVStack(alignment: .leading, spacing: 16) {
                     if !service.draft.contextNote.isEmpty {
                         Label(strings.attachedContext, systemImage: "text.cursor")
                             .font(.caption)
@@ -130,48 +127,12 @@ struct QuickAIChatView: View {
                             .foregroundStyle(.orange)
                     }
                     if service.draft.messages.isEmpty, service.lastError == nil, !service.isSending {
-                        VStack(alignment: .leading, spacing: 8) {
-                            if !service.draft.contextNote.isEmpty {
-                                HStack(spacing: 8) {
-                                    Button {
-                                        service.runSelectionAction(.improve)
-                                    } label: {
-                                        Label(strings.selectionImprove, systemImage: "wand.and.stars")
-                                    }
-                                    Button {
-                                        service.runSelectionAction(.summarize)
-                                    } label: {
-                                        Label(strings.selectionSummarize, systemImage: "doc.text")
-                                    }
-                                    Button {
-                                        service.runSelectionAction(.translate)
-                                    } label: {
-                                        Label(strings.selectionTranslate, systemImage: "character.book.closed")
-                                    }
-                                }
-                            }
-                            HStack(spacing: 8) {
-                                Button {
-                                    service.enableResearchMode()
-                                } label: {
-                                    Label(strings.researchThisQuestion, systemImage: "globe")
-                                }
-                                Button {
-                                    service.enableThinkHarder()
-                                } label: {
-                                    Label(strings.thinkHarder, systemImage: "lightbulb")
-                                }
-                                .foregroundStyle(service.isThinkHarderOn ? Color.accentColor : Color.secondary)
-                            }
-                        }
-                        .font(.system(size: 12, weight: .semibold))
-                        .buttonStyle(.plain)
-                        .foregroundStyle(.secondary)
+                        emptyState
                     }
                     Color.clear.frame(height: 1).id("quick-ai-end")
                 }
-                .padding(.horizontal, 20)
-                .padding(.vertical, 16)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 14)
             }
             .onChange(of: service.draft.messages.count) { _, _ in
                 proxy.scrollTo("quick-ai-end", anchor: .bottom)
@@ -182,29 +143,96 @@ struct QuickAIChatView: View {
         }
     }
 
+    private var emptyState: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(strings.emptyChatHint)
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
+            if !service.draft.contextNote.isEmpty {
+                HStack(spacing: 8) {
+                    chip(strings.selectionImprove, symbol: "wand.and.stars") {
+                        service.runSelectionAction(.improve)
+                    }
+                    chip(strings.selectionSummarize, symbol: "doc.text") {
+                        service.runSelectionAction(.summarize)
+                    }
+                    chip(strings.selectionTranslate, symbol: "character.book.closed") {
+                        service.runSelectionAction(.translate)
+                    }
+                }
+            }
+            HStack(spacing: 8) {
+                chip(strings.researchThisQuestion, symbol: "globe") {
+                    service.enableResearchMode()
+                }
+                chip(strings.thinkHarder, symbol: "lightbulb", selected: service.isThinkHarderOn) {
+                    service.enableThinkHarder()
+                }
+            }
+        }
+        .font(.system(size: 12, weight: .semibold))
+        .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
+    }
+
     private var composer: some View {
-        VStack(spacing: 0) {
-            Divider()
-            HStack(alignment: .bottom, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
+            Divider().opacity(0.35)
+            if isDropTargeted {
+                Text(strings.dropPhotoHint)
+                    .font(.caption)
+                    .foregroundStyle(Color.accentColor)
+                    .padding(.horizontal, 4)
+            }
+            QuickAIPendingPhotos()
+            HStack(alignment: .bottom, spacing: 8) {
+                QuickAIAttachMenu()
                 TextField(strings.askPlaceholder, text: $draftText, axis: .vertical)
                     .textFieldStyle(.plain)
                     .font(.system(size: 14))
                     .lineLimit(1...8)
                     .disabled(service.isSending)
                 Button(strings.send) { send() }
-                    .disabled(draftText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                              || service.isSending)
+                    .disabled(!service.canSendComposer(draftText) || service.isSending)
                     .keyboardShortcut(.return, modifiers: [])
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
             }
-            .padding(12)
-            .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(Color.primary.opacity(0.05))
-            )
-            .padding(12)
+            HStack(spacing: 12) {
+                Button(strings.copyResult) { service.copyLastAssistantReply() }
+                    .disabled(service.lastAssistantReply() == nil)
+                Button(strings.insertReply) { service.insertLastAssistantReplyAtCaret() }
+                    .disabled(service.isSending || service.lastAssistantReply() == nil)
+                if !service.draft.messages.isEmpty {
+                    Button(strings.keepChat) { service.persistDraft() }
+                }
+                Spacer()
+            }
+            .font(.system(size: 11, weight: .semibold))
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
         }
+        .padding(.horizontal, 14)
+        .padding(.bottom, 14)
+        .padding(.top, 8)
+    }
+
+    private func chip(_ title: String, symbol: String, selected: Bool = false,
+                      action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: symbol)
+                .font(.system(size: 11, weight: .semibold))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .foregroundStyle(selected ? Color.accentColor : Color.primary)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(selected
+                              ? Color.accentColor.opacity(0.16)
+                              : Color.primary.opacity(0.08))
+                )
+        }
+        .buttonStyle(.plain)
     }
 
     private func isStreaming(_ message: QuickAISupport.Message) -> Bool {

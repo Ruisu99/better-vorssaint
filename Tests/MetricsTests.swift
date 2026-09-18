@@ -15760,7 +15760,7 @@ struct MetricsTests {
                    "kill process formats keep their placeholders (\(language.rawValue))")
             let quickAIValues = Mirror(reflecting: FeatureStrings.quickAI(language)).children
                 .compactMap { $0.value as? String }
-            expect(quickAIValues.count == 47 && quickAIValues.allSatisfy { !$0.isEmpty },
+            expect(quickAIValues.count == 57 && quickAIValues.allSatisfy { !$0.isEmpty },
                    "every Quick AI string is set for \(language.rawValue)")
             expect(quickAIValues.allSatisfy { !$0.contains("—") },
                    "no em-dash in visible Quick AI strings (\(language.rawValue))")
@@ -15929,7 +15929,9 @@ struct MetricsTests {
                 && QuickAISupport.conversationSystemPrompt(webSearch: false, languageCode: "en")
                     .localizedCaseInsensitiveContains("blank line")
                 && QuickAISupport.conversationSystemPrompt(webSearch: false, languageCode: "en")
-                    .localizedCaseInsensitiveContains("numbered thinking steps"),
+                    .localizedCaseInsensitiveContains("numbered thinking steps")
+                && QuickAISupport.conversationSystemPrompt(webSearch: false, languageCode: "en")
+                    .localizedCaseInsensitiveContains("photos"),
                "web search is only in the prompt when the person switched it on, and replies are asked to use spaced markdown")
         expect(QuickAISupport.needsWebSearch("Recherchiere Swift 6")
                 && QuickAISupport.needsWebSearch("Who is the mayor")
@@ -16172,6 +16174,56 @@ struct MetricsTests {
                 && quickAIChatViewSource.contains("enableResearchMode")
                 && quickAIChatViewSource.contains("runSelectionAction(.improve)"),
                "the Command Bar and the chat window can insert the last reply into the previous app")
+        let quickAIPhotosSource = (try? String(
+            contentsOfFile: "Sources/Vorssaint/UI/QuickAI/QuickAIPhotoViews.swift",
+            encoding: .utf8)) ?? ""
+        let quickAICodecSource = (try? String(
+            contentsOfFile: "Sources/Vorssaint/Services/QuickAI/QuickAIImageCodec.swift",
+            encoding: .utf8)) ?? ""
+        let quickAIStoreSource = (try? String(
+            contentsOfFile: "Sources/Vorssaint/Services/QuickAI/QuickAIStore.swift",
+            encoding: .utf8)) ?? ""
+        let commandBarPasteSource = (try? String(
+            contentsOfFile: "Sources/Vorssaint/Services/CommandBar/CommandBarService.swift",
+            encoding: .utf8)) ?? ""
+        expect(!quickAIChatViewSource.contains("NavigationSplitView")
+                && quickAIChatViewSource.contains("HUDBackdrop")
+                && quickAIChatViewSource.contains("QuickAIAttachMenu")
+                && quickAIChatViewSource.contains("onDrop")
+                && quickAIChatViewSource.contains("pendingImages")
+                && quickAIPaneSource.contains("QuickAIPendingPhotos")
+                && quickAIPaneSource.contains("QuickAIAttachMenu")
+                && quickAIPaneSource.contains("onDrop")
+                && quickAIPaneSource.contains("emptyChatHint")
+                && quickAITranscriptSource.contains("hasPhotos")
+                && quickAITranscriptSource.contains("showMore")
+                && quickAIPhotosSource.contains("fromClipboardHistory")
+                && quickAIPhotosSource.contains("pastePhoto")
+                && quickAICodecSource.contains("pixelData(from:")
+                && quickAICodecSource.contains("images(from pasteboard:")
+                && quickAIStoreSource.contains("Images")
+                && quickAIStoreSource.contains("resolvedImages")
+                && quickAIServiceSource.contains("pasteImagesFromPasteboard")
+                && quickAIServiceSource.contains("attachClipboardHistoryImage")
+                && quickAIServiceSource.contains("pendingImages")
+                && quickAIServiceSource.contains("KeyableQuickAIPanel")
+                && quickAIServiceSource.contains("borderless")
+                && quickAIClientSource.contains("imagesByMessage")
+                && commandBarPasteSource.contains("pasteImagesFromPasteboard")
+                && commandBarPasteSource.contains("canSendComposer"),
+               "Quick AI takes photos from paste, clipboard history and drop, and the window is a compact glass plate")
+        expect(QuickAISupport.canSend(text: "", imageCount: 1)
+                && !QuickAISupport.canSend(text: "   ", imageCount: 0)
+                && QuickAISupport.canSend(text: "Hi", imageCount: 0)
+                && QuickAISupport.sanitizedImageFileName("\(UUID().uuidString).jpeg") != nil
+                && QuickAISupport.sanitizedImageFileName("../secret.jpeg") == "secret.jpeg"
+                && QuickAISupport.sanitizedImageFileName("note.txt") == nil
+                && QuickAISupport.sanitizedImageFileName(".hidden.jpeg") == nil
+                && QuickAISupport.dataURL(mimeType: "image/jpeg", data: Data([0xFF, 0xD8]))
+                    .hasPrefix("data:image/jpeg;base64,")
+                && QuickAISupport.shouldCollapseMessage(String(repeating: "line\n", count: 12))
+                && !QuickAISupport.shouldCollapseMessage("short"),
+               "photos can be sent without text, file names stay inside the image folder, and long turns collapse")
         let folder = FileManager.default.temporaryDirectory
             .appendingPathComponent("quick-ai-tests-\(UUID().uuidString)", isDirectory: true)
         let chatsURL = folder.appendingPathComponent("chats.json")
@@ -16186,6 +16238,77 @@ struct MetricsTests {
         expect(QuickAIStore.saveChats([seeded], to: chatsURL)
                 && QuickAIStore.loadChats(from: chatsURL).first?.title == "Hello there",
                "saved chats round-trip as JSON next to the key, never inside it")
+        let photoName = UUID().uuidString + ".jpeg"
+        let imagesDir = folder.appendingPathComponent("Images", isDirectory: true)
+        let photoBytes = Data([0xFF, 0xD8, 0xFF, 0xD9])
+        expect(QuickAIStore.saveImageData(photoBytes, fileName: photoName, directory: imagesDir) == photoName
+                && QuickAIStore.loadImageData(named: photoName, directory: imagesDir) == photoBytes,
+               "chat photos are stored as files next to the JSON, not as base64 inside it")
+        var photoChat = QuickAISupport.Chat(model: "gpt-4o-mini")
+        let attachment = QuickAISupport.ImageAttachment(fileName: photoName,
+                                                        mimeType: "image/jpeg",
+                                                        width: 8,
+                                                        height: 8,
+                                                        title: "shot")
+        expect(QuickAISupport.appending(userText: "   ", images: [], to: photoChat) == nil,
+               "whitespace without a photo is still not a turn")
+        photoChat = QuickAISupport.appending(userText: "", images: [attachment], to: photoChat)!
+        expect(photoChat.title == "shot"
+                && photoChat.messages.first?.hasPhotos == true
+                && photoChat.messages.first?.content.isEmpty == true,
+               "a photo with no caption still opens a chat")
+        let dataURL = QuickAISupport.dataURL(mimeType: "image/jpeg", data: photoBytes)
+        let imagesByMessage = [photoChat.messages[0].id: [
+            QuickAISupport.ResolvedImage(mimeType: "image/jpeg", dataURL: dataURL),
+        ]]
+        if let visionData = QuickAISupport.chatCompletionsBody(chat: photoChat,
+                                                               languageCode: "en",
+                                                               imagesByMessage: imagesByMessage),
+           let visionObject = try? JSONSerialization.jsonObject(with: visionData) as? [String: Any],
+           let visionMessages = visionObject["messages"] as? [[String: Any]],
+           let user = visionMessages.last(where: { ($0["role"] as? String) == "user" }),
+           let parts = user["content"] as? [[String: Any]],
+           let imagePart = parts.first(where: { ($0["type"] as? String) == "image_url" }),
+           let imageURL = imagePart["image_url"] as? [String: Any] {
+            expect(imageURL["url"] as? String == dataURL,
+                   "chat completions send photos as image_url data URLs")
+        } else {
+            expect(false, "chat completions vision body is a content array")
+        }
+        if let responsesVision = QuickAISupport.responsesBody(chat: photoChat,
+                                                              languageCode: "en",
+                                                              imagesByMessage: imagesByMessage),
+           let responsesObject = try? JSONSerialization.jsonObject(with: responsesVision) as? [String: Any],
+           let input = responsesObject["input"] as? [[String: Any]],
+           let user = input.last(where: { ($0["role"] as? String) == "user" }),
+           let parts = user["content"] as? [[String: Any]] {
+            expect(parts.contains { ($0["type"] as? String) == "input_image"
+                    && ($0["image_url"] as? String) == dataURL },
+                   "the Responses API sends photos as input_image parts")
+        } else {
+            expect(false, "Responses API vision body is a content array")
+        }
+        let oldMessageJSON = """
+        {"role":"user","content":"Hi"}
+        """.data(using: .utf8)!
+        let decodedOld = try? JSONDecoder().decode(QuickAISupport.Message.self, from: oldMessageJSON)
+        expect(decodedOld?.content == "Hi" && decodedOld?.images.isEmpty == true,
+               "chats saved before photos still load")
+        if let encodedPhoto = try? JSONEncoder().encode(photoChat.messages[0]),
+           let roundPhoto = try? JSONDecoder().decode(QuickAISupport.Message.self, from: encodedPhoto) {
+            expect(roundPhoto.hasPhotos
+                    && roundPhoto.images.first?.fileName == photoName
+                    && roundPhoto.content.isEmpty,
+                   "a photo turn round-trips without putting pixels in the JSON")
+        } else {
+            expect(false, "a photo turn encodes as JSON")
+        }
+        let resolved = QuickAIStore.resolvedImages(for: photoChat, directory: imagesDir)
+        expect(resolved[photoChat.messages[0].id]?.first?.dataURL == dataURL,
+               "sending a chat reads photo bytes from the image folder")
+        QuickAIStore.sweepImages(keeping: [], directory: imagesDir)
+        expect(QuickAIStore.loadImageData(named: photoName, directory: imagesDir) == nil,
+               "photos that no chat still names are deleted")
         try? FileManager.default.removeItem(at: folder)
 
         for language in AppLanguage.allCases {

@@ -5,11 +5,21 @@ import AppKit
 import Carbon.HIToolbox
 import SwiftUI
 import ApplicationServices
+import UniformTypeIdentifiers
 
 /// Quick AI: a Command Bar mode for fast follow-ups, and a window for chats
 /// the person wants to keep. The OpenAI key never sits in UserDefaults.
 final class QuickAIService: ObservableObject {
     static let shared = QuickAIService()
+    static let windowSize = NSSize(width: CommandBarChrome.width, height: 640)
+
+    struct PendingImage: Identifiable, Equatable {
+        var id: UUID
+        var fileName: String
+        var title: String
+        var width: Int
+        var height: Int
+    }
 
     @Published private(set) var draft = QuickAISupport.Chat()
     @Published private(set) var savedChats: [QuickAISupport.Chat] = []
@@ -17,6 +27,7 @@ final class QuickAIService: ObservableObject {
     @Published private(set) var isSending = false
     @Published private(set) var lastError: String?
     @Published private(set) var hasAPIKey = false
+    @Published private(set) var pendingImages: [PendingImage] = []
     /// When a Command Bar selection action turns web search on for one session,
     /// that must not rewrite the person's saved preference.
     private var persistWebSearchPreference = true
@@ -98,10 +109,157 @@ final class QuickAIService: ObservableObject {
     // MARK: - Draft
 
     func resetDraft(keepingContext: Bool) {
+        clearPendingImages()
+        QuickAIStore.sweepImages(keeping: savedChats)
         let context = keepingContext ? draft.contextNote : ""
         draft = QuickAISupport.Chat(model: model, webSearch: webSearch, contextNote: context)
         selectedChatID = nil
         lastError = nil
+    }
+
+    func canSendComposer(_ text: String) -> Bool {
+        QuickAISupport.canSend(text: text, imageCount: pendingImages.count)
+    }
+
+    func previewImage(named fileName: String) -> NSImage? {
+        guard let data = QuickAIStore.loadImageData(named: fileName) else { return nil }
+        return NSImage(data: data)
+    }
+
+    func clipboardHistoryImages() -> [ClipboardHistoryEntry] {
+        guard AppFeature.clipboardHistory.isAvailable else { return [] }
+        return Array(ClipboardHistoryService.shared.entries
+            .filter { $0.kind == .image }
+            .prefix(12))
+    }
+
+    @discardableResult
+    func pasteImagesFromPasteboard(_ pasteboard: NSPasteboard = .general) -> Bool {
+        let images = QuickAIImageCodec.images(from: pasteboard)
+        guard !images.isEmpty else { return false }
+        var attached = false
+        for image in images {
+            if attachPrepared(image) { attached = true }
+        }
+        return attached
+    }
+
+    @discardableResult
+    func attachClipboardHistoryImage(_ id: UUID) -> Bool {
+        guard let entry = ClipboardHistoryService.shared.entries.first(where: { $0.id == id }),
+              entry.kind == .image,
+              let name = entry.imageFile,
+              let data = ClipboardImageStore.imageData(named: name)
+        else { return false }
+        let title = ClipboardHistoryCaptureSupport.imageTitle(from: entry.text)
+            ?? (entry.text.isEmpty ? entry.imageDimensionsLabel : entry.text)
+        return attachImageData(data, title: title)
+    }
+
+    @discardableResult
+    func attachImageData(_ data: Data, title: String?) -> Bool {
+        guard let prepared = QuickAIImageCodec.prepare(data: data, title: title ?? "") else {
+            lastError = FeatureStrings.quickAI(L10n.shared.language).errorNoPhoto
+            return false
+        }
+        return attachPrepared(prepared)
+    }
+
+    @discardableResult
+    func attachFileURL(_ url: URL) -> Bool {
+        guard let prepared = QuickAIImageCodec.prepare(fileURL: url) else {
+            lastError = FeatureStrings.quickAI(L10n.shared.language).errorNoPhoto
+            return false
+        }
+        return attachPrepared(prepared)
+    }
+
+    @discardableResult
+    func attachDropProviders(_ providers: [NSItemProvider]) -> Bool {
+        if pasteImagesFromPasteboard(NSPasteboard(name: .drag)) { return true }
+        var accepted = false
+        for provider in providers.prefix(QuickAISupport.maximumImagesPerMessage) {
+            if provider.hasItemConformingToTypeIdentifier(UTType.image.identifier) {
+                accepted = true
+                provider.loadDataRepresentation(forTypeIdentifier: UTType.image.identifier) { [weak self] data, _ in
+                    guard let data else { return }
+                    DispatchQueue.main.async {
+                        _ = self?.attachImageData(data, title: nil)
+                    }
+                }
+            } else if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
+                accepted = true
+                provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { [weak self] item, _ in
+                    let url: URL?
+                    if let value = item as? URL {
+                        url = value
+                    } else if let data = item as? Data {
+                        url = URL(dataRepresentation: data, relativeTo: nil)
+                    } else {
+                        url = nil
+                    }
+                    guard let url else { return }
+                    DispatchQueue.main.async {
+                        _ = self?.attachFileURL(url)
+                    }
+                }
+            }
+        }
+        return accepted
+    }
+
+    func removePendingImage(_ id: UUID) {
+        guard let index = pendingImages.firstIndex(where: { $0.id == id }) else { return }
+        QuickAIStore.deleteImage(named: pendingImages[index].fileName)
+        pendingImages.remove(at: index)
+    }
+
+    func clearPendingImages() {
+        for image in pendingImages {
+            QuickAIStore.deleteImage(named: image.fileName)
+        }
+        pendingImages = []
+    }
+
+    func stepSavedChat(_ delta: Int) {
+        if !draft.messages.isEmpty { persistDraft() }
+        let chats = savedChats
+        guard !chats.isEmpty else { return }
+        let current = selectedChatID ?? draft.id
+        guard let index = chats.firstIndex(where: { $0.id == current }) else {
+            if let first = chats.first { loadChat(first.id) }
+            return
+        }
+        let next = (index + delta % chats.count + chats.count) % chats.count
+        loadChat(chats[next].id)
+    }
+
+    @discardableResult
+    private func attachPrepared(_ prepared: QuickAIImageCodec.Prepared) -> Bool {
+        guard pendingImages.count < QuickAISupport.maximumImagesPerMessage else { return false }
+        let fileName = UUID().uuidString + ".jpeg"
+        guard QuickAIStore.saveImageData(prepared.data, fileName: fileName) != nil else {
+            lastError = FeatureStrings.quickAI(L10n.shared.language).errorNoPhoto
+            return false
+        }
+        pendingImages.append(PendingImage(id: UUID(),
+                                          fileName: fileName,
+                                          title: prepared.title,
+                                          width: prepared.width,
+                                          height: prepared.height))
+        lastError = nil
+        return true
+    }
+
+    private func pendingAttachments() -> [QuickAISupport.ImageAttachment] {
+        pendingImages.map {
+            QuickAISupport.ImageAttachment(id: $0.id,
+                                           fileName: $0.fileName,
+                                           mimeType: "image/jpeg",
+                                           width: $0.width,
+                                           height: $0.height,
+                                           title: $0.title)
+        }
     }
 
     func attachContext(_ text: String) {
@@ -171,15 +329,21 @@ final class QuickAIService: ObservableObject {
             lastError = FeatureStrings.quickAI(L10n.shared.language).noKey
             return
         }
+        let photos = pendingAttachments()
+        guard QuickAISupport.canSend(text: text, imageCount: photos.count) else {
+            lastError = FeatureStrings.quickAI(L10n.shared.language).errorEmpty
+            return
+        }
         if QuickAISupport.needsWebSearch(text) {
             applySessionWebSearch(true)
         }
         applySessionReasoning(QuickAISupport.reasoningEffortForSend(text, current: reasoningEffort))
         let effort = reasoningEffort
-        guard let next = QuickAISupport.appending(userText: text, to: draft) else {
+        guard let next = QuickAISupport.appending(userText: text, images: photos, to: draft) else {
             lastError = FeatureStrings.quickAI(L10n.shared.language).errorEmpty
             return
         }
+        pendingImages = []
         draft = next
         lastError = nil
         isSending = true
@@ -235,6 +399,8 @@ final class QuickAIService: ObservableObject {
 
     func loadChat(_ id: UUID) {
         cancel()
+        clearPendingImages()
+        QuickAIStore.sweepImages(keeping: savedChats)
         guard let chat = savedChats.first(where: { $0.id == id }) else { return }
         draft = chat
         selectedChatID = id
@@ -346,17 +512,28 @@ final class QuickAIService: ObservableObject {
 
     private func ensurePanel() -> NSPanel {
         if let panel { return panel }
-        let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 720, height: 520),
-                              styleMask: [.titled, .closable, .resizable, .fullSizeContentView],
-                              backing: .buffered,
-                              defer: false)
+        let panel = KeyableQuickAIPanel(contentRect: NSRect(origin: .zero, size: Self.windowSize),
+                                        styleMask: [.borderless, .resizable],
+                                        backing: .buffered,
+                                        defer: false)
         panel.title = FeatureStrings.quickAI(L10n.shared.language).pageTitle
         panel.isReleasedWhenClosed = false
         panel.hidesOnDeactivate = false
+        panel.isFloatingPanel = true
         panel.level = .floating
-        panel.titlebarAppearsTransparent = true
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = true
+        panel.isMovableByWindowBackground = true
+        panel.minSize = NSSize(width: 440, height: 420)
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        panel.contentViewController = NSHostingController(rootView: QuickAIChatView())
+        let host = NSHostingController(rootView: QuickAIChatView())
+        host.sizingOptions = []
+        host.view.wantsLayer = true
+        host.view.layer?.backgroundColor = NSColor.clear.cgColor
+        host.view.layer?.isOpaque = false
+        panel.contentViewController = host
+        panel.setContentSize(Self.windowSize)
         panel.delegate = CloseForwarder.shared
         CloseForwarder.shared.onClose = { [weak self] in self?.hideWindow() }
         self.panel = panel
@@ -366,12 +543,30 @@ final class QuickAIService: ObservableObject {
     private func installKeyMonitor() {
         guard keyMonitor == nil else { return }
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard event.keyCode == UInt16(kVK_Escape),
-                  event.modifierFlags.intersection([.command, .option, .control, .shift]).isEmpty,
-                  let self, self.panel?.isKeyWindow == true
-            else { return event }
-            self.hideWindow()
-            return nil
+            guard let self, self.panel?.isKeyWindow == true else { return event }
+            let modifiers = event.modifierFlags.intersection([.command, .option, .control, .shift])
+            if event.keyCode == UInt16(kVK_Escape), modifiers.isEmpty {
+                self.hideWindow()
+                return nil
+            }
+            if modifiers == [.command] {
+                switch event.charactersIgnoringModifiers?.lowercased() {
+                case "v":
+                    if self.pasteImagesFromPasteboard() { return nil }
+                case "n":
+                    self.resetDraft(keepingContext: false)
+                    return nil
+                case "[":
+                    self.stepSavedChat(-1)
+                    return nil
+                case "]":
+                    self.stepSavedChat(1)
+                    return nil
+                default:
+                    break
+                }
+            }
+            return event
         }
     }
 
@@ -400,7 +595,13 @@ final class QuickAIService: ObservableObject {
 }
 
 /// NSPanel needs a delegate to swallow the red close button without destroying
-/// the window. The service stays the owner.
+/// the window. The service stays the owner. Borderless panels also refuse key
+/// status unless we say otherwise, and the composer needs it for typing.
+private final class KeyableQuickAIPanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { true }
+}
+
 private final class CloseForwarder: NSObject, NSWindowDelegate {
     static let shared = CloseForwarder()
     var onClose: (() -> Void)?

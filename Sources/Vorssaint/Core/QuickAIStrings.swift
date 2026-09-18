@@ -53,6 +53,16 @@ struct QuickAIFeatureStrings {
     let thinkHarder: String
     let insertWithCommandReturn: String
     let researchThisQuestion: String
+    let attachPhoto: String
+    let pastePhoto: String
+    let fromClipboardHistory: String
+    let dropPhotoHint: String
+    let photoAttached: String
+    let removePhoto: String
+    let showMore: String
+    let collapseMessage: String
+    let emptyChatHint: String
+    let errorNoPhoto: String
 }
 
 extension FeatureStrings {
@@ -123,7 +133,17 @@ extension QuickAIFeatureStrings {
         insertReply: "Insert",
         thinkHarder: "Think harder",
         insertWithCommandReturn: "⌘Return inserts",
-        researchThisQuestion: "Research this"
+        researchThisQuestion: "Research this",
+        attachPhoto: "Add photo",
+        pastePhoto: "Paste photo",
+        fromClipboardHistory: "Clipboard history",
+        dropPhotoHint: "Drop a photo here",
+        photoAttached: "Photo",
+        removePhoto: "Remove",
+        showMore: "Show more",
+        collapseMessage: "Collapse",
+        emptyChatHint: "Ask a question, or paste a photo.",
+        errorNoPhoto: "That photo could not be attached."
     )
 
     static let de = QuickAIFeatureStrings(
@@ -173,7 +193,17 @@ extension QuickAIFeatureStrings {
         insertReply: "Einfügen",
         thinkHarder: "Gründlicher denken",
         insertWithCommandReturn: "⌘Return fügt ein",
-        researchThisQuestion: "Das recherchieren"
+        researchThisQuestion: "Das recherchieren",
+        attachPhoto: "Foto hinzufügen",
+        pastePhoto: "Foto einfügen",
+        fromClipboardHistory: "Zwischenablage",
+        dropPhotoHint: "Foto hier ablegen",
+        photoAttached: "Foto",
+        removePhoto: "Entfernen",
+        showMore: "Mehr anzeigen",
+        collapseMessage: "Einklappen",
+        emptyChatHint: "Stell eine Frage oder füge ein Foto ein.",
+        errorNoPhoto: "Dieses Foto konnte nicht angehängt werden."
     )
 
     static let ptBR = QuickAIFeatureStrings(
@@ -223,7 +253,17 @@ extension QuickAIFeatureStrings {
         insertReply: "Inserir",
         thinkHarder: "Pensar mais",
         insertWithCommandReturn: "⌘Return insere",
-        researchThisQuestion: "Pesquisar isto"
+        researchThisQuestion: "Pesquisar isto",
+        attachPhoto: "Adicionar foto",
+        pastePhoto: "Colar foto",
+        fromClipboardHistory: "Histórico da área de transferência",
+        dropPhotoHint: "Solte uma foto aqui",
+        photoAttached: "Foto",
+        removePhoto: "Remover",
+        showMore: "Mostrar mais",
+        collapseMessage: "Recolher",
+        emptyChatHint: "Faça uma pergunta, ou cole uma foto.",
+        errorNoPhoto: "Não foi possível anexar essa foto."
     )
 
     static let tr = QuickAIFeatureStrings(
@@ -273,7 +313,17 @@ extension QuickAIFeatureStrings {
         insertReply: "Ekle",
         thinkHarder: "Daha derin düşün",
         insertWithCommandReturn: "⌘Return yapıştırır",
-        researchThisQuestion: "Bunu araştır"
+        researchThisQuestion: "Bunu araştır",
+        attachPhoto: "Fotoğraf ekle",
+        pastePhoto: "Fotoğraf yapıştır",
+        fromClipboardHistory: "Pano geçmişi",
+        dropPhotoHint: "Bir fotoğraf bırak",
+        photoAttached: "Fotoğraf",
+        removePhoto: "Kaldır",
+        showMore: "Daha fazla göster",
+        collapseMessage: "Daralt",
+        emptyChatHint: "Bir soru sor veya bir fotoğraf yapıştır.",
+        errorNoPhoto: "Bu fotoğraf eklenemedi."
     )
 
     static let ru = QuickAIFeatureStrings(
@@ -323,7 +373,17 @@ extension QuickAIFeatureStrings {
         insertReply: "Вставить",
         thinkHarder: "Думать глубже",
         insertWithCommandReturn: "⌘Return вставляет",
-        researchThisQuestion: "Исследовать это"
+        researchThisQuestion: "Исследовать это",
+        attachPhoto: "Добавить фото",
+        pastePhoto: "Вставить фото",
+        fromClipboardHistory: "История буфера",
+        dropPhotoHint: "Перетащите фото сюда",
+        photoAttached: "Фото",
+        removePhoto: "Убрать",
+        showMore: "Показать ещё",
+        collapseMessage: "Свернуть",
+        emptyChatHint: "Задайте вопрос или вставьте фото.",
+        errorNoPhoto: "Это фото не удалось прикрепить."
     )
 
     static let es = QuickAIFeatureStrings(
@@ -373,7 +433,17 @@ extension QuickAIFeatureStrings {
         insertReply: "Insertar",
         thinkHarder: "Pensar más",
         insertWithCommandReturn: "⌘Return inserta",
-        researchThisQuestion: "Investigar esto"
+        researchThisQuestion: "Investigar esto",
+        attachPhoto: "Añadir foto",
+        pastePhoto: "Pegar foto",
+        fromClipboardHistory: "Historial del portapapeles",
+        dropPhotoHint: "Suelta una foto aquí",
+        photoAttached: "Foto",
+        removePhoto: "Quitar",
+        showMore: "Mostrar más",
+        collapseMessage: "Contraer",
+        emptyChatHint: "Haz una pregunta, o pega una foto.",
+        errorNoPhoto: "No se pudo adjuntar esa foto."
     )
 
     static let fr = QuickAIFeatureStrings(
@@ -423,7 +493,17 @@ extension QuickAIFeatureStrings {
         insertReply: "Insérer",
         thinkHarder: "Réfléchir plus",
         insertWithCommandReturn: "⌘Retour insère",
-        researchThisQuestion: "Rechercher ceci"
+        researchThisQuestion: "Rechercher ceci",
+        attachPhoto: "Ajouter une photo",
+        pastePhoto: "Coller la photo",
+        fromClipboardHistory: "Historique du presse-papiers",
+        dropPhotoHint: "Déposez une photo ici",
+        photoAttached: "Photo",
+        removePhoto: "Retirer",
+        showMore: "Afficher plus",
+        collapseMessage: "Réduire",
+        emptyChatHint: "Posez une question, ou collez une photo.",
+        errorNoPhoto: "Cette photo n’a pas pu être jointe."
     )
 
     static let it = QuickAIFeatureStrings(
@@ -473,7 +553,17 @@ extension QuickAIFeatureStrings {
         insertReply: "Inserisci",
         thinkHarder: "Pensa di più",
         insertWithCommandReturn: "⌘Invio inserisce",
-        researchThisQuestion: "Cerca informazioni"
+        researchThisQuestion: "Cerca informazioni",
+        attachPhoto: "Aggiungi foto",
+        pastePhoto: "Incolla foto",
+        fromClipboardHistory: "Cronologia degli appunti",
+        dropPhotoHint: "Trascina una foto qui",
+        photoAttached: "Foto",
+        removePhoto: "Rimuovi",
+        showMore: "Mostra di più",
+        collapseMessage: "Comprimi",
+        emptyChatHint: "Fai una domanda, oppure incolla una foto.",
+        errorNoPhoto: "Questa foto non è stata allegata."
     )
 
     static let ja = QuickAIFeatureStrings(
@@ -523,7 +613,17 @@ extension QuickAIFeatureStrings {
         insertReply: "挿入",
         thinkHarder: "しっかり考える",
         insertWithCommandReturn: "⌘Returnで挿入",
-        researchThisQuestion: "これを調べる"
+        researchThisQuestion: "これを調べる",
+        attachPhoto: "写真を追加",
+        pastePhoto: "写真を貼り付け",
+        fromClipboardHistory: "クリップボード履歴",
+        dropPhotoHint: "ここに写真をドロップ",
+        photoAttached: "写真",
+        removePhoto: "削除",
+        showMore: "もっと見る",
+        collapseMessage: "折りたたむ",
+        emptyChatHint: "質問するか、写真を貼り付けてください。",
+        errorNoPhoto: "その写真は添付できませんでした。"
     )
 
     static let ko = QuickAIFeatureStrings(
@@ -573,7 +673,17 @@ extension QuickAIFeatureStrings {
         insertReply: "삽입",
         thinkHarder: "더 깊게 생각",
         insertWithCommandReturn: "⌘Return으로 삽입",
-        researchThisQuestion: "이 내용 조사"
+        researchThisQuestion: "이 내용 조사",
+        attachPhoto: "사진 추가",
+        pastePhoto: "사진 붙여넣기",
+        fromClipboardHistory: "클립보드 기록",
+        dropPhotoHint: "여기에 사진을 놓으세요",
+        photoAttached: "사진",
+        removePhoto: "제거",
+        showMore: "더 보기",
+        collapseMessage: "접기",
+        emptyChatHint: "질문을 하거나 사진을 붙여넣으세요.",
+        errorNoPhoto: "그 사진을 첨부할 수 없습니다."
     )
 
     static let zhHans = QuickAIFeatureStrings(
@@ -623,7 +733,17 @@ extension QuickAIFeatureStrings {
         insertReply: "插入",
         thinkHarder: "再想深一点",
         insertWithCommandReturn: "⌘Return 插入",
-        researchThisQuestion: "检索此内容"
+        researchThisQuestion: "检索此内容",
+        attachPhoto: "添加照片",
+        pastePhoto: "粘贴照片",
+        fromClipboardHistory: "剪贴板历史",
+        dropPhotoHint: "把照片拖到这里",
+        photoAttached: "照片",
+        removePhoto: "移除",
+        showMore: "显示更多",
+        collapseMessage: "收起",
+        emptyChatHint: "提出问题，或粘贴一张照片。",
+        errorNoPhoto: "无法附加这张照片。"
     )
 
     static let zhTW = QuickAIFeatureStrings(
@@ -673,7 +793,17 @@ extension QuickAIFeatureStrings {
         insertReply: "插入",
         thinkHarder: "再想深一點",
         insertWithCommandReturn: "⌘Return 插入",
-        researchThisQuestion: "檢索此內容"
+        researchThisQuestion: "檢索此內容",
+        attachPhoto: "新增照片",
+        pastePhoto: "貼上照片",
+        fromClipboardHistory: "剪貼簿記錄",
+        dropPhotoHint: "把照片拖到這裡",
+        photoAttached: "照片",
+        removePhoto: "移除",
+        showMore: "顯示更多",
+        collapseMessage: "收合",
+        emptyChatHint: "提出問題，或貼上一張照片。",
+        errorNoPhoto: "無法附加這張照片。"
     )
 
     static let zhHK = QuickAIFeatureStrings(
@@ -723,6 +853,16 @@ extension QuickAIFeatureStrings {
         insertReply: "插入",
         thinkHarder: "再想深一點",
         insertWithCommandReturn: "⌘Return 插入",
-        researchThisQuestion: "檢索此內容"
+        researchThisQuestion: "檢索此內容",
+        attachPhoto: "新增照片",
+        pastePhoto: "貼上照片",
+        fromClipboardHistory: "剪貼簿記錄",
+        dropPhotoHint: "把照片拖到這裡",
+        photoAttached: "照片",
+        removePhoto: "移除",
+        showMore: "顯示更多",
+        collapseMessage: "收合",
+        emptyChatHint: "提出問題，或貼上一張照片。",
+        errorNoPhoto: "無法附加這張照片。"
     )
 }

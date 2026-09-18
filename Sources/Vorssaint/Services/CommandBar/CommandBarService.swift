@@ -1815,7 +1815,7 @@ final class CommandBarService: ObservableObject {
     func sendQuickAI() {
         guard case .quickAI = mode else { return }
         let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
+        guard QuickAIService.shared.canSendComposer(text) else { return }
         query = ""
         QuickAIService.shared.send(text, fromCommandBar: true)
         refreshPanelLayout()
@@ -2594,6 +2594,10 @@ final class CommandBarService: ObservableObject {
         case .search, .argument, .naming, .quickAI: break
         default: return false
         }
+        if case .quickAI = mode, QuickAIService.shared.pasteImagesFromPasteboard() {
+            refreshPanelLayout()
+            return true
+        }
         if fieldIsComposing(in: panel) { return false }
         if let editor = panel.firstResponder as? NSTextView {
             editor.paste(nil)
@@ -3148,6 +3152,11 @@ final class CommandBarService: ObservableObject {
                 case "x" where navigationModifiers == [.command]:
                     return NSApp.sendAction(#selector(NSText.cut(_:)), to: nil, from: panel) ? nil : event
                 case "v" where navigationModifiers == [.command]:
+                    if case .quickAI = self.mode,
+                       QuickAIService.shared.pasteImagesFromPasteboard() {
+                        self.refreshPanelLayout()
+                        return nil
+                    }
                     if NSApp.sendAction(#selector(NSText.paste(_:)), to: nil, from: panel) {
                         return nil
                     }
