@@ -12,6 +12,8 @@ enum QuickToolHUD {
     private static var scrollingPanel: ScrollingCapturePanel?
     private static var scrollingModel: ScrollingCaptureHUDModel?
     private static var dismissWork: DispatchWorkItem?
+    private static var dictationPanel: NSPanel?
+    private static var dictationModel: DictationHUDModel?
     /// How wide a message is allowed to get, on either of this file's two
     /// message panels. A confirmation is read at a
     /// glance, so anything past this is a preview rather than the whole value;
@@ -118,13 +120,17 @@ enum QuickToolHUD {
         let content = ScrollingCaptureHUDView(model: model,
                                               finishTitle: finishTitle,
                                               cancelTitle: cancelTitle,
-                                              onFinish: onFinish,
+                                              onFinish: {
+                                                  guard !model.isFinishing else { return }
+                                                  model.isFinishing = true
+                                                  onFinish()
+                                              },
                                               onCancel: onCancel)
-        let host = NSHostingController(rootView: AnyView(content))
-        host.view.layoutSubtreeIfNeeded()
-        let size = host.view.fittingSize
+        let host = ScrollingCaptureHostingView(rootView: AnyView(content))
+        host.layoutSubtreeIfNeeded()
+        let size = host.fittingSize
         let panel = ensureScrollingPanel()
-        panel.contentViewController = host
+        panel.contentView = host
         let frame = NSScreen.pointerVisibleFrame
         panel.setFrame(NSRect(x: frame.midX - size.width / 2,
                               y: frame.maxY - size.height - 24,
@@ -135,6 +141,61 @@ enum QuickToolHUD {
         panel.makeKey()
     }
 
+    /// A small, persistent HUD for dictation: shown while the hold key is
+    /// down, updated in place once transcription starts, and dismissed once
+    /// there is a result (or an error) rather than fading out on its own —
+    /// nobody should wonder whether a long dictation is still recording.
+    static func showDictation(message: String) {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { showDictation(message: message) }
+            return
+        }
+        let model = DictationHUDModel(message: message)
+        dictationModel = model
+        let content = DictationHUDView(model: model)
+        let host = NSHostingController(rootView: AnyView(content))
+        host.view.layoutSubtreeIfNeeded()
+        let size = host.view.fittingSize
+        let panel = ensureDictationPanel()
+        panel.contentViewController = host
+        let frame = NSScreen.pointerVisibleFrame
+        panel.setFrame(NSRect(x: frame.midX - size.width / 2,
+                              y: frame.maxY - size.height - 24,
+                              width: size.width,
+                              height: size.height),
+                       display: true)
+        panel.alphaValue = 0
+        panel.orderFrontRegardless()
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.12
+            panel.animator().alphaValue = 1
+        }
+    }
+
+    static func updateDictation(message: String) {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { updateDictation(message: message) }
+            return
+        }
+        dictationModel?.message = message
+    }
+
+    static func dismissDictation() {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { dismissDictation() }
+            return
+        }
+        guard let panel = dictationPanel, panel.isVisible else { return }
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = 0.18
+            panel.animator().alphaValue = 0
+        }, completionHandler: {
+            panel.orderOut(nil)
+            panel.contentViewController = nil
+            dictationModel = nil
+        })
+    }
+
     static func updateScrollingCapture(height: Int) {
         guard Thread.isMainThread else {
             DispatchQueue.main.async { updateScrollingCapture(height: height) }
@@ -143,13 +204,17 @@ enum QuickToolHUD {
         scrollingModel?.height = height
     }
 
+    static func markScrollingCaptureFinishing() {
+        scrollingModel?.isFinishing = true
+    }
+
     static func dismissScrollingCapture() {
         guard Thread.isMainThread else {
             DispatchQueue.main.async { dismissScrollingCapture() }
             return
         }
         scrollingPanel?.orderOut(nil)
-        scrollingPanel?.contentViewController = nil
+        scrollingPanel?.contentView = nil
         scrollingModel = nil
     }
 
@@ -205,6 +270,13 @@ enum QuickToolHUD {
         return panel
     }
 
+    private static func ensureDictationPanel() -> NSPanel {
+        if let dictationPanel { return dictationPanel }
+        let panel = makePanel()
+        dictationPanel = panel
+        return panel
+    }
+
     private static func ensureScrollingPanel() -> ScrollingCapturePanel {
         if let scrollingPanel { return scrollingPanel }
         let panel = ScrollingCapturePanel(contentRect: .zero,
@@ -218,10 +290,10 @@ enum QuickToolHUD {
     }
 
     private static func makePanel() -> NSPanel {
-        let panel = NSPanel(contentRect: .zero,
-                            styleMask: [.borderless, .nonactivatingPanel],
-                            backing: .buffered,
-                            defer: false)
+        let panel = OverlayPanel(contentRect: .zero,
+                                 styleMask: [.borderless, .nonactivatingPanel],
+                                 backing: .buffered,
+                                 defer: false)
         configure(panel)
         return panel
     }
@@ -259,15 +331,47 @@ private struct QuickToolCountdownView: View {
     }
 }
 
+private final class DictationHUDModel: ObservableObject {
+    @Published var message: String
+
+    init(message: String) {
+        self.message = message
+    }
+}
+
+private struct DictationHUDView: View {
+    @ObservedObject var model: DictationHUDModel
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "waveform")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Color.accentColor)
+            Text(model.message)
+                .font(.system(size: 12, weight: .semibold))
+                .lineLimit(1)
+                .frame(maxWidth: QuickToolHUD.messageWidthLimit, alignment: .leading)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 9)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+}
+
 /// A non-activating panel that can still own Return and Escape while the
 /// underlying window continues receiving pointer and scrolling events.
-private final class ScrollingCapturePanel: NSPanel {
+private final class ScrollingCapturePanel: OverlayPanel {
     override var canBecomeKey: Bool { true }
+}
+
+private final class ScrollingCaptureHostingView: NSHostingView<AnyView> {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
 
 private final class ScrollingCaptureHUDModel: ObservableObject {
     let message: String
     @Published var height = 0
+    @Published var isFinishing = false
 
     init(message: String) {
         self.message = message
@@ -283,9 +387,16 @@ private struct ScrollingCaptureHUDView: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: "rectangle.stack.fill")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Color.accentColor)
+            ZStack {
+                if model.isFinishing {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Image(systemName: "rectangle.stack.fill")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Color.accentColor)
+                }
+            }
+            .frame(width: 16, height: 16)
             VStack(alignment: .leading, spacing: 1) {
                 Text(model.message)
                     .font(.system(size: 12, weight: .semibold))
@@ -304,6 +415,7 @@ private struct ScrollingCaptureHUDView: View {
                 .controlSize(.small)
                 .keyboardShortcut(.cancelAction)
             Button(finishTitle, action: onFinish)
+                .disabled(model.isFinishing)
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
                 .keyboardShortcut(.defaultAction)

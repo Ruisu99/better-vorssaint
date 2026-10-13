@@ -1,0 +1,99 @@
+name: Personal build
+
+# Fork-only: GitHub builds the app so the Mac never has to. Official
+# vorssaint-utils never runs this job.
+on:
+  push:
+    branches: [main, "cursor/**"]
+  workflow_dispatch:
+
+concurrency:
+  group: personal-build
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    name: Build and publish zip
+    if: github.repository == 'Ruisu99/better-vorssaint'
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up signing
+        env:
+          SIGNING_CERT_P12: ${{ secrets.SIGNING_CERT_P12 }}
+          SIGNING_CERT_PASSWORD: ${{ secrets.SIGNING_CERT_PASSWORD }}
+        run: ./Tools/ci-setup-signing.sh
+
+      - name: Build
+        run: ./build.sh
+
+      - name: Verify personal signature
+        run: |
+          set -euo pipefail
+          APP="build/stage/Better Vorssaint.app"
+          INFO="$(codesign -dv --verbose=2 "$APP" 2>&1)"
+          echo "$INFO"
+          if printf '%s\n' "$INFO" | grep -q 'Signature=adhoc'; then
+            echo "Personal builds must keep a stable identity so TCC grants survive updates." >&2
+            exit 1
+          fi
+
+      - name: Selftest
+        run: ./build/BetterVorssaint --selftest
+
+      - name: Zip app
+        run: |
+          mkdir -p dist
+          ditto -c -k --keepParent "build/stage/Better Vorssaint.app" dist/BetterVorssaint.zip
+          ls -lh dist/BetterVorssaint.zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: BetterVorssaint
+          path: dist/BetterVorssaint.zip
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish personal-latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          NOTES="$(cat <<EOF
+          Better Vorssaint personal build from \`${GITHUB_SHA}\` on \`${GITHUB_REF_NAME}\`.
+
+          Personal fork of Vorssaint (GPL-3.0). Own app name and bundle id so it
+          does not fight the official app for the menu bar.
+
+          On your Mac (no Xcode):
+
+          \`\`\`sh
+          curl -fsSL https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${GITHUB_SHA}/Tools/install-latest.sh | zsh
+          \`\`\`
+
+          Or download BetterVorssaint.zip, unzip, drag to Applications, then right-click Open.
+
+          The installer updates Better Vorssaint in place and the zip is signed
+          with a stable identity so Accessibility and Screen Recording can stay
+          granted. It also removes older Vorssaint.app copies left by previous
+          fork installs and turns off automatic official updates.
+          EOF
+          )"
+          if gh release view personal-latest >/dev/null 2>&1; then
+            gh release delete personal-latest --yes
+          fi
+          gh api -X DELETE "repos/${GITHUB_REPOSITORY}/git/refs/tags/personal-latest" >/dev/null 2>&1 || true
+          gh release create personal-latest dist/BetterVorssaint.zip \
+            --target "$GITHUB_SHA" \
+            --title "Latest Better Vorssaint build" \
+            --notes "$NOTES" \
+            --prerelease \
+            --latest=false

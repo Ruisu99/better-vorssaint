@@ -4,14 +4,35 @@
 import Foundation
 
 /// Static identity of the app, shared by UI, notifications and tooling.
+///
+/// This build is the personal fork **Better Vorssaint** (`better-vorssaint`):
+/// same GPL codebase as Vorssaint, own name and bundle id so it never fights
+/// the official app for the menu bar or for Launch Services.
 enum AppInfo {
-    static let name = "Vorssaint"
-    static let copyright = "© 2026 Vorssaint"
+    static let name = "Better Vorssaint"
+    /// Short line under the name: makes the fork relationship obvious without
+    /// pretending to be the upstream project.
+    static let forkAttribution = "Personal fork of Vorssaint · better-vorssaint"
+    static let copyright = "© 2026 · based on Vorssaint (GPL-3.0)"
     static let websiteURL = URL(string: "https://vorssaint.com")!
-    static let repositoryURL = URL(string: "https://github.com/vorssaintapp/vorssaint-utils")!
+    static let repositoryURL = URL(string: "https://github.com/Ruisu99/better-vorssaint")!
+    static let upstreamRepositoryURL = URL(string: "https://github.com/vorssaintapp/vorssaint-utils")!
     static let coffeeURL = URL(string: "https://buymeacoffee.com/vorssaint")!
     static let discordURL = URL(string: "https://discord.gg/M6BwWH4BJp")!
     static let socialURL = URL(string: "https://x.com/vorssaint")!
+
+    static let releaseBundleID = "com.ruisu99.bettervorssaint"
+    static let developerBundleID = "com.ruisu99.bettervorssaint.dev"
+    /// Prefs and Application Support left by the earlier fork install that
+    /// still shipped as `com.vorssaint.utils`.
+    static let legacyForkBundleIDs = ["com.vorssaint.utils", "com.vorssaint.utils.dev"]
+
+    /// True for every build of this fork (release and Developer).
+    static var isPersonalFork: Bool {
+        let id = Bundle.main.bundleIdentifier ?? releaseBundleID
+        return id == releaseBundleID || id == developerBundleID
+            || id.hasPrefix("com.ruisu99.bettervorssaint")
+    }
 
     /// The bundle version. The fallback only applies to the bare binary
     /// (e.g. `--selftest`), never the shipped app, which reads its Info.plist.
@@ -19,7 +40,7 @@ enum AppInfo {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
     }
 
-    /// True for the local "Vorssaint (Developer)" build (bundle id ends in `.dev`).
+    /// True for the local "Better Vorssaint (Developer)" build (bundle id ends in `.dev`).
     /// It is never published and never auto-updates; all work is tested here first.
     static var isDeveloperBuild: Bool {
         (Bundle.main.bundleIdentifier ?? "").hasSuffix(".dev")
@@ -37,8 +58,9 @@ enum AppInfo {
     /// The git commit a Developer build was compiled from, e.g. "ed2ebba · 2026-06-15 21:30"
     /// (or with a "-dirty" suffix on the SHA for uncommitted changes). build.sh stamps
     /// this into the Developer bundle only, so you can confirm at a glance that the
-    /// running dev app matches the source you are about to change. nil in the official app.
+    /// running dev app matches the source you are about to change. nil in the release app.
     static var buildCommit: String? {
         Bundle.main.object(forInfoDictionaryKey: "VorssaintBuildCommit") as? String
+            ?? Bundle.main.object(forInfoDictionaryKey: "BetterVorssaintBuildCommit") as? String
     }
 }
