@@ -355,9 +355,10 @@ final class CommandBarService: ObservableObject {
         let panel = ensurePanel()
         // The window that shows the bar takes the keyboard before anything is
         // prepared, so keys typed right after the shortcut wait in this app
-        // for the field instead of reaching the app in front.
+        // for the field instead of reaching the app in front. The selection
+        // snapshot has to land before that, because many editors clear
+        // AXSelectedText once this panel becomes key.
         let reopening = isVisible
-        if !reopening { claimKeyboard(with: panel) }
         if AppFeature.textSnippets.isAvailable {
             TextSnippetService.shared.setCommandBarVisible(true)
         }
@@ -365,25 +366,15 @@ final class CommandBarService: ObservableObject {
         if let stableKey { deferredRowShortcut.schedule(stableKey, for: id) }
         reloadPreferenceCaches()
         query = ""
-        // Remember the app that had the selection before any panel work
-        // changes key status, then fill home so fade and lift move one surface.
         rememberPasteTarget()
         if presentationLifecycle.completeHomeHydrationForOpening(id) {
             prepareHomeForCurrentPresentation()
         }
         snapshotSelectedText()
         refreshResults()
-        CommandBarQueryHabits.warmInstallationKey { [weak self] in
-            DispatchQueue.main.async {
-                guard let self, self.presentationID == id, self.isVisible else { return }
-                self.preparedHabitQuery.reset()
-                self.refreshResults()
-            }
-        }
         adoptASCIIInputSource()
+        if !reopening { claimKeyboard(with: panel) }
         present(panel, reopening: reopening)
-        // Ordering the prepared panel is the keystroke path. Home is filled on
-        // the next main-loop turn, when a close or newer opening can supersede it.
         DispatchQueue.main.async { [weak self] in
             guard let self, self.presentationID == id, self.isVisible else { return }
             self.runDeferredRowShortcutIfReady(for: id)
@@ -657,57 +648,6 @@ final class CommandBarService: ObservableObject {
         forgetSavedPanelPosition()
         presentationLifecycle.hide()
         clearIndex()
-        isRevealing = false
-        appearanceGeneration += 1
-        let generation = appearanceGeneration
-        guard let panel else {
-            chromeAnimating = false
-            finishHideContent()
-            return
-        }
-        if !panel.isVisible {
-            chromeAnimating = false
-            panel.alphaValue = 1
-            panel.ignoresMouseEvents = false
-            finishHideContent()
-            return
-        }
-        panel.ignoresMouseEvents = true
-        let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-        if reduceMotion {
-            chromeAnimating = false
-            panel.orderOut(nil)
-            panel.alphaValue = 1
-            panel.ignoresMouseEvents = false
-            finishHideContent()
-            return
-        }
-        chromeAnimating = true
-        let resting = panel.frame
-        var dropped = resting
-        dropped.origin.y -= CommandBarChrome.appearLift
-        NSAnimationContext.runAnimationGroup({ context in
-            context.duration = CommandBarChrome.disappearDuration
-            context.timingFunction = CAMediaTimingFunction(name: .easeIn)
-            panel.animator().alphaValue = 0
-            panel.animator().setFrame(dropped, display: true)
-        }, completionHandler: { [weak self] in
-            guard let self, generation == self.appearanceGeneration else { return }
-            panel.orderOut(nil)
-            panel.alphaValue = 1
-            panel.setFrame(resting, display: false)
-            panel.ignoresMouseEvents = false
-            self.chromeAnimating = false
-            self.layoutAfterChrome = false
-            self.finishHideContent()
-        })
-    }
-
-    private func finishHideContent() {
-        isTearingDown = false
-        rows = []
-        sectionTitles = [:]
-        lastLaidOutCompact = nil
     }
 
     // MARK: - The bar's own keyboard layout

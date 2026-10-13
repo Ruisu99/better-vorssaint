@@ -204,7 +204,7 @@ struct MenuBarMetricsPreview: View {
             .frame(width: MenuBarRenderer.rateBlockWidth(style: style),
                    height: style == .readable ? 22 : 20,
                    alignment: .center)
-        case let .batteryBlock(percent, isCharging, _, _, style):
+        case let .batteryBlock(percent, isCharging, _, warning, style):
             let clamped = max(0, min(100, percent))
             HStack(spacing: MenuBarBatterySupport.percentGap(readable: style == .readable)) {
                 Image(nsImage: MenuBarBatterySupport.glyphImage(percent: clamped,
