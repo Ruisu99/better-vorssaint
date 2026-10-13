@@ -390,6 +390,11 @@ if (( TEST )); then
         Sources/Vorssaint/Core/Localization.swift
         Sources/Vorssaint/Core/Localizations/Strings+*.swift
         Sources/Vorssaint/Core/FeatureStrings.swift
+        Sources/Vorssaint/Core/DictationStrings.swift
+        Sources/Vorssaint/Core/DisplayModesStrings.swift
+        Sources/Vorssaint/Core/MenuBarCollapseStrings.swift
+        Sources/Vorssaint/Core/MonitorDetailStrings.swift
+        Sources/Vorssaint/Core/QuickAIStrings.swift
         Sources/Vorssaint/Core/KillProcessStrings.swift
         Sources/Vorssaint/Core/PortManagerStrings.swift
         Sources/Vorssaint/Core/WhatsAppDownloadStrings.swift
@@ -436,6 +441,7 @@ if (( TEST )); then
         Sources/Vorssaint/UI/Settings/SettingsWindow.swift
         Sources/Vorssaint/Core/SettingsNavigationStrings.swift
         Sources/Vorssaint/App/MenuBarSpacingSupport.swift
+        Sources/Vorssaint/App/MenuBarBatterySupport.swift
         Sources/Vorssaint/App/MenuBarAllowanceSupport.swift
         Sources/Vorssaint/App/ReopenRequestSupport.swift
         Sources/Vorssaint/App/StatusItemAnchorSupport.swift
@@ -464,6 +470,8 @@ if (( TEST )); then
         Sources/Vorssaint/Core/DiskExclusionStrings.swift
         Sources/Vorssaint/Core/SwitcherAppRulesStrings.swift
         Sources/Vorssaint/Services/QuickTools/QuickToolsSupport.swift
+        Sources/Vorssaint/Services/Dictation/DictationSupport.swift
+        Sources/Vorssaint/Services/QuickAI/QuickAISupport.swift
         Sources/Vorssaint/Services/CommandBar/CommandBarSupport.swift
         Sources/Vorssaint/Services/CommandBar/CommandBarPreferences.swift
         Sources/Vorssaint/Services/CommandBar/CommandBarMath.swift

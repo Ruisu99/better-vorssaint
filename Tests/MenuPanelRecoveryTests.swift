@@ -184,6 +184,13 @@ enum MenuPanelRecoveryTests {
         var preventsPopoverDismissal: Bool {
             viewKeepsPopoverOpen || isPresentingPopoverModal
         }
+        private var dismissClickConsumedAt = Date.distantPast
+        func consumeDismissClick() {
+            dismissClickConsumedAt = Date()
+        }
+        func didConsumeRecentDismissClick(now: Date = Date()) -> Bool {
+            now.timeIntervalSince(dismissClickConsumedAt) < 0.4
+        }
     }
     enum StatusItemAnchorSupport {
         static func panelActivationSource<App>(after change: PanelActivationChange<App>, current: App?,

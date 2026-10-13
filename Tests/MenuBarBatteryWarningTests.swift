@@ -40,6 +40,7 @@ enum MenuBarBatteryWarningTests {
                                             pressure: MemoryPressure?) -> NSAttributedString { preconditionFailure() }
         static func networkBlockAttachment(down: String, up: String, style: MenuBarBlockStyle) -> NSAttributedString { preconditionFailure() }
         static func diskActivityBlockAttachment(read: String, write: String, style: MenuBarBlockStyle) -> NSAttributedString { preconditionFailure() }
+        static func batteryGlyphAttachment(percent: Int, isCharging: Bool, stacked: Bool) -> NSAttributedString { preconditionFailure() }
     }
 
     static func run(_ suite: TestSuite) {

@@ -162,6 +162,10 @@ enum UninstallerFlowTests {
         func refreshPanelLayout() {}
         func entry(withID: String) -> (id: String, other: Bool)? { nil }
         func leaveActions() { mode = .search }
+        func leaveQuickAI() {
+            mode = .search
+            refreshResults()
+        }
         func endCapturingShortcut() {}
         func setCategory(_ value: String?) { activeCategory = value }
         func hide() { mode = .search }
