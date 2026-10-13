@@ -25,6 +25,7 @@ extension FeatureStrings {
         case .tr: return .tr
         case .ru: return .ru
         case .es: return .es
+        case .sk: return .sk
         case .de: return .de
         case .fr: return .fr
         case .it: return .it
@@ -33,6 +34,7 @@ extension FeatureStrings {
         case .zhHans: return .zhHans
         case .zhTW: return .zhTW
         case .zhHK: return .zhHK
+        case .uk: return .uk
         }
     }
 }
@@ -179,5 +181,26 @@ extension DisplayModesFeatureStrings {
         hidpiBadge: "HiDPI",
         applyFailed: "無法變更呢個螢幕嘅解像度。",
         panelCaption: "選擇一個解像度即可即刻切換。"
+    )
+
+    static let sk = DisplayModesFeatureStrings(
+        pageTitle: "Rozlíšenie obrazovky",
+        hubDescription: "Prepínajte rozlíšenie a obnovovaciu frekvenciu každého displeja, so značkou HiDPI pri škálovaných režimoch",
+        enable: "Ovládať rozlíšenie obrazovky",
+        enableCaption: "Tu a v paneli panela menu zobrazí dostupné rozlíšenia každého displeja. Prepnutie je na jedno ťuknutie.",
+        noDisplays: "Nenašiel sa žiadny displej.",
+        hidpiBadge: "HiDPI",
+        applyFailed: "Rozlíšenie tohto displeja sa nepodarilo zmeniť.",
+        panelCaption: "Vyberte rozlíšenie a hneď sa prepne."
+    )
+    static let uk = DisplayModesFeatureStrings(
+        pageTitle: "Роздільна здатність екрана",
+        hubDescription: "Змінюйте роздільну здатність і частоту оновлення кожного дисплея, зі значком HiDPI для масштабованих режимів",
+        enable: "Керувати роздільною здатністю екрана",
+        enableCaption: "Показує тут і на панелі смуги меню доступні роздільності кожного дисплея. Перемикання одним дотиком.",
+        noDisplays: "Дисплей не знайдено.",
+        hidpiBadge: "HiDPI",
+        applyFailed: "Не вдалося змінити роздільну здатність цього дисплея.",
+        panelCaption: "Виберіть роздільність, щоб перемкнути одразу."
     )
 }

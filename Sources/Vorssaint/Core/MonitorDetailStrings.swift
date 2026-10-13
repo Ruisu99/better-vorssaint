@@ -26,6 +26,7 @@ extension FeatureStrings {
         case .tr: return .tr
         case .ru: return .ru
         case .es: return .es
+        case .sk: return .sk
         case .de: return .de
         case .fr: return .fr
         case .it: return .it
@@ -34,6 +35,7 @@ extension FeatureStrings {
         case .zhHans: return .zhHans
         case .zhTW: return .zhTW
         case .zhHK: return .zhHK
+        case .uk: return .uk
         }
     }
 }
@@ -220,5 +222,34 @@ extension MonitorDetailStrings {
         peakDownload: "下載峰值",
         peakUpload: "上傳峰值",
         liveRates: "即時速率"
+    )
+
+    static let sk = MonitorDetailStrings(
+        user: "Používateľ",
+        system: "Systém",
+        idle: "Nečinnosť",
+        loadAverage: "Priemerné zaťaženie",
+        coresFormat: "%d jadier",
+        renderer: "Renderer",
+        tiler: "Tiler",
+        chip: "Čip",
+        interface: "Rozhranie",
+        peakDownload: "Špička sťahovania",
+        peakUpload: "Špička odosielania",
+        liveRates: "Aktuálna rýchlosť"
+    )
+    static let uk = MonitorDetailStrings(
+        user: "Користувач",
+        system: "Система",
+        idle: "Простій",
+        loadAverage: "Середнє навантаження",
+        coresFormat: "%d ядер",
+        renderer: "Рендерер",
+        tiler: "Тайлер",
+        chip: "Чіп",
+        interface: "Інтерфейс",
+        peakDownload: "Пік завантаження",
+        peakUpload: "Пік віддачі",
+        liveRates: "Поточна швидкість"
     )
 }

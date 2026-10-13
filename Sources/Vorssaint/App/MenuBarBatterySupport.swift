@@ -58,9 +58,11 @@ enum MenuBarBatterySupport {
                            percentText: String,
                            reservedPercentText: String,
                            font: NSFont,
-                           readable: Bool) -> NSImage {
+                           readable: Bool,
+                           tint: NSColor? = nil) -> NSImage {
         let clamped = max(0, min(100, percent))
-        let key = "block|\(clamped)|\(isCharging)|\(percentText)|\(reservedPercentText)|\(readable)|\(font.pointSize)" as NSString
+        let ink = tint ?? NSColor.labelColor
+        let key = "block|\(clamped)|\(isCharging)|\(percentText)|\(reservedPercentText)|\(readable)|\(font.pointSize)|\(ink.hash)" as NSString
         if let cached = imageCache.object(forKey: key) { return cached }
 
         let scale = Scale.block(readable: readable)
@@ -79,10 +81,10 @@ enum MenuBarBatterySupport {
                                    y: (height - glyph.height) / 2,
                                    width: glyph.width,
                                    height: glyph.height)
-            drawGlyph(in: glyphRect, percent: clamped, isCharging: isCharging, scale: scale)
+            drawGlyph(in: glyphRect, percent: clamped, isCharging: isCharging, scale: scale, ink: ink)
             let attrs: [NSAttributedString.Key: Any] = [
                 .font: font,
-                .foregroundColor: NSColor.labelColor,
+                .foregroundColor: ink,
             ]
             let valueY = (height - valueSize.height) / 2
             (percentText as NSString).draw(at: NSPoint(x: glyph.width + gap, y: valueY),
@@ -163,7 +165,8 @@ enum MenuBarBatterySupport {
         }
     }
 
-    private static func drawGlyph(in rect: NSRect, percent: Int, isCharging: Bool, scale: Scale) {
+    private static func drawGlyph(in rect: NSRect, percent: Int, isCharging: Bool, scale: Scale,
+                                  ink: NSColor = .labelColor) {
         let metrics = glyphMetrics(scale)
         let bodyRect = NSRect(x: rect.minX + metrics.lineWidth / 2,
                               y: rect.minY + (rect.height - metrics.body.height) / 2,
@@ -174,8 +177,8 @@ enum MenuBarBatterySupport {
                                   width: metrics.terminal.width,
                                   height: metrics.terminal.height)
 
-        NSColor.labelColor.setStroke()
-        NSColor.labelColor.setFill()
+        ink.setStroke()
+        ink.setFill()
 
         let outline = NSBezierPath(roundedRect: bodyRect,
                                    xRadius: metrics.cornerRadius,
@@ -203,11 +206,11 @@ enum MenuBarBatterySupport {
         }
 
         if isCharging {
-            drawBolt(in: bodyRect, scale: scale)
+            drawBolt(in: bodyRect, scale: scale, ink: ink)
         }
     }
 
-    private static func drawBolt(in body: NSRect, scale: Scale) {
+    private static func drawBolt(in body: NSRect, scale: Scale, ink: NSColor = .labelColor) {
         let metrics = glyphMetrics(scale)
         let inset = max(1.2, metrics.fillInset + 0.4)
         let boltBounds = body.insetBy(dx: inset + 0.6, dy: inset - 0.2)
@@ -232,7 +235,7 @@ enum MenuBarBatterySupport {
             context.restoreGState()
         }
 
-        NSColor.labelColor.setStroke()
+        ink.setStroke()
         path.lineWidth = max(0.7, metrics.lineWidth - 0.3)
         path.lineJoinStyle = .round
         path.stroke()

@@ -19,6 +19,7 @@ extension FeatureStrings {
         case .tr: return .tr
         case .ru: return .ru
         case .es: return .es
+        case .sk: return .sk
         case .de: return .de
         case .fr: return .fr
         case .it: return .it
@@ -27,6 +28,7 @@ extension FeatureStrings {
         case .zhHans: return .zhHans
         case .zhTW: return .zhTW
         case .zhHK: return .zhHK
+        case .uk: return .uk
         }
     }
 }
@@ -122,5 +124,20 @@ extension MenuBarCollapseFeatureStrings {
         settingsCaption: "點一下箭嘴可顯示或隱藏額外圖示。按住 Command 把圖示拖到箭嘴前面即可隱藏，拖到後面則保持可見。在 macOS 27 上可用。",
         tooltipCollapsed: "顯示已隱藏的選單列圖示",
         tooltipExpanded: "隱藏多餘的選單列圖示"
+    )
+
+    static let sk = MenuBarCollapseFeatureStrings(
+        title: "Doplnky panela menu",
+        hubDescription: "Skryje ďalšie ikony panela menu za šípku. Potiahnite ich so stlačeným Command vľavo od šípky, aby sa skryli, a vpravo, aby ostali viditeľné.",
+        settingsCaption: "Kliknutím na šípku doplnky zobrazíte alebo skryjete. Potiahnite ikony so stlačeným Command pred šípku, aby sa skryli, a za ňu, aby ostali viditeľné. Funguje aj v macOS 27.",
+        tooltipCollapsed: "Zobraziť skryté ikony panela menu",
+        tooltipExpanded: "Skryť ďalšie ikony panela menu"
+    )
+    static let uk = MenuBarCollapseFeatureStrings(
+        title: "Додаткові значки смуги меню",
+        hubDescription: "Ховає зайві значки смуги меню за стрілкою. Перетягніть їх з Command ліворуч від стрілки, щоб сховати, і праворуч, щоб лишити видимими.",
+        settingsCaption: "Натисніть стрілку, щоб показати або сховати додаткові значки. Перетягніть значки з Command перед стрілку, щоб сховати, і за неї, щоб лишити видимими. Працює в macOS 27.",
+        tooltipCollapsed: "Показати приховані значки смуги меню",
+        tooltipExpanded: "Сховати додаткові значки смуги меню"
     )
 }

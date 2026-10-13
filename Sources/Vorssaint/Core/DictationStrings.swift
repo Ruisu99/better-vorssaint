@@ -52,6 +52,7 @@ extension FeatureStrings {
         case .tr: return .tr
         case .ru: return .ru
         case .es: return .es
+        case .sk: return .sk
         case .de: return .de
         case .fr: return .fr
         case .it: return .it
@@ -60,6 +61,7 @@ extension FeatureStrings {
         case .zhHans: return .zhHans
         case .zhTW: return .zhTW
         case .zhHK: return .zhHK
+        case .uk: return .uk
         }
     }
 }
@@ -557,5 +559,80 @@ extension DictationFeatureStrings {
         errorEmpty: "沒有聽到任何內容。",
         errorParse: "無法讀取轉錄結果。",
         errorEngineUnavailable: "此引擎目前無法使用。"
+    )
+
+    static let sk = DictationFeatureStrings(
+        pageTitle: "Diktovanie",
+        hubDescription: "Podržte kláves, hovorte a po pustení sa výsledok napíše do poľa, ktoré má fokus",
+        enableToggle: "Zapnúť diktovanie",
+        enableCaption: "Podržte kláves nižšie kdekoľvek na Macu, hovorte a potom ho pustite. Slová sa napíšu na miesto kurzora.",
+        holdKeyLabel: "Pridržaný kláves",
+        holdKeyCaption: "Podržte tento kláves na nahrávanie, pustite ho na prepis a napísanie výsledku.",
+        holdKeyRightOption: "Pravý Option",
+        holdKeyLeftOption: "Ľavý Option",
+        holdKeyRightCommand: "Pravý Command",
+        holdKeyRightControl: "Pravý Control",
+        holdKeyRightShift: "Pravý Shift",
+        engineLabel: "Nástroj",
+        engineApple: "Apple Speech (v zariadení)",
+        engineOpenAI: "OpenAI Whisper",
+        engineParakeet: "Parakeet (lokálne)",
+        engineCaption: "Rozpoznávanie Apple beží celé na tomto Macu. OpenAI odošle nahrávku do vášho vlastného účtu. Parakeet beží lokálne cez Python.",
+        apiKeyLabel: "Kľúč API OpenAI",
+        apiKeyCaption: "Kľúč zostáva na tomto Macu, čítať ho môžete len vy a nikdy nie je súčasťou zálohy nastavení.",
+        apiKeyUsingQuickAI: "Používa sa kľúč Quick AI, ktorý už na tomto Macu je. Sem pridajte vlastný, ak chcete iný.",
+        openAIModelLabel: "Model",
+        parakeetModelLabel: "Model: mlx-community/parakeet-tdt-0.6b-v3",
+        parakeetInstalled: "Parakeet je nainštalovaný.",
+        parakeetNotInstalled: "Parakeet nie je nainštalovaný.",
+        parakeetInstallHint: "Nainštalujte ho v Termináli a potom to skontrolujte znova: pip install parakeet-mlx",
+        parakeetCheckAgain: "Skontrolovať znova",
+        privacyCaption: "Apple Speech a Parakeet nahrávku nikam neodosielajú. OpenAI ju dostane len vtedy, keď je vybraný nástroj OpenAI.",
+        recording: "Počúvam",
+        transcribing: "Prepisujem",
+        noMicrophone: "Diktovanie potrebuje prístup k mikrofónu.",
+        recordingFailed: "Nahrávanie sa nepodarilo spustiť.",
+        errorNoKey: "Tento kľúč OpenAI bol odmietnutý. Skontrolujte ho v Nastaveniach.",
+        errorNetwork: "Služba prepisu neodpovedala.",
+        errorEmpty: "Nebolo nič počuť.",
+        errorParse: "Prepis sa nepodarilo prečítať.",
+        errorEngineUnavailable: "Tento nástroj teraz nie je k dispozícii."
+    )
+    static let uk = DictationFeatureStrings(
+        pageTitle: "Диктування",
+        hubDescription: "Утримуйте клавішу, щоб говорити, і відпустіть, щоб ввести результат у поле, яке зараз у фокусі",
+        enableToggle: "Увімкнути диктування",
+        enableCaption: "Утримуйте клавішу нижче будь-де на Mac, говоріть і відпустіть. Слова вводяться в позицію курсора.",
+        holdKeyLabel: "Клавіша утримання",
+        holdKeyCaption: "Утримуйте цю клавішу, щоб записати, і відпустіть, щоб розпізнати та ввести результат.",
+        holdKeyRightOption: "Правий Option",
+        holdKeyLeftOption: "Лівий Option",
+        holdKeyRightCommand: "Правий Command",
+        holdKeyRightControl: "Правий Control",
+        holdKeyRightShift: "Правий Shift",
+        engineLabel: "Рушій",
+        engineApple: "Apple Speech (на пристрої)",
+        engineOpenAI: "OpenAI Whisper",
+        engineParakeet: "Parakeet (локально)",
+        engineCaption: "Розпізнавання Apple повністю працює на цьому Mac. OpenAI надсилає запис у ваш власний обліковий запис. Parakeet працює локально через Python.",
+        apiKeyLabel: "Ключ API OpenAI",
+        apiKeyCaption: "Ключ лишається на цьому Mac, читати його можете лише ви, і він ніколи не входить до резервної копії налаштувань.",
+        apiKeyUsingQuickAI: "Використовується ключ Quick AI, який уже є на цьому Mac. Додайте тут власний, щоб використовувати інший.",
+        openAIModelLabel: "Модель",
+        parakeetModelLabel: "Модель: mlx-community/parakeet-tdt-0.6b-v3",
+        parakeetInstalled: "Parakeet установлено.",
+        parakeetNotInstalled: "Parakeet не установлено.",
+        parakeetInstallHint: "Установіть його в Терміналі, потім перевірте знову: pip install parakeet-mlx",
+        parakeetCheckAgain: "Перевірити знову",
+        privacyCaption: "Apple Speech і Parakeet ніколи нікуди не надсилають запис. OpenAI отримує його лише тоді, коли вибрано рушій OpenAI.",
+        recording: "Слухаю",
+        transcribing: "Розпізнавання",
+        noMicrophone: "Диктуванню потрібен доступ до мікрофона.",
+        recordingFailed: "Не вдалося почати запис.",
+        errorNoKey: "Цей ключ OpenAI відхилено. Перевірте його в Налаштуваннях.",
+        errorNetwork: "Служба розпізнавання не відповіла.",
+        errorEmpty: "Нічого не було чутно.",
+        errorParse: "Розпізнаний текст не вдалося прочитати.",
+        errorEngineUnavailable: "Цей рушій зараз недоступний."
     )
 }
