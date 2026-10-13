@@ -61,12 +61,12 @@ extension PermissionGuideStrings {
     static let uk = PermissionGuideStrings(
         title: "Залишився один крок",
         stepOpen: "macOS відкрила Системні параметри на потрібному списку.",
-        stepToggle: "Увімкніть Vorssaint у тому списку.",
+        stepToggle: "Увімкніть %@ у тому списку.",
         stepReturn: "Поверніться. Ця картка помітить сама.",
         waiting: "Очікування дозволу…",
         granted: "Дозвіл надано!",
         closeHelp: "Закрити",
-        staleHint: "Вже є в тому списку? Той запис належить попередній копії програми. Почніть заново, щоб замінити її.",
+        staleHint: "Вже увімкнено в тому списку? Цей перемикач може належати попередній копії або офіційному Vorssaint. Увімкніть %@. Запис екрана діє лише після перезапуску.",
         startOver: "Почати заново",
         relaunch: "Перезапустити для застосування"
     )
@@ -141,12 +141,12 @@ extension PermissionGuideStrings {
     static let sk = PermissionGuideStrings(
         title: "Ostáva jeden krok",
         stepOpen: "macOS otvoril Systémové nastavenia na správnom zozname.",
-        stepToggle: "V tomto zozname zapnite Vorssaint.",
+        stepToggle: "V tomto zozname zapnite %@.",
         stepReturn: "Vráťte sa sem. Táto karta si to všimne sama.",
         waiting: "Čaká sa na povolenie…",
         granted: "Povolenie udelené!",
         closeHelp: "Zavrieť",
-        staleHint: "Je to v zozname už zapnuté? Táto položka patrí staršej kópii aplikácie. Začnite znova, aby ste ju nahradili.",
+        staleHint: "Je to v zozname už zapnuté? Tento prepínač môže patriť staršej kópii alebo oficiálnemu Vorssaint. Zapnite %@. Záznam obrazovky platí až po opätovnom spustení.",
         startOver: "Začať znova",
         relaunch: "Reštartovať na použitie"
     )

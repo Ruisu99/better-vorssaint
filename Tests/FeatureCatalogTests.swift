@@ -1949,11 +1949,13 @@ enum FeatureCatalogTests {
                "the mouse page hides only with all eight mouse features off")
         suite.expect(!pageVisible(.energy, available: allFeatures.subtracting([.keepAwake, .brightness,
                                                                          .extraBrightness,
-                                                                         .bluetoothSleep])),
-               "energy hides when all four of its features are off")
+                                                                         .bluetoothSleep, .displayModes])),
+               "energy hides when all five of its features are off")
         suite.expect(pageVisible(.energy, available: [.extraBrightness]), "XDR alone keeps the energy page")
         suite.expect(pageVisible(.energy, available: [.brightness]),
                "brightness control alone keeps the energy page")
+        suite.expect(pageVisible(.energy, available: [.displayModes]),
+               "display modes alone keep the energy page")
         suite.expect(!pageVisible(.monitor, available: allFeatures.subtracting(Set(FeatureVisibilitySupport.monitorFeatures))),
                "monitor page hides with every metric off")
         suite.expect(pageVisible(.monitor, available: [.monitorNetwork]), "one metric keeps the monitor page")
