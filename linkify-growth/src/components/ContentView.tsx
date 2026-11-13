@@ -29,6 +29,7 @@ export function ContentView({
   );
   const [topic, setTopic] = useState("");
   const [generating, setGenerating] = useState(false);
+  const [packGenerating, setPackGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -66,6 +67,35 @@ export function ContentView({
       setError("Netzwerkfehler.");
     } finally {
       setGenerating(false);
+    }
+  }
+
+  async function handleWeeklyPack() {
+    setPackGenerating(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const res = await fetch("/api/content", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "weekly_pack",
+          topic: topic.trim() || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error ?? "Wochen-Paket fehlgeschlagen.");
+        return;
+      }
+      setPosts((prev) => [...(data.posts ?? []), ...prev]);
+      setNotice(
+        `${(data.posts ?? []).length} Beiträge (KMU, Startup & Akquise-Aufhänger) erstellt.`,
+      );
+    } catch {
+      setError("Netzwerkfehler beim Wochen-Paket.");
+    } finally {
+      setPackGenerating(false);
     }
   }
 
@@ -200,20 +230,34 @@ export function ContentView({
           </p>
         )}
 
-        <div className="flex items-center justify-between gap-4">
+        <div className="flex flex-wrap items-center justify-between gap-4">
           <span className="text-[12px] text-[#6B7280]">
             Modell: {snapshot.brand.openrouter_config.contentModel}
           </span>
-          <button
-            type="submit"
-            disabled={generating || !topic.trim()}
-            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-[#0000F5] hover:bg-[#0000C8] disabled:opacity-50 text-white text-[14px] font-medium cursor-pointer"
-          >
-            <Sparkles className="w-4 h-4" />
-            <span>
-              {generating ? "Erstelle Entwurf..." : "Beitrag entwerfen"}
-            </span>
-          </button>
+          <div className="flex flex-wrap items-center gap-2.5">
+            <button
+              type="button"
+              onClick={handleWeeklyPack}
+              disabled={packGenerating || generating}
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-full border border-[#0000F5]/30 bg-[#F0F3FF] text-[#0000F5] disabled:opacity-50 text-[13px] font-medium cursor-pointer"
+            >
+              <span>
+                {packGenerating
+                  ? "Erstelle 3er-Paket..."
+                  : "3er-Wochen-Paket generieren"}
+              </span>
+            </button>
+            <button
+              type="submit"
+              disabled={generating || packGenerating || !topic.trim()}
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-[#0000F5] hover:bg-[#0000C8] disabled:opacity-50 text-white text-[14px] font-medium cursor-pointer"
+            >
+              <Sparkles className="w-4 h-4" />
+              <span>
+                {generating ? "Erstelle Entwurf..." : "Beitrag entwerfen"}
+              </span>
+            </button>
+          </div>
         </div>
       </form>
 

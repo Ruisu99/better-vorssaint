@@ -65,6 +65,101 @@ export async function POST(request: Request) {
   await ensureWorkspaceSeeded(auth.scopeKey);
   const brand = await getBrandProfile(auth.scopeKey);
 
+  if (cleanStr(body.action, 40) === "weekly_pack") {
+    const focusTopic =
+      cleanStr(body.topic, 300) ||
+      "Warum ein sauberer Website-Relaunch oder eine pragmatische Web-App schneller zu Anfragen führt";
+
+    const packSpecs: Array<{
+      format: ContentFormat;
+      track: TargetTrack;
+      basis: string;
+      topic: string;
+    }> = [
+      {
+        format: "linkedin",
+        track: "kmu",
+        basis:
+          brand.verified_references[0]
+            ? `${brand.verified_references[0].clientName}: ${brand.verified_references[0].summary}`
+            : "Praxisbeobachtung KMU",
+        topic: `KMU-Perspektive: ${focusTopic}`,
+      },
+      {
+        format: "linkedin",
+        track: "startup",
+        basis:
+          brand.verified_references[1]
+            ? `${brand.verified_references[1].clientName}: ${brand.verified_references[1].summary}`
+            : "Praxisbeobachtung Fullstack & Web-Apps",
+        topic: `Startup & Produkt-Perspektive: ${focusTopic}`,
+      },
+      {
+        format: "outreach_hook",
+        track: "kmu",
+        basis: "Direkte Akquise-Ansprache ohne Agentur-Floskeln",
+        topic: `Gesprächs-Aufhänger für Erstkontakt: ${focusTopic}`,
+      },
+    ];
+
+    const createdPosts = [];
+    for (const spec of packSpecs) {
+      try {
+        const aiRes = await runAiTask({
+          scopeKey: auth.scopeKey,
+          taskType: "content_pack",
+          model: brand.openrouter_config.contentModel,
+          systemPrompt: buildLinkifySystemPrompt(brand),
+          userPrompt: buildContentPrompt({
+            brand,
+            format: spec.format,
+            targetTrack: spec.track,
+            sourceBasis: spec.basis,
+            userTopic: spec.topic,
+          }),
+          temperature: brand.openrouter_config.temperature,
+          maxTokens: 1100,
+          privacyMode: true,
+          summaryLabel: `Content-Paket (${spec.format}/${spec.track})`,
+          fallbackFn: () =>
+            JSON.stringify({
+              title: `${spec.track === "startup" ? "Produktteam" : "KMU"}: ${focusTopic.slice(0, 60)}`,
+              body: `Praxisimpuls für ${spec.track === "startup" ? "Startups & Produktteams" : "lokale Unternehmen"}: ${spec.topic}\n\nBasis: ${spec.basis}`,
+              verificationNotes: ["Vor Veröffentlichung Details prüfen."],
+            }),
+        });
+        const parsed = parseJsonSafe<{
+          title?: string;
+          body?: string;
+          verificationNotes?: string[];
+        }>(aiRes.text);
+        const post = await createContentPost({
+          id: crypto.randomUUID(),
+          owner_sub: auth.scopeKey,
+          title: (parsed?.title || spec.topic).slice(0, 180),
+          format: spec.format,
+          target_track: spec.track,
+          source_basis: spec.basis.slice(0, 200),
+          body: (parsed?.body || aiRes.text).slice(0, 8000),
+          verification_notes: Array.isArray(parsed?.verificationNotes)
+            ? parsed.verificationNotes.map(String).slice(0, 8)
+            : ["Vor Veröffentlichung kurz prüfen."],
+          status: "entwurf",
+          model_used: aiRes.modelUsed,
+          is_sample: false,
+        });
+        createdPosts.push(post);
+      } catch {
+        // continue with remaining pack items
+      }
+    }
+
+    return NextResponse.json(
+      { posts: createdPosts },
+      { status: 201, headers: PRIVATE_JSON_HEADERS },
+    );
+  }
+
   const format: ContentFormat = VALID_FORMATS.has(body.format as ContentFormat)
     ? (body.format as ContentFormat)
     : "linkedin";

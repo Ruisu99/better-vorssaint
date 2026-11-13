@@ -1,8 +1,13 @@
 import { NextResponse } from "next/server";
 import { PRIVATE_JSON_HEADERS, requireScopedIdentity } from "@/lib/auth";
 import { HARD_MAX_BATCH_LEADS } from "@/lib/budget-guard";
-import { searchLocalBusinesses, type RadarCategory } from "@/lib/radar";
+import {
+  searchLocalBusinesses,
+  searchWebProspectsWithOpenRouter,
+  type RadarCategory,
+} from "@/lib/radar";
 import { scanWebsite } from "@/lib/scanner";
+import type { TargetTrack } from "@/lib/types";
 import { sanitizeExternalHref } from "@/lib/url-safety";
 import {
   cleanStr,
@@ -39,6 +44,50 @@ export async function POST(request: Request) {
 
   await ensureWorkspaceSeeded(auth.scopeKey);
   const action = cleanStr(body.action, 40) || "search";
+
+  if (action === "web_search") {
+    const existingLeads = await listLeads(auth.scopeKey);
+    const existingNames = new Set(
+      existingLeads.map((l) => l.company_name.toLowerCase()),
+    );
+    const existingWebsites = new Set(
+      existingLeads
+        .map((l) =>
+          l.website_url
+            .replace(/^https?:\/\/(www\.)?/i, "")
+            .replace(/\/.*$/, "")
+            .toLowerCase(),
+        )
+        .filter(Boolean),
+    );
+
+    const track: TargetTrack =
+      body.track === "startup" ? "startup" : "kmu";
+    const query =
+      cleanStr(body.keyword, 80) ||
+      (track === "startup" ? "B2B SaaS Startup" : "Handwerk");
+    const city = cleanStr(body.city, 80) || "Erfurt";
+
+    const webRes = await searchWebProspectsWithOpenRouter({
+      scopeKey: auth.scopeKey,
+      query,
+      city,
+      track,
+      limit: 10,
+      existingNames,
+      existingWebsites,
+    });
+    return NextResponse.json(
+      {
+        resolvedLocation: `${city} (${track === "startup" ? "Startups & Produkte" : "Lokale KMU"})`,
+        candidates: webRes.candidates,
+        providerMode: webRes.providerMode,
+        modelUsed: webRes.modelUsed,
+        limitBlockedReason: webRes.limitBlockedReason,
+      },
+      { headers: PRIVATE_JSON_HEADERS },
+    );
+  }
 
   // 0-EUR bulk technical pre-scan right inside Radar before importing or using AI tokens
   if (action === "prescan_candidates") {

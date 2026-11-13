@@ -30,42 +30,46 @@ export function errorResponse(err: unknown, fallbackStatus = 400): Response {
   });
 }
 
-function normalizedHostHeader(request: Request): string {
-  const forwarded = request.headers.get("x-forwarded-host")?.split(",")[0]?.trim();
-  const direct = request.headers.get("host")?.trim();
-  return (forwarded || direct || "").toLowerCase();
+function collectKnownHosts(request: Request): Set<string> {
+  const hosts = new Set<string>();
+  const add = (val: string | null) => {
+    if (!val) return;
+    for (const part of val.split(",")) {
+      const clean = part.trim().toLowerCase();
+      if (clean) hosts.add(clean);
+    }
+  };
+  add(request.headers.get("host"));
+  add(request.headers.get("x-forwarded-host"));
+  add(request.headers.get("x-original-host"));
+  add(request.headers.get("x-vercel-deployment-url"));
+  try {
+    const reqUrlHost = new URL(request.url).host.toLowerCase();
+    if (reqUrlHost) hosts.add(reqUrlHost);
+  } catch {
+    // ignore relative url
+  }
+  return hosts;
 }
 
 /**
- * Blocks cross-site form submissions and cross-origin browser mutations (CSRF defense-in-depth).
+ * Blocks cross-site form submissions and cross-origin browser mutations (CSRF defense-in-depth),
+ * while supporting reverse-proxied Cursor Apps (*.apps.grok.bot -> internal Vercel host).
  */
 export function assertSafeMutationRequest(
   request: Request,
   options: { requireJsonContentType?: boolean } = {},
 ): void {
-  const secFetchSite = request.headers.get("sec-fetch-site")?.trim().toLowerCase();
-  if (secFetchSite === "cross-site") {
+  const secFetchSite = request.headers
+    .get("sec-fetch-site")
+    ?.trim()
+    .toLowerCase();
+
+  if (secFetchSite === "cross-site" || secFetchSite === "same-site") {
     throw new HttpInputError(
       403,
       "Cross-Site-Anfragen sind aus Sicherheitsgründen blockiert.",
     );
-  }
-
-  const originHeader = request.headers.get("origin")?.trim();
-  if (originHeader) {
-    let originHost = "";
-    try {
-      originHost = new URL(originHeader).host.toLowerCase();
-    } catch {
-      throw new HttpInputError(403, "Ungültiger Origin-Header.");
-    }
-    const expectedHost = normalizedHostHeader(request);
-    if (expectedHost && originHost !== expectedHost) {
-      throw new HttpInputError(
-        403,
-        "Origin stimmt nicht mit dem App-Host überein.",
-      );
-    }
   }
 
   if (options.requireJsonContentType !== false) {
@@ -75,6 +79,36 @@ export function assertSafeMutationRequest(
         415,
         "Content-Type muss application/json sein.",
       );
+    }
+  }
+
+  // Browser explicitly guarantees same-origin even when upstream proxy rewrites Host header
+  if (secFetchSite === "same-origin") {
+    return;
+  }
+
+  const originHeader = request.headers.get("origin")?.trim();
+  if (originHeader) {
+    let parsedOrigin: URL;
+    try {
+      parsedOrigin = new URL(originHeader);
+    } catch {
+      throw new HttpInputError(403, "Ungültiger Origin-Header.");
+    }
+    const originHost = parsedOrigin.host.toLowerCase();
+    const knownHosts = collectKnownHosts(request);
+
+    if (knownHosts.size > 0 && !knownHosts.has(originHost)) {
+      const isCursorAppsProxy =
+        parsedOrigin.protocol === "https:" &&
+        originHost.endsWith(".apps.grok.bot") &&
+        Boolean(process.env.CURSOR_APP_ID || process.env.VERCEL);
+      if (!isCursorAppsProxy) {
+        throw new HttpInputError(
+          403,
+          "Origin stimmt nicht mit dem App-Host überein.",
+        );
+      }
     }
   }
 }
@@ -129,7 +163,9 @@ export async function parseSafeJsonBody<T = Record<string, unknown>>(
     offset += chunk.byteLength;
   }
 
-  const text = new TextDecoder("utf-8", { fatal: false }).decode(combined).trim();
+  const text = new TextDecoder("utf-8", { fatal: false })
+    .decode(combined)
+    .trim();
   if (!text) return {} as T;
 
   let parsed: unknown;

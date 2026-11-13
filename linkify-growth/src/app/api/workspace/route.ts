@@ -4,16 +4,13 @@ import {
   requireScopedIdentity,
   viewerInfoFor,
 } from "@/lib/auth";
-import {
-  buildDefaultBrandProfile,
-  buildSampleContentPosts,
-  buildSampleLeads,
-} from "@/lib/defaults";
+import { buildDefaultBrandProfile } from "@/lib/defaults";
 import {
   getOpenRouterKeyStatus,
   isOpenRouterConfigured,
 } from "@/lib/openrouter";
 import {
+  clearSampleData,
   getAiUsageSummary,
   getBrandProfile,
   hasPersistedProfile,
@@ -31,24 +28,15 @@ export async function GET(request: Request) {
   const initialized = await hasPersistedProfile(scopeKey);
 
   if (!initialized) {
-    const now = new Date().toISOString();
     return NextResponse.json(
       {
         viewer: viewerInfoFor(identity),
         initialized: false,
         openRouterConnected: isOpenRouterConfigured(),
         brand: buildDefaultBrandProfile(scopeKey),
-        leads: buildSampleLeads(scopeKey).map((l) => ({
-          ...l,
-          created_at: now,
-          updated_at: now,
-        })),
+        leads: [],
         recentOutreach: [],
-        contentPosts: buildSampleContentPosts(scopeKey).map((p) => ({
-          ...p,
-          created_at: now,
-          updated_at: now,
-        })),
+        contentPosts: [],
         aiRuns: [],
         usageSummary: {
           monthCalls: 0,
@@ -62,6 +50,8 @@ export async function GET(request: Request) {
       { headers: PRIVATE_JSON_HEADERS },
     );
   }
+
+  await clearSampleData(scopeKey).catch(() => {});
 
   const [brand, leads, recentOutreach, contentPosts, aiRuns, usageSummary, keyStatus] =
     await Promise.all([

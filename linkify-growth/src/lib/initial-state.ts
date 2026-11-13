@@ -5,8 +5,6 @@ import {
 } from "./auth";
 import {
   buildDefaultBrandProfile,
-  buildSampleContentPosts,
-  buildSampleLeads,
 } from "./defaults";
 import {
   getOpenRouterKeyStatus,
@@ -22,6 +20,7 @@ import type {
   ViewerInfo,
 } from "./types";
 import {
+  clearSampleData,
   getAiUsageSummary,
   getBrandProfile,
   hasPersistedProfile,
@@ -89,24 +88,15 @@ export async function loadWorkspaceSnapshot(): Promise<WorkspaceSnapshot> {
   const keyStatus = await getOpenRouterKeyStatus();
 
   if (!initialized) {
-    const now = new Date().toISOString();
     return {
       authenticated: true,
       viewer: viewerInfoFor(identity),
       initialized: false,
       openRouterConnected: isOpenRouterConfigured(),
       brand: buildDefaultBrandProfile(scopeKey),
-      leads: buildSampleLeads(scopeKey).map((l) => ({
-        ...l,
-        created_at: now,
-        updated_at: now,
-      })),
+      leads: [],
       recentOutreach: [],
-      contentPosts: buildSampleContentPosts(scopeKey).map((p) => ({
-        ...p,
-        created_at: now,
-        updated_at: now,
-      })),
+      contentPosts: [],
       aiRuns: [],
       usageSummary: {
         monthCalls: 0,
@@ -118,6 +108,9 @@ export async function loadWorkspaceSnapshot(): Promise<WorkspaceSnapshot> {
       keyStatus,
     };
   }
+
+  // Ensure any legacy demo rows from earlier builds are purged cleanly
+  await clearSampleData(scopeKey).catch(() => {});
 
   const [brand, leads, recentOutreach, contentPosts, aiRuns, usageSummary] =
     await Promise.all([

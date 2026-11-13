@@ -434,24 +434,14 @@ export function SettingsView({
               </span>
             </label>
 
-            <label className="inline-flex items-center gap-2 text-[14px] text-[#1A1A2E] cursor-pointer">
-              <input
-                type="checkbox"
-                checked={brand.openrouter_config.privacyMode}
-                onChange={(e) =>
-                  setBrand((p) => ({
-                    ...p,
-                    openrouter_config: {
-                      ...p.openrouter_config,
-                      privacyMode: e.target.checked,
-                    },
-                  }))
-                }
-                className="w-4 h-4 accent-[#0000F5]"
-              />
+            <div className="inline-flex items-center gap-2 text-[14px] text-[#1A1A2E]">
               <ShieldCheck className="w-4 h-4 text-[#0000F5]" />
-              <span>Privacy-Mode: Personen-Daten vor Prompt maskieren</span>
-            </label>
+              <span>
+                <strong>Privacy-Mode serverseitig aktiv:</strong> Firmennamen,
+                URLs, Ansprechpartner, E-Mails, Telefon & Adressen werden vor
+                jedem OpenRouter-Aufruf maskiert.
+              </span>
+            </div>
           </div>
         </div>
       </section>

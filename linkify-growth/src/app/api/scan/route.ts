@@ -242,6 +242,8 @@ export async function POST(request: Request) {
         maxTokens: 700,
         privacyMode: brand.openrouter_config.privacyMode,
         piiContext: {
+          companyName: draftLead.company_name,
+          websiteUrl: draftLead.website_url,
           decisionMaker: draftLead.decision_maker,
           contactEmail: draftLead.contact_email,
           contactPhone: draftLead.contact_phone,

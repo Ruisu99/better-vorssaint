@@ -144,35 +144,54 @@ export async function getOpenRouterKeyStatus(): Promise<OpenRouterKeyStatus> {
 }
 
 export interface PiiMaskContext {
+  companyName?: string;
+  websiteUrl?: string;
   decisionMaker?: string;
   contactEmail?: string;
   contactPhone?: string;
   postalAddress?: string;
 }
 
+/**
+ * Unconditionally masks identifying lead fields AND stray emails/phone numbers
+ * before sending any text to third-party OpenRouter endpoints, then restores them locally.
+ */
 export function applyPrivacyMask(
   text: string,
-  ctx: PiiMaskContext,
+  ctx: PiiMaskContext = {},
 ): { maskedText: string; restore: (output: string) => string } {
   const pairs: Array<[string, string]> = [];
-  if (ctx.decisionMaker?.trim()) {
-    pairs.push([ctx.decisionMaker.trim(), "[ANSPRECHPARTNER]"]);
-  }
-  if (ctx.contactEmail?.trim()) {
-    pairs.push([ctx.contactEmail.trim(), "[KONTAKT_EMAIL]"]);
-  }
-  if (ctx.contactPhone?.trim()) {
-    pairs.push([ctx.contactPhone.trim(), "[KONTAKT_TELEFON]"]);
-  }
-  if (ctx.postalAddress?.trim()) {
-    pairs.push([ctx.postalAddress.trim(), "[POSTANSCHRIFT]"]);
-  }
+  const pushPair = (val: string | undefined, token: string) => {
+    const clean = val?.trim() ?? "";
+    if (clean.length >= 3) {
+      pairs.push([clean, token]);
+    }
+  };
+
+  pushPair(ctx.decisionMaker, "[ANSPRECHPARTNER]");
+  pushPair(ctx.contactEmail, "[KONTAKT_EMAIL]");
+  pushPair(ctx.contactPhone, "[KONTAKT_TELEFON]");
+  pushPair(ctx.postalAddress, "[POSTANSCHRIFT]");
+  pushPair(ctx.websiteUrl, "[WEBSITE_URL]");
+  pushPair(ctx.companyName, "[UNTERNEHMEN]");
+
+  // Longest strings first so partial names never corrupt full names/addresses
+  pairs.sort((a, b) => b[0].length - a[0].length);
 
   let maskedText = text;
   for (const [original, token] of pairs) {
-    if (original.length < 3) continue;
     maskedText = maskedText.split(original).join(token);
   }
+
+  // Scrub any residual email addresses or phone numbers in arbitrary notes/context
+  maskedText = maskedText.replace(
+    /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g,
+    "[EMAIL_ENTFERNT]",
+  );
+  maskedText = maskedText.replace(
+    /(?:\+49|0)[1-9][0-9\s/()-]{6,18}\d/g,
+    "[TELEFON_ENTFERNT]",
+  );
 
   const restore = (output: string): string => {
     let restored = output;
@@ -185,9 +204,6 @@ export function applyPrivacyMask(
   return { maskedText, restore };
 }
 
-/**
- * Fetches OpenRouter models filtered strictly to Linkify's cost-controlled price ceiling.
- */
 export async function listOpenRouterModels(): Promise<{
   connected: boolean;
   models: OpenRouterModelOption[];
@@ -275,14 +291,9 @@ export async function runAiTask(params: {
   usage: { promptTokens: number; completionTokens: number };
 }> {
   const apiKey = process.env.OPENROUTER_API_KEY?.trim() ?? "";
-  const privacyMasked = params.privacyMode ?? true;
-  const masker =
-    privacyMasked && params.piiContext
-      ? applyPrivacyMask(params.userPrompt, params.piiContext)
-      : {
-          maskedText: params.userPrompt,
-          restore: (s: string) => s,
-        };
+  // Privacy scrubbing is always enforced on third-party AI calls
+  const privacyMasked = true;
+  const masker = applyPrivacyMask(params.userPrompt, params.piiContext ?? {});
 
   const brand = await getBrandProfile(params.scopeKey);
   const [userUsage, globalUsage] = await Promise.all([
@@ -290,7 +301,6 @@ export async function runAiTask(params: {
     getGlobalAiUsageSummary(),
   ]);
 
-  // Hard server-enforced limits — never bypassable by client settings
   const effectiveMonthlyLimitEur = Math.min(
     Math.max(brand.budget_config.monthlyBudgetEur, 0),
     HARD_MAX_MONTHLY_EUR,
@@ -325,7 +335,7 @@ export async function runAiTask(params: {
       id: crypto.randomUUID(),
       owner_sub: params.scopeKey,
       task_type: params.taskType,
-      model: "lokal-vorschau",
+      model: "lokal-basis",
       provider_mode: "local_fallback",
       privacy_masked: privacyMasked,
       prompt_tokens: 0,
@@ -333,11 +343,11 @@ export async function runAiTask(params: {
       estimated_cost_usd: 0,
       summary: limitBlockedReason
         ? `${params.summaryLabel} (${limitBlockedReason})`
-        : `${params.summaryLabel} (Vorschau-Modus ohne OpenRouter-Key)`,
+        : `${params.summaryLabel} (Lokale Vorlage – kein Key)`,
     });
     return {
       text: fallbackText,
-      modelUsed: "lokal-vorschau",
+      modelUsed: "lokal-basis",
       providerMode: "local_fallback",
       privacyMasked,
       limitBlockedReason,
@@ -346,14 +356,14 @@ export async function runAiTask(params: {
     };
   }
 
-  // Enforce approved model allowlist & 75%-budget automatic downgrade to Muse Ember
   let chosenSpec = resolveApprovedModel(params.model, "meta/muse-ember");
   let autoDowngraded = false;
   if (
     brand.budget_config.autoDowngradeAt75Pct &&
     effectiveMonthlyLimitEur > 0 &&
     userMonthEur >= effectiveMonthlyLimitEur * 0.75 &&
-    chosenSpec.id !== "meta/muse-ember"
+    chosenSpec.id !== "meta/muse-ember" &&
+    chosenSpec.id !== "perplexity/sonar"
   ) {
     chosenSpec = resolveApprovedModel("meta/muse-ember");
     autoDowngraded = true;

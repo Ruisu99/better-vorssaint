@@ -13,7 +13,7 @@ export const HARD_MAX_MODEL_COMPLETION_USD_PER_1M = 15.0;
 export interface CuratedModelSpec {
   id: string;
   name: string;
-  tier: "ultra_sparen" | "ausgewogen" | "premium_text";
+  tier: "ultra_sparen" | "ausgewogen" | "premium_text" | "websuche";
   promptPerMillionUsd: number;
   completionPerMillionUsd: number;
   intelligenceIndex?: number;
@@ -31,7 +31,7 @@ export const APPROVED_OPENROUTER_MODELS: CuratedModelSpec[] = [
     promptPerMillionUsd: 0.1,
     completionPerMillionUsd: 0.5,
     intelligenceIndex: 36,
-    note: "Pareto-Spitze (AA-Index 36, 443 tok/s, minimale Halluzinationen) – ideal für Analyse & Budget-Texte",
+    note: "Pareto-Spitze (AA-Index 36, 443 tok/s, minimale Halluzinationen) – Standard für Analyse & Qualifizierung",
   },
   {
     id: "deepseek/deepseek-v4.1-flash",
@@ -67,6 +67,14 @@ export const APPROVED_OPENROUTER_MODELS: CuratedModelSpec[] = [
     note: "Kompaktes, schnelles OpenAI-Sparmodell",
   },
   {
+    id: "perplexity/sonar",
+    name: "Perplexity: Sonar (Live-Websuche)",
+    tier: "websuche",
+    promptPerMillionUsd: 1.0,
+    completionPerMillionUsd: 1.0,
+    note: "Findet echte Unternehmen & Startups direkt im Live-Web (~0,003 € pro Suche)",
+  },
+  {
     id: "openai/gpt-6.1-terra",
     name: "OpenAI: GPT-6.1 Terra",
     tier: "ausgewogen",
@@ -89,7 +97,7 @@ export const APPROVED_OPENROUTER_MODELS: CuratedModelSpec[] = [
     promptPerMillionUsd: 1.5,
     completionPerMillionUsd: 7.5,
     intelligenceIndex: 54,
-    note: "Starkes Reasoning & Analyse (AA-Index 54 Xhigh / 41 Medium) – perfekt im 15-€-Rahmen",
+    note: "Starkes Reasoning & natürliches Deutsch (AA-Index 54 Xhigh / 41 Medium) – Standard für Akquise & Content",
   },
   {
     id: "x-ai/grok-4.7",
@@ -153,7 +161,10 @@ export function clampBudgetSettings(input: {
 
   return {
     monthlyBudgetEur: Number.isFinite(rawMonth)
-      ? Math.min(Math.max(Math.round(rawMonth * 100) / 100, 0), HARD_MAX_MONTHLY_EUR)
+      ? Math.min(
+          Math.max(Math.round(rawMonth * 100) / 100, 0),
+          HARD_MAX_MONTHLY_EUR,
+        )
       : HARD_MAX_MONTHLY_EUR,
     dailyMaxCalls: Number.isFinite(rawDaily)
       ? Math.min(Math.max(Math.round(rawDaily), 1), HARD_MAX_DAILY_CALLS)
@@ -164,7 +175,6 @@ export function clampBudgetSettings(input: {
     batchMaxLeads: Number.isFinite(rawBatch)
       ? Math.min(Math.max(Math.round(rawBatch), 1), HARD_MAX_BATCH_LEADS)
       : HARD_MAX_BATCH_LEADS,
-    // Always enforced server-side regardless of payload
     stopOnLimit: true as const,
     autoDowngradeAt75Pct:
       input.autoDowngradeAt75Pct === undefined

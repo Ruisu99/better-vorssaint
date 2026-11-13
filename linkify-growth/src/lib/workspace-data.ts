@@ -1,10 +1,6 @@
 import { clampBudgetSettings, resolveApprovedModel } from "./budget-guard";
 import { sql } from "./db";
-import {
-  buildDefaultBrandProfile,
-  buildSampleContentPosts,
-  buildSampleLeads,
-} from "./defaults";
+import { buildDefaultBrandProfile } from "./defaults";
 import type {
   AiRun,
   BrandProfile,
@@ -270,24 +266,6 @@ export async function ensureWorkspaceSeeded(ownerSub: string): Promise<{
     return { seededNow: false };
   }
   await saveBrandProfile(buildDefaultBrandProfile(ownerSub));
-  const leadCount = await sql<{ count: string }>(
-    "select count(*)::text as count from leads where owner_sub = $1",
-    [ownerSub],
-  );
-  if (Number(leadCount[0]?.count ?? 0) === 0) {
-    for (const lead of buildSampleLeads(ownerSub)) {
-      await upsertLead(lead);
-    }
-  }
-  const postCount = await sql<{ count: string }>(
-    "select count(*)::text as count from content_posts where owner_sub = $1",
-    [ownerSub],
-  );
-  if (Number(postCount[0]?.count ?? 0) === 0) {
-    for (const post of buildSampleContentPosts(ownerSub)) {
-      await createContentPost(post);
-    }
-  }
   return { seededNow: true };
 }
 

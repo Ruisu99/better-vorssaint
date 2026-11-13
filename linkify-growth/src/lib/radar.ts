@@ -1,4 +1,5 @@
-import type { RadarCandidate } from "./types";
+import { runAiTask } from "./openrouter";
+import type { RadarCandidate, TargetTrack } from "./types";
 import { sanitizeExternalHref } from "./url-safety";
 
 export type RadarCategory =
@@ -10,29 +11,37 @@ export type RadarCategory =
   | "bau";
 
 const CATEGORY_KEYWORDS: Record<RadarCategory, string[]> = {
-  handwerk: ["Tischlerei", "Dachdecker", "Elektriker", "Sanitär"],
-  gesundheit: ["Physiotherapie", "Zahnarzt", "Arztpraxis", "Pflegedienst"],
-  kanzlei: ["Rechtsanwalt", "Steuerberater", "Architekt", "Notar"],
-  auto: ["Autohaus", "Autowerkstatt"],
-  bau: ["Bauunternehmen", "Dachdecker", "Heizung"],
-  alle: ["Physiotherapie", "Tischlerei", "Rechtsanwalt", "Autohaus", "Zahnarzt"],
-};
-
-const OVERPASS_TAGS: Record<RadarCategory, string[]> = {
-  handwerk: ['["craft"]', '["shop"~"trade|hardware"]'],
+  handwerk: [
+    "Tischlerei",
+    "Dachdecker",
+    "Elektro",
+    "Sanitär",
+    "Malerbetrieb",
+    "Heizungsbau",
+  ],
   gesundheit: [
-    '["amenity"~"doctors|dentist|clinic|pharmacy"]',
-    '["healthcare"]',
+    "Physiotherapie",
+    "Zahnarzt",
+    "Arztpraxis",
+    "Pflegedienst",
+    "Ergotherapie",
   ],
   kanzlei: [
-    '["office"~"lawyer|tax_advisor|notary|accountant|architect|company"]',
+    "Rechtsanwalt",
+    "Steuerberater",
+    "Architekt",
+    "Notar",
+    "Ingenieurbüro",
   ],
-  auto: ['["shop"~"car|car_repair"]'],
-  bau: ['["craft"~"roofer|carpenter|electrician|plumber|painter|hvac|builder"]'],
+  auto: ["Autohaus", "Autowerkstatt", "Kfz"],
+  bau: ["Bauunternehmen", "Zimmerei", "Gerüstbau", "Tiefbau"],
   alle: [
-    '["craft"]',
-    '["amenity"~"doctors|dentist|clinic"]',
-    '["office"~"lawyer|tax_advisor|architect"]',
+    "Physiotherapie",
+    "Tischlerei",
+    "Rechtsanwalt",
+    "Autohaus",
+    "Zahnarzt",
+    "Dachdecker",
   ],
 };
 
@@ -60,12 +69,6 @@ interface PhotonFeature {
     postcode?: string;
     city?: string;
   };
-}
-
-interface OverpassElement {
-  type: string;
-  id: number;
-  tags?: Record<string, string>;
 }
 
 const TYPE_LABELS: Record<string, string> = {
@@ -102,20 +105,6 @@ function formatNominatimAddress(
   return line1 || line2 || fallbackCity;
 }
 
-function formatOverpassAddress(
-  tags: Record<string, string>,
-  fallbackCity: string,
-): string {
-  const street = tags["addr:street"] ?? "";
-  const number = tags["addr:housenumber"] ?? "";
-  const postcode = tags["addr:postcode"] ?? "";
-  const city = tags["addr:city"] ?? fallbackCity;
-  const line1 = `${street} ${number}`.trim();
-  const line2 = `${postcode} ${city}`.trim();
-  if (line1 && line2) return `${line1}, ${line2}`;
-  return line1 || line2 || fallbackCity;
-}
-
 async function fetchNominatimPois(
   queryTerm: string,
   city: string,
@@ -127,7 +116,7 @@ async function fetchNominatimPois(
     url.searchParams.set("format", "jsonv2");
     url.searchParams.set("extratags", "1");
     url.searchParams.set("addressdetails", "1");
-    url.searchParams.set("limit", "15");
+    url.searchParams.set("limit", "12");
     if (viewbox) {
       url.searchParams.set("viewbox", viewbox);
       url.searchParams.set("bounded", "1");
@@ -135,7 +124,7 @@ async function fetchNominatimPois(
 
     const res = await fetch(url.toString(), {
       method: "GET",
-      signal: AbortSignal.timeout(7_000),
+      signal: AbortSignal.timeout(6_000),
       headers: {
         "user-agent": "LinkifyGrowthOS/1.0 (https://linkify.tech)",
         accept: "application/json",
@@ -160,7 +149,7 @@ async function fetchPhotonPois(
     url.searchParams.set("lang", "de");
     const res = await fetch(url.toString(), {
       method: "GET",
-      signal: AbortSignal.timeout(6_000),
+      signal: AbortSignal.timeout(5_000),
       headers: {
         "user-agent": "LinkifyGrowthOS/1.0 (https://linkify.tech)",
         accept: "application/json",
@@ -169,35 +158,6 @@ async function fetchPhotonPois(
     if (!res.ok) return [];
     const data = (await res.json()) as { features?: PhotonFeature[] };
     return Array.isArray(data.features) ? data.features : [];
-  } catch {
-    return [];
-  }
-}
-
-async function tryFastOverpass(
-  bbox: string,
-  category: RadarCategory,
-  limit: number,
-): Promise<OverpassElement[]> {
-  try {
-    const filters = OVERPASS_TAGS[category] ?? OVERPASS_TAGS.alle;
-    const queryLines = filters
-      .map((f) => `  nwr${f}["name"](${bbox});`)
-      .join("\n");
-    const overpassQuery = `[out:json][timeout:6];\n(\n${queryLines}\n);\nout tags ${limit * 2};`;
-
-    const res = await fetch("https://overpass-api.de/api/interpreter", {
-      method: "POST",
-      signal: AbortSignal.timeout(5_000),
-      headers: {
-        "user-agent": "LinkifyGrowthOS/1.0 (https://linkify.tech)",
-        "content-type": "application/x-www-form-urlencoded;charset=UTF-8",
-      },
-      body: new URLSearchParams({ data: overpassQuery }),
-    });
-    if (!res.ok) return [];
-    const json = (await res.json()) as { elements?: OverpassElement[] };
-    return json.elements ?? [];
   } catch {
     return [];
   }
@@ -220,7 +180,7 @@ export async function searchLocalBusinesses(params: {
     throw new Error("Bitte einen Ort oder eine Stadt eingeben.");
   }
 
-  const limit = Math.min(Math.max(params.limit ?? 20, 5), 35);
+  const limit = Math.min(Math.max(params.limit ?? 25, 5), 40);
 
   const geoUrl = new URL("https://nominatim.openstreetmap.org/search");
   geoUrl.searchParams.set("q", `${city}, Deutschland`);
@@ -229,7 +189,7 @@ export async function searchLocalBusinesses(params: {
 
   const geoRes = await fetch(geoUrl.toString(), {
     method: "GET",
-    signal: AbortSignal.timeout(8_000),
+    signal: AbortSignal.timeout(7_000),
     headers: {
       "user-agent": "LinkifyGrowthOS/1.0 (https://linkify.tech)",
       accept: "application/json",
@@ -261,21 +221,16 @@ export async function searchLocalBusinesses(params: {
   const clampedNorth = Math.min(north, latMid + 0.18).toFixed(5);
   const clampedWest = Math.max(west, lonMid - 0.25).toFixed(5);
   const clampedEast = Math.min(east, lonMid + 0.25).toFixed(5);
-
-  const overpassBbox = `${clampedSouth},${clampedWest},${clampedNorth},${clampedEast}`;
   const nominatimViewbox = `${clampedWest},${clampedNorth},${clampedEast},${clampedSouth}`;
 
   const customKeyword = params.keyword?.trim().slice(0, 60);
   const terms = customKeyword
     ? [customKeyword]
-    : (CATEGORY_KEYWORDS[params.category] ?? CATEGORY_KEYWORDS.alle).slice(0, 3);
+    : CATEGORY_KEYWORDS[params.category] ?? CATEGORY_KEYWORDS.alle;
 
-  const [poiBatches, photonPois, overpassElements] = await Promise.all([
+  const [poiBatches, photonPois] = await Promise.all([
     Promise.all(terms.map((t) => fetchNominatimPois(t, city, nominatimViewbox))),
     customKeyword ? fetchPhotonPois(customKeyword, city) : Promise.resolve([]),
-    customKeyword
-      ? Promise.resolve([])
-      : tryFastOverpass(overpassBbox, params.category, limit),
   ]);
 
   const seenNames = new Set<string>();
@@ -356,32 +311,139 @@ export async function searchLocalBusinesses(params: {
     });
   }
 
-  for (const el of overpassElements) {
-    const tags = el.tags ?? {};
-    const name = (tags.name ?? "").trim();
-    if (!name) continue;
-    const rawSite = tags.website ?? tags["contact:website"] ?? tags.url ?? "";
-    const safeSite = sanitizeExternalHref(rawSite) ?? "";
-    const industry =
-      TYPE_LABELS[tags.craft ?? ""] ??
-      TYPE_LABELS[tags.amenity ?? ""] ??
-      TYPE_LABELS[tags.office ?? ""] ??
-      "Lokales Unternehmen";
+  return {
+    resolvedLocation: geoData[0].display_name ?? city,
+    candidates: candidates.slice(0, limit),
+  };
+}
 
-    pushCandidate({
-      osmId: `${el.type}:${el.id}`,
+/**
+ * Live Web Discovery via OpenRouter's Perplexity Sonar ($1/$1 per 1M tokens)
+ * to discover real DACH startups, SaaS teams, and local businesses not in OSM.
+ */
+export async function searchWebProspectsWithOpenRouter(params: {
+  scopeKey: string;
+  query: string;
+  city: string;
+  track: TargetTrack;
+  limit?: number;
+  existingWebsites?: Set<string>;
+  existingNames?: Set<string>;
+}): Promise<{
+  candidates: RadarCandidate[];
+  providerMode: "openrouter" | "local_fallback";
+  modelUsed: string;
+  limitBlockedReason?: string;
+}> {
+  const count = Math.min(Math.max(params.limit ?? 8, 3), 12);
+  const region = params.city.trim() || "Deutschland / DACH";
+  const focus =
+    params.track === "startup"
+      ? `junge B2B-Startups, SaaS-Produkte oder digitale Plattformen mit Sitz in ${region} (die potenziell Web-App-, UI/UX- oder Fullstack-Entwicklung benötigen)`
+      : `lokale KMU, Handwerksbetriebe, Praxen, Kanzleien oder Dienstleister in ${region}`;
+
+  const prompt = `Finde ${count} reale, aktuell existierende Unternehmen (${focus}) passend zum Suchbegriff "${params.query}".
+WICHTIGE REGELN:
+- Nenne NUR Unternehmen mit verifizierter, echter Website-URL aus deinen aktuellen Suchergebnissen (keine Verzeichnisse wie GelbeSeiten, KennstDuEinen, ProvenExpert, LinkedIn oder Instagram).
+- Erfinde NIEMALS eine Domain oder Firma.
+- Gib ausschließlich ein valides JSON-Array ohne Markdown-Codeblock zurück:
+[
+  {
+    "companyName": "Exakter Unternehmensname",
+    "industry": "Branche",
+    "city": "Stadt",
+    "websiteUrl": "https://...",
+    "postalAddress": "Straße Hausnummer, PLZ Stadt oder leer"
+  }
+]`;
+
+  const aiRes = await runAiTask({
+    scopeKey: params.scopeKey,
+    taskType: "web_discovery",
+    model: "perplexity/sonar",
+    systemPrompt:
+      "Du bist ein präziser B2B-Recherche-Assistent für den DACH-Raum. Gib ausschließlich ein JSON-Array real existierender Unternehmen mit eigener Firmenwebsite zurück.",
+    userPrompt: prompt,
+    temperature: 0.1,
+    maxTokens: 1100,
+    privacyMode: true,
+    summaryLabel: `Live-Websuche: ${params.query} (${region})`,
+    fallbackFn: () => "[]",
+  });
+
+  const cleaned = aiRes.text
+    .replace(/^```json\s*/i, "")
+    .replace(/^```\s*/i, "")
+    .replace(/```\s*$/i, "")
+    .trim();
+
+  let parsed: Array<Record<string, unknown>> = [];
+  try {
+    const startIdx = cleaned.indexOf("[");
+    const endIdx = cleaned.lastIndexOf("]");
+    const slice =
+      startIdx !== -1 && endIdx > startIdx
+        ? cleaned.slice(startIdx, endIdx + 1)
+        : cleaned;
+    const raw = JSON.parse(slice);
+    if (Array.isArray(raw)) parsed = raw;
+  } catch {
+    parsed = [];
+  }
+
+  const DIRECTORY_BLOCKLIST = [
+    "gelbeseiten.de",
+    "11880.com",
+    "dasoertliche.de",
+    "kennstdueinen.de",
+    "linkedin.com",
+    "facebook.com",
+    "instagram.com",
+    "kununu.com",
+    "northdata.de",
+    "crunchbase.com",
+    "yelp.",
+    "jameda.de",
+  ];
+
+  const seen = new Set<string>();
+  const candidates: RadarCandidate[] = [];
+
+  for (const row of parsed) {
+    const name = String(row.companyName ?? "").trim().slice(0, 160);
+    const safeSite =
+      sanitizeExternalHref(String(row.websiteUrl ?? "")) ?? "";
+    if (!name || !safeSite) continue;
+
+    const domain = safeSite
+      .replace(/^https?:\/\/(www\.)?/i, "")
+      .replace(/\/.*$/, "")
+      .toLowerCase();
+    if (DIRECTORY_BLOCKLIST.some((blk) => domain.includes(blk))) continue;
+    if (seen.has(domain)) continue;
+    seen.add(domain);
+
+    const alreadyInPipeline =
+      Boolean(params.existingNames?.has(name.toLowerCase())) ||
+      Boolean(params.existingWebsites?.has(domain));
+
+    candidates.push({
+      osmId: `web:${domain}`,
       companyName: name,
-      industry,
-      city: tags["addr:city"] ?? city,
-      postalAddress: formatOverpassAddress(tags, city),
+      industry: String(row.industry ?? params.query).trim().slice(0, 100),
+      city: String(row.city ?? region).trim().slice(0, 80),
+      postalAddress: String(row.postalAddress ?? "").trim().slice(0, 220),
       websiteUrl: safeSite,
-      contactEmail: (tags.email ?? tags["contact:email"] ?? "").trim(),
-      contactPhone: (tags.phone ?? tags["contact:phone"] ?? "").trim(),
+      contactEmail: "",
+      contactPhone: "",
+      alreadyInPipeline,
     });
   }
 
   return {
-    resolvedLocation: geoData[0].display_name ?? city,
-    candidates: candidates.slice(0, limit),
+    candidates: candidates.slice(0, count),
+    providerMode: aiRes.providerMode,
+    modelUsed: aiRes.modelUsed,
+    limitBlockedReason: aiRes.limitBlockedReason,
   };
 }

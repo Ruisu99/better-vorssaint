@@ -99,7 +99,7 @@ export function AppShell({
                     : "bg-amber-50 text-amber-800"
                 }`}
               >
-                {openRouterConnected ? "Verbunden" : "Vorschau-Modus"}
+                {openRouterConnected ? "Verbunden" : "Lokal (0 €)"}
               </span>
             </div>
             <div className="mt-2.5 flex items-baseline justify-between text-[12px]">
