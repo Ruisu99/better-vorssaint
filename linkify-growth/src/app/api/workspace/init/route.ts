@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { PRIVATE_JSON_HEADERS, requireScopedIdentity } from "@/lib/auth";
+import { cleanStr, errorResponse, parseSafeJsonBody } from "@/lib/validation";
 import {
   clearSampleData,
   ensureWorkspaceSeeded,
@@ -9,14 +10,15 @@ export async function POST(request: Request) {
   const auth = await requireScopedIdentity(request);
   if (auth instanceof Response) return auth;
 
-  let body: { action?: string } = {};
+  let body: Record<string, unknown>;
   try {
-    body = (await request.json()) as { action?: string };
-  } catch {
-    body = {};
+    body = await parseSafeJsonBody(request, 8_192);
+  } catch (err) {
+    return errorResponse(err, 400);
   }
 
-  if (body.action === "clear_samples") {
+  const action = cleanStr(body.action, 40);
+  if (action === "clear_samples") {
     await ensureWorkspaceSeeded(auth.scopeKey);
     await clearSampleData(auth.scopeKey);
     return NextResponse.json(

@@ -1,8 +1,21 @@
 import { NextResponse } from "next/server";
 import { PRIVATE_JSON_HEADERS, requireScopedIdentity } from "@/lib/auth";
+import {
+  clampBudgetSettings,
+  resolveApprovedModel,
+} from "@/lib/budget-guard";
 import { listOpenRouterModels } from "@/lib/openrouter";
 import type { BrandProfile } from "@/lib/types";
 import { sanitizeExternalHref } from "@/lib/url-safety";
+import {
+  cleanStr,
+  errorResponse,
+  parseSafeJsonBody,
+  sanitizeCoreServices,
+  sanitizePricingBenchmarks,
+  sanitizeStringList,
+  sanitizeVerifiedReferences,
+} from "@/lib/validation";
 import {
   ensureWorkspaceSeeded,
   getBrandProfile,
@@ -17,9 +30,7 @@ export async function GET(request: Request) {
   const includeModels = url.searchParams.get("models") === "1";
 
   const brand = await getBrandProfile(auth.scopeKey);
-  const modelsResult = includeModels
-    ? await listOpenRouterModels()
-    : null;
+  const modelsResult = includeModels ? await listOpenRouterModels() : null;
 
   return NextResponse.json(
     {
@@ -34,167 +45,159 @@ export async function PATCH(request: Request) {
   const auth = await requireScopedIdentity(request);
   if (auth instanceof Response) return auth;
 
+  let patch: Record<string, unknown>;
+  try {
+    patch = await parseSafeJsonBody(request, 65_536);
+  } catch (err) {
+    return errorResponse(err, 400);
+  }
+
   await ensureWorkspaceSeeded(auth.scopeKey);
   const current = await getBrandProfile(auth.scopeKey);
 
-  let patch: Partial<BrandProfile>;
-  try {
-    patch = (await request.json()) as Partial<BrandProfile>;
-  } catch {
-    return NextResponse.json(
-      { error: "Ungültiger JSON-Body." },
-      { status: 400, headers: PRIVATE_JSON_HEADERS },
-    );
-  }
-
   const sanitizedWebsite =
-    patch.website_url !== undefined
+    typeof patch.website_url === "string"
       ? sanitizeExternalHref(patch.website_url) ?? current.website_url
       : current.website_url;
+
+  const rawOrConfig =
+    typeof patch.openrouter_config === "object" &&
+    patch.openrouter_config !== null
+      ? (patch.openrouter_config as Record<string, unknown>)
+      : null;
+
+  const rawBudgetConfig =
+    typeof patch.budget_config === "object" && patch.budget_config !== null
+      ? (patch.budget_config as Record<string, unknown>)
+      : null;
+
+  const rawWeeklyTargets =
+    typeof patch.weekly_targets === "object" && patch.weekly_targets !== null
+      ? (patch.weekly_targets as Record<string, unknown>)
+      : null;
 
   const updated: BrandProfile = {
     ...current,
     brand_name:
-      typeof patch.brand_name === "string" && patch.brand_name.trim()
-        ? patch.brand_name.trim().slice(0, 100)
-        : current.brand_name,
+      cleanStr(patch.brand_name, 100) || current.brand_name,
     owner_name:
-      typeof patch.owner_name === "string" && patch.owner_name.trim()
-        ? patch.owner_name.trim().slice(0, 100)
-        : current.owner_name,
+      cleanStr(patch.owner_name, 100) || current.owner_name,
     city:
-      typeof patch.city === "string"
-        ? patch.city.trim().slice(0, 80)
-        : current.city,
+      patch.city !== undefined ? cleanStr(patch.city, 80) : current.city,
     website_url: sanitizedWebsite,
     contact_email:
-      typeof patch.contact_email === "string"
-        ? patch.contact_email.trim().slice(0, 120)
+      patch.contact_email !== undefined
+        ? cleanStr(patch.contact_email, 120)
         : current.contact_email,
     phone_mobile:
-      typeof patch.phone_mobile === "string"
-        ? patch.phone_mobile.trim().slice(0, 40)
+      patch.phone_mobile !== undefined
+        ? cleanStr(patch.phone_mobile, 40)
         : current.phone_mobile,
     phone_landline:
-      typeof patch.phone_landline === "string"
-        ? patch.phone_landline.trim().slice(0, 40)
+      patch.phone_landline !== undefined
+        ? cleanStr(patch.phone_landline, 40)
         : current.phone_landline,
     postal_address:
-      typeof patch.postal_address === "string"
-        ? patch.postal_address.trim().slice(0, 240)
+      patch.postal_address !== undefined
+        ? cleanStr(patch.postal_address, 240)
         : current.postal_address,
     tax_note:
-      typeof patch.tax_note === "string"
-        ? patch.tax_note.trim().slice(0, 300)
+      patch.tax_note !== undefined
+        ? cleanStr(patch.tax_note, 300)
         : current.tax_note,
     positioning_statement:
-      typeof patch.positioning_statement === "string"
-        ? patch.positioning_statement.trim().slice(0, 800)
-        : current.positioning_statement,
+      cleanStr(patch.positioning_statement, 800) ||
+      current.positioning_statement,
     tone_rules:
-      typeof patch.tone_rules === "string"
-        ? patch.tone_rules.trim().slice(0, 1200)
-        : current.tone_rules,
-    core_services: Array.isArray(patch.core_services)
-      ? patch.core_services.slice(0, 15)
-      : current.core_services,
-    excluded_services: Array.isArray(patch.excluded_services)
-      ? patch.excluded_services.map(String).slice(0, 15)
-      : current.excluded_services,
-    verified_references: Array.isArray(patch.verified_references)
-      ? patch.verified_references.slice(0, 15)
-      : current.verified_references,
-    discovery_questions: Array.isArray(patch.discovery_questions)
-      ? patch.discovery_questions.map(String).slice(0, 20)
-      : current.discovery_questions,
-    pricing_benchmarks: Array.isArray(patch.pricing_benchmarks)
-      ? patch.pricing_benchmarks.slice(0, 20)
-      : current.pricing_benchmarks,
-    openrouter_config:
-      patch.openrouter_config && typeof patch.openrouter_config === "object"
-        ? {
-            researchModel: String(
-              patch.openrouter_config.researchModel ??
-                current.openrouter_config.researchModel,
-            ).slice(0, 120),
-            writingModel: String(
-              patch.openrouter_config.writingModel ??
-                current.openrouter_config.writingModel,
-            ).slice(0, 120),
-            contentModel: String(
-              patch.openrouter_config.contentModel ??
-                current.openrouter_config.contentModel,
-            ).slice(0, 120),
-            privacyMode: Boolean(
-              patch.openrouter_config.privacyMode ??
-                current.openrouter_config.privacyMode,
+      cleanStr(patch.tone_rules, 1200) || current.tone_rules,
+    core_services:
+      patch.core_services !== undefined
+        ? sanitizeCoreServices(patch.core_services, current.core_services)
+        : current.core_services,
+    excluded_services:
+      patch.excluded_services !== undefined
+        ? sanitizeStringList(
+            patch.excluded_services,
+            current.excluded_services,
+            12,
+            200,
+          )
+        : current.excluded_services,
+    verified_references:
+      patch.verified_references !== undefined
+        ? sanitizeVerifiedReferences(
+            patch.verified_references,
+            current.verified_references,
+          )
+        : current.verified_references,
+    discovery_questions:
+      patch.discovery_questions !== undefined
+        ? sanitizeStringList(
+            patch.discovery_questions,
+            current.discovery_questions,
+            15,
+            240,
+          )
+        : current.discovery_questions,
+    pricing_benchmarks:
+      patch.pricing_benchmarks !== undefined
+        ? sanitizePricingBenchmarks(
+            patch.pricing_benchmarks,
+            current.pricing_benchmarks,
+          )
+        : current.pricing_benchmarks,
+    openrouter_config: rawOrConfig
+      ? {
+          researchModel: resolveApprovedModel(
+            cleanStr(rawOrConfig.researchModel, 120),
+            current.openrouter_config.researchModel,
+          ).id,
+          writingModel: resolveApprovedModel(
+            cleanStr(rawOrConfig.writingModel, 120),
+            current.openrouter_config.writingModel,
+          ).id,
+          contentModel: resolveApprovedModel(
+            cleanStr(rawOrConfig.contentModel, 120),
+            current.openrouter_config.contentModel,
+          ).id,
+          privacyMode:
+            rawOrConfig.privacyMode !== undefined
+              ? Boolean(rawOrConfig.privacyMode)
+              : current.openrouter_config.privacyMode,
+          temperature: Math.min(
+            Math.max(
+              Number.isFinite(Number(rawOrConfig.temperature))
+                ? Number(rawOrConfig.temperature)
+                : current.openrouter_config.temperature,
+              0,
             ),
-            temperature: Math.min(
-              Math.max(
-                Number(
-                  patch.openrouter_config.temperature ??
-                    current.openrouter_config.temperature,
-                ),
-                0,
-              ),
+            1,
+          ),
+        }
+      : current.openrouter_config,
+    // Always server-clamped (max 15 EUR/month, max 40 calls/day, stopOnLimit always true)
+    budget_config: rawBudgetConfig
+      ? clampBudgetSettings(rawBudgetConfig)
+      : clampBudgetSettings(current.budget_config),
+    weekly_targets: rawWeeklyTargets
+      ? {
+          leadsChecked: Math.min(
+            Math.max(
+              Math.round(Number(rawWeeklyTargets.leadsChecked) || 12),
               1,
             ),
-          }
-        : current.openrouter_config,
-    budget_config:
-      patch.budget_config && typeof patch.budget_config === "object"
-        ? {
-            monthlyBudgetEur: Math.min(
-              Math.max(Number(patch.budget_config.monthlyBudgetEur ?? 15), 0),
-              500,
-            ),
-            dailyMaxCalls: Math.min(
-              Math.max(
-                Math.round(Number(patch.budget_config.dailyMaxCalls ?? 40)),
-                1,
-              ),
-              300,
-            ),
-            maxTokensPerCall: Math.min(
-              Math.max(
-                Math.round(Number(patch.budget_config.maxTokensPerCall ?? 1200)),
-                200,
-              ),
-              3200,
-            ),
-            batchMaxLeads: Math.min(
-              Math.max(
-                Math.round(Number(patch.budget_config.batchMaxLeads ?? 5)),
-                1,
-              ),
-              10,
-            ),
-            stopOnLimit: Boolean(
-              patch.budget_config.stopOnLimit ?? current.budget_config.stopOnLimit,
-            ),
-            eurPerUsdRate: Math.min(
-              Math.max(Number(patch.budget_config.eurPerUsdRate ?? 0.92), 0.5),
-              1.5,
-            ),
-          }
-        : current.budget_config,
-    weekly_targets:
-      patch.weekly_targets && typeof patch.weekly_targets === "object"
-        ? {
-            leadsChecked: Math.min(
-              Math.max(Number(patch.weekly_targets.leadsChecked || 12), 1),
-              200,
-            ),
-            auditsSent: Math.min(
-              Math.max(Number(patch.weekly_targets.auditsSent || 5), 1),
-              100,
-            ),
-            callsBooked: Math.min(
-              Math.max(Number(patch.weekly_targets.callsBooked || 2), 1),
-              50,
-            ),
-          }
-        : current.weekly_targets,
+            200,
+          ),
+          auditsSent: Math.min(
+            Math.max(Math.round(Number(rawWeeklyTargets.auditsSent) || 5), 1),
+            100,
+          ),
+          callsBooked: Math.min(
+            Math.max(Math.round(Number(rawWeeklyTargets.callsBooked) || 2), 1),
+            50,
+          ),
+        }
+      : current.weekly_targets,
   };
 
   const saved = await saveBrandProfile(updated);

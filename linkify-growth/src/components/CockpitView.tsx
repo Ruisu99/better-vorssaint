@@ -488,9 +488,15 @@ export function CockpitView({
                 </span>
               </div>
               <div className="flex justify-between">
-                <span className="text-[#6B7280]">Automatischer Stopp</span>
-                <span className="font-medium text-[#1A1A2E]">
-                  {snapshot.brand.budget_config.stopOnLimit ? "Aktiv" : "Aus"}
+                <span className="text-[#6B7280]">Harter Kosten-Stopp</span>
+                <span className="font-medium text-[#0000F5]">
+                  Serverseitig aktiv
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-[#6B7280]">Analyse-Modell</span>
+                <span className="font-medium text-[#1A1A2E] truncate max-w-[140px]">
+                  {snapshot.brand.openrouter_config.researchModel}
                 </span>
               </div>
               <div className="flex justify-between items-center pt-2 border-t border-[#E5E7EB]">

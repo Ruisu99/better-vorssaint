@@ -4,7 +4,9 @@ import net from "node:net";
 /**
  * Sanitizes a URL for safe rendering in <a href> attributes (prevents javascript: / data: XSS).
  */
-export function sanitizeExternalHref(raw: string | null | undefined): string | null {
+export function sanitizeExternalHref(
+  raw: string | null | undefined,
+): string | null {
   if (!raw) return null;
   const trimmed = raw.trim();
   if (!trimmed) return null;
@@ -27,14 +29,17 @@ export function sanitizeExternalHref(raw: string | null | undefined): string | n
 
 function isPrivateIpv4(ip: string): boolean {
   const parts = ip.split(".").map((n) => Number.parseInt(n, 10));
-  if (parts.length !== 4 || parts.some((n) => Number.isNaN(n) || n < 0 || n > 255)) {
+  if (
+    parts.length !== 4 ||
+    parts.some((n) => Number.isNaN(n) || n < 0 || n > 255)
+  ) {
     return true;
   }
   const [a, b] = parts;
   if (a === 0) return true; // 0.0.0.0/8
   if (a === 10) return true; // 10.0.0.0/8
   if (a === 127) return true; // 127.0.0.0/8 loopback
-  if (a === 169 && b === 254) return true; // 169.254.0.0/16 link-local / cloud metadata
+  if (a === 169 && b === 254) return true; // 169.254.0.0/16 link-local / metadata
   if (a === 172 && b >= 16 && b <= 31) return true; // 172.16.0.0/12
   if (a === 192 && b === 168) return true; // 192.168.0.0/16
   if (a === 100 && b >= 64 && b <= 127) return true; // 100.64.0.0/10 CGNAT
@@ -72,10 +77,22 @@ export function isPublicIpAddress(ip: string): boolean {
   return false;
 }
 
-export async function assertSafePublicUrl(rawUrl: string): Promise<URL> {
+export interface PinnedPublicTarget {
+  url: URL;
+  pinnedIp: string;
+  family: 4 | 6;
+}
+
+/**
+ * Validates URL scheme/port/hostname and resolves DNS ONCE, returning the exact
+ * validated public IP to pin the TCP socket to (prevents DNS rebinding SSRF).
+ */
+export async function resolveAndPinPublicUrl(
+  rawUrl: string,
+): Promise<PinnedPublicTarget> {
   const trimmed = rawUrl.trim();
-  if (!trimmed) {
-    throw new Error("Bitte eine gültige Website-URL angeben.");
+  if (!trimmed || trimmed.length > 500) {
+    throw new Error("Bitte eine gültige Website-URL (max. 500 Zeichen) angeben.");
   }
   const withScheme = /^https?:\/\//i.test(trimmed)
     ? trimmed
@@ -116,11 +133,20 @@ export async function assertSafePublicUrl(rawUrl: string): Promise<URL> {
   if (resolved.length === 0) {
     throw new Error(`Domain "${host}" konnte nicht aufgelöst werden.`);
   }
+
   for (const entry of resolved) {
     if (!isPublicIpAddress(entry.address)) {
       throw new Error("Zieladresse verweist auf ein geschütztes Netzwerk.");
     }
   }
 
-  return parsed;
+  const preferred =
+    resolved.find((r) => r.family === 4) ?? resolved[0];
+  const family: 4 | 6 = preferred.family === 6 ? 6 : 4;
+
+  return {
+    url: parsed,
+    pinnedIp: preferred.address,
+    family,
+  };
 }

@@ -4,12 +4,31 @@ import { runAiTask } from "@/lib/openrouter";
 import { buildContentPrompt, buildLinkifySystemPrompt } from "@/lib/prompts";
 import type { ContentFormat, ContentStatus, TargetTrack } from "@/lib/types";
 import {
+  assertSafeMutationRequest,
+  cleanStr,
+  errorResponse,
+  parseSafeJsonBody,
+} from "@/lib/validation";
+import {
   createContentPost,
   deleteContentPost,
   ensureWorkspaceSeeded,
   getBrandProfile,
   listContentPosts,
 } from "@/lib/workspace-data";
+
+const VALID_FORMATS = new Set<ContentFormat>([
+  "linkedin",
+  "website_insight",
+  "case_study",
+  "outreach_hook",
+]);
+
+const VALID_CONTENT_STATUS = new Set<ContentStatus>([
+  "entwurf",
+  "geprueft",
+  "veroeffentlicht",
+]);
 
 function parseJsonSafe<T>(text: string): T | null {
   const cleaned = text
@@ -36,29 +55,24 @@ export async function POST(request: Request) {
   const auth = await requireScopedIdentity(request);
   if (auth instanceof Response) return auth;
 
+  let body: Record<string, unknown>;
+  try {
+    body = await parseSafeJsonBody(request, 24_576);
+  } catch (err) {
+    return errorResponse(err, 400);
+  }
+
   await ensureWorkspaceSeeded(auth.scopeKey);
   const brand = await getBrandProfile(auth.scopeKey);
 
-  let body: {
-    format?: ContentFormat;
-    targetTrack?: TargetTrack;
-    sourceBasis?: string;
-    topic?: string;
-  };
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json(
-      { error: "Ungültiger Request-Body." },
-      { status: 400, headers: PRIVATE_JSON_HEADERS },
-    );
-  }
-
-  const format: ContentFormat = body.format ?? "linkedin";
+  const format: ContentFormat = VALID_FORMATS.has(body.format as ContentFormat)
+    ? (body.format as ContentFormat)
+    : "linkedin";
   const targetTrack: TargetTrack =
     body.targetTrack === "startup" ? "startup" : "kmu";
-  const sourceBasis = (body.sourceBasis ?? "Praxisbeobachtung Linkify").trim();
-  const topic = (body.topic ?? "").trim();
+  const sourceBasis =
+    cleanStr(body.sourceBasis, 240) || "Praxisbeobachtung Linkify";
+  const topic = cleanStr(body.topic, 1000);
 
   if (!topic) {
     return NextResponse.json(
@@ -68,7 +82,7 @@ export async function POST(request: Request) {
   }
 
   const fallbackDraft = {
-    title: `${topic.slice(0, 80)}`,
+    title: topic.slice(0, 80),
     body:
       targetTrack === "startup"
         ? `Bei Web-Apps und Plattformen entscheidet oft nicht das größte Feature-Set, sondern eine klare Struktur von Anfang an.\n\nAusgangspunkt: ${topic}\nBasis: ${sourceBasis}\n\nIn meiner Arbeit als Fullstack-Entwickler (u. a. bei Skabe GbR) erlebe ich immer wieder: Saubere Rollen, nachvollziehbare Buchungs- oder Nutzerabläufe und eine dokumentierte Übergabe sparen später Monate an Korrekturen.\n\nWer direkt mit dem Entwickler zusammenarbeitet, der das System auch konzipiert, kommt schneller zu einem funktionierenden Produkt.`
@@ -93,7 +107,7 @@ export async function POST(request: Request) {
         userTopic: topic,
       }),
       temperature: brand.openrouter_config.temperature,
-      maxTokens: 1500,
+      maxTokens: 1300,
       privacyMode: brand.openrouter_config.privacyMode,
       summaryLabel: `Content (${format}): ${topic.slice(0, 50)}`,
       fallbackFn: () => JSON.stringify(fallbackDraft),
@@ -126,6 +140,7 @@ export async function POST(request: Request) {
         post,
         providerMode: aiRes.providerMode,
         limitBlockedReason: aiRes.limitBlockedReason,
+        autoDowngraded: aiRes.autoDowngraded,
         estimatedCostUsd: aiRes.estimatedCostUsd,
       },
       { status: 201, headers: PRIVATE_JSON_HEADERS },
@@ -144,22 +159,15 @@ export async function PATCH(request: Request) {
   const auth = await requireScopedIdentity(request);
   if (auth instanceof Response) return auth;
 
-  let body: {
-    id?: string;
-    title?: string;
-    body?: string;
-    status?: ContentStatus;
-  };
+  let body: Record<string, unknown>;
   try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json(
-      { error: "Ungültiger Request-Body." },
-      { status: 400, headers: PRIVATE_JSON_HEADERS },
-    );
+    body = await parseSafeJsonBody(request, 24_576);
+  } catch (err) {
+    return errorResponse(err, 400);
   }
 
-  if (!body.id) {
+  const id = cleanStr(body.id, 80);
+  if (!id) {
     return NextResponse.json(
       { error: "Post-ID fehlt." },
       { status: 400, headers: PRIVATE_JSON_HEADERS },
@@ -167,7 +175,7 @@ export async function PATCH(request: Request) {
   }
 
   const existing = (await listContentPosts(auth.scopeKey)).find(
-    (p) => p.id === body.id,
+    (p) => p.id === id,
   );
   if (!existing) {
     return NextResponse.json(
@@ -176,16 +184,25 @@ export async function PATCH(request: Request) {
     );
   }
 
+  const status: ContentStatus = VALID_CONTENT_STATUS.has(
+    body.status as ContentStatus,
+  )
+    ? (body.status as ContentStatus)
+    : existing.status;
+
   const updated = await createContentPost({
     id: existing.id,
     owner_sub: auth.scopeKey,
-    title: body.title?.trim() ? body.title.trim().slice(0, 180) : existing.title,
+    title: cleanStr(body.title, 180) || existing.title,
     format: existing.format,
     target_track: existing.target_track,
     source_basis: existing.source_basis,
-    body: body.body !== undefined ? body.body.slice(0, 8000) : existing.body,
+    body:
+      typeof body.body === "string"
+        ? cleanStr(body.body, 8000)
+        : existing.body,
     verification_notes: existing.verification_notes,
-    status: body.status ?? existing.status,
+    status,
     model_used: existing.model_used,
     is_sample: existing.is_sample,
   });
@@ -199,6 +216,12 @@ export async function PATCH(request: Request) {
 export async function DELETE(request: Request) {
   const auth = await requireScopedIdentity(request);
   if (auth instanceof Response) return auth;
+
+  try {
+    assertSafeMutationRequest(request, { requireJsonContentType: false });
+  } catch (err) {
+    return errorResponse(err, 403);
+  }
 
   const url = new URL(request.url);
   const id = url.searchParams.get("id") ?? "";

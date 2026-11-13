@@ -6,14 +6,16 @@ import {
   CheckSquare,
   ExternalLink,
   Globe,
+  Layers,
   MapPin,
   Search,
   Sparkles,
   Square,
+  Zap,
 } from "lucide-react";
-import { safeHref } from "@/lib/client-utils";
+import { PRIORITY_LABELS, safeHref } from "@/lib/client-utils";
 import type { WorkspaceSnapshot } from "@/lib/initial-state";
-import type { Lead, RadarCandidate } from "@/lib/types";
+import type { Lead, LeadPriority, RadarCandidate, TargetTrack } from "@/lib/types";
 
 const CATEGORIES = [
   { id: "alle", label: "Alle Zielbranchen" },
@@ -24,10 +26,23 @@ const CATEGORIES = [
   { id: "bau", label: "Bau & Haustechnik" },
 ] as const;
 
-export function RadarView({ snapshot }: { snapshot: WorkspaceSnapshot }) {
-  const [tab, setTab] = useState<"local" | "scanner">("local");
+interface RadarPreview {
+  osmId: string;
+  ok: boolean;
+  priority: LeadPriority;
+  cms: string;
+  httpsEnabled: boolean;
+  hasViewport: boolean;
+  responseTimeMs: number;
+  topFinding: string;
+  extractedEmail?: string;
+  extractedPhone?: string;
+}
 
-  // Local OpenStreetMap Radar state
+export function RadarView({ snapshot }: { snapshot: WorkspaceSnapshot }) {
+  const [tab, setTab] = useState<"local" | "batch" | "scanner">("local");
+
+  // Local OpenStreetMap + Photon Radar state
   const [city, setCity] = useState(snapshot.brand.city || "Erfurt");
   const [category, setCategory] = useState<string>("alle");
   const [keyword, setKeyword] = useState<string>("");
@@ -36,12 +51,23 @@ export function RadarView({ snapshot }: { snapshot: WorkspaceSnapshot }) {
   const [searchError, setSearchError] = useState<string | null>(null);
   const [resolvedLocation, setResolvedLocation] = useState<string | null>(null);
   const [candidates, setCandidates] = useState<RadarCandidate[]>([]);
+  const [previews, setPreviews] = useState<Record<string, RadarPreview>>({});
+  const [prescanning, setPrescanning] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [autoScanOnImport, setAutoScanOnImport] = useState(true);
   const [importing, setImporting] = useState(false);
   const [importedLeads, setImportedLeads] = useState<Lead[]>([]);
 
-  // Direct Website / Startup Scanner state
+  // Batch URL / Startup Track Scanner
+  const [batchText, setBatchText] = useState("");
+  const [batchTrack, setBatchTrack] = useState<TargetTrack>("startup");
+  const [batchScanning, setBatchScanning] = useState(false);
+  const [batchError, setBatchError] = useState<string | null>(null);
+  const [batchResults, setBatchResults] = useState<
+    Array<{ url: string; ok: boolean; lead?: Lead; error?: string }>
+  >([]);
+
+  // Direct Single Website + PageSpeed + AI Scanner state
   const [scanUrl, setScanUrl] = useState("");
   const [scanCompany, setScanCompany] = useState("");
   const [scanCity, setScanCity] = useState("");
@@ -54,6 +80,7 @@ export function RadarView({ snapshot }: { snapshot: WorkspaceSnapshot }) {
       providerMode: string;
       modelUsed: string;
       limitBlockedReason?: string;
+      autoDowngraded?: boolean;
       nextVisualCheckHints?: string[];
     } | null;
   } | null>(null);
@@ -66,6 +93,7 @@ export function RadarView({ snapshot }: { snapshot: WorkspaceSnapshot }) {
     setSearching(true);
     setSearchError(null);
     setImportedLeads([]);
+    setPreviews({});
     try {
       const res = await fetch("/api/radar", {
         method: "POST",
@@ -91,6 +119,45 @@ export function RadarView({ snapshot }: { snapshot: WorkspaceSnapshot }) {
       setSearchError("Verbindung zur Branchensuche fehlgeschlagen.");
     } finally {
       setSearching(false);
+    }
+  }
+
+  async function handleFreePrescan() {
+    const withWeb = candidates.filter((c) => c.websiteUrl).slice(0, 8);
+    if (withWeb.length === 0) return;
+    setPrescanning(true);
+    setSearchError(null);
+    try {
+      const res = await fetch("/api/radar", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "prescan_candidates",
+          candidates: withWeb,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setSearchError(data.error ?? "Vorcheck fehlgeschlagen.");
+        return;
+      }
+      const nextMap: Record<string, RadarPreview> = { ...previews };
+      for (const p of (data.previews ?? []) as RadarPreview[]) {
+        nextMap[p.osmId] = p;
+      }
+      setPreviews(nextMap);
+
+      // Sort high-priority relaunch candidates to the top automatically
+      const score = (c: RadarCandidate) => {
+        const p = nextMap[c.osmId];
+        if (!p) return 2;
+        return p.priority === "heiss" ? 0 : p.priority === "warm" ? 1 : 2;
+      };
+      setCandidates((prev) => [...prev].sort((a, b) => score(a) - score(b)));
+    } catch {
+      setSearchError("Netzwerkfehler beim kostenlosen Vorcheck.");
+    } finally {
+      setPrescanning(false);
     }
   }
 
@@ -140,6 +207,40 @@ export function RadarView({ snapshot }: { snapshot: WorkspaceSnapshot }) {
     }
   }
 
+  async function handleBatchScan(e: React.FormEvent) {
+    e.preventDefault();
+    const urls = batchText
+      .split(/\r?\n/)
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .slice(0, 5);
+    if (urls.length === 0) return;
+    setBatchScanning(true);
+    setBatchError(null);
+    setBatchResults([]);
+    try {
+      const res = await fetch("/api/scan", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          urls,
+          targetTrack: batchTrack,
+          saveToPipeline: true,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setBatchError(data.error ?? "Batch-Scan fehlgeschlagen.");
+        return;
+      }
+      setBatchResults(data.results ?? []);
+    } catch {
+      setBatchError("Netzwerkfehler beim Batch-Scan.");
+    } finally {
+      setBatchScanning(false);
+    }
+  }
+
   async function handleSingleScan(e: React.FormEvent) {
     e.preventDefault();
     if (!scanUrl.trim()) return;
@@ -174,48 +275,59 @@ export function RadarView({ snapshot }: { snapshot: WorkspaceSnapshot }) {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+      <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4">
         <div>
           <p className="text-[13px] font-medium text-[#0000F5]">
-            Kundensuche & Technische Vor-Filterung
+            Kundensuche & Kostenlose Vor-Qualifizierung (0,00 € KI-Kosten)
           </p>
           <h1 className="mt-1 text-[28px] font-semibold tracking-tight text-[#1A1A2E]">
             Kunden-Radar
           </h1>
           <p className="mt-1 text-[14px] text-[#6B7280] max-w-2xl">
-            Finde echte lokale Unternehmen über OpenStreetMap oder prüfe
-            bekannte Websites & Startup-Seiten direkt auf Relaunch- und
-            Produktpotenzial – komplett ohne KI-Kosten vorab.
+            Finde lokale Unternehmen (KMU) oder prüfe Startup-/Produkt-URLs im
+            Stapel – inklusive automatischem Impressum- & Karriere-Check, bevor
+            du KI-Budget nutzt.
           </p>
         </div>
 
-        <div className="inline-flex rounded-full bg-white border border-[#E5E7EB] p-1">
+        <div className="inline-flex items-center flex-nowrap rounded-full bg-white border border-[#E5E7EB] p-1 shrink-0 overflow-x-auto max-w-full">
           <button
             type="button"
             onClick={() => setTab("local")}
-            className={`px-4 py-1.5 rounded-full text-[13px] font-medium transition-colors cursor-pointer ${
+            className={`whitespace-nowrap px-3.5 py-1.5 rounded-full text-[13px] font-medium transition-colors cursor-pointer ${
               tab === "local"
                 ? "bg-[#0000F5] text-white"
                 : "text-[#6B7280] hover:text-[#1A1A2E]"
             }`}
           >
-            Lokale Branchensuche
+            Branchen-Radar
+          </button>
+          <button
+            type="button"
+            onClick={() => setTab("batch")}
+            className={`whitespace-nowrap px-3.5 py-1.5 rounded-full text-[13px] font-medium transition-colors cursor-pointer ${
+              tab === "batch"
+                ? "bg-[#0000F5] text-white"
+                : "text-[#6B7280] hover:text-[#1A1A2E]"
+            }`}
+          >
+            Startups & 5er-Batch
           </button>
           <button
             type="button"
             onClick={() => setTab("scanner")}
-            className={`px-4 py-1.5 rounded-full text-[13px] font-medium transition-colors cursor-pointer ${
+            className={`whitespace-nowrap px-3.5 py-1.5 rounded-full text-[13px] font-medium transition-colors cursor-pointer ${
               tab === "scanner"
                 ? "bg-[#0000F5] text-white"
                 : "text-[#6B7280] hover:text-[#1A1A2E]"
             }`}
           >
-            Einzel-URL & PageSpeed
+            Einzel-URL
           </button>
         </div>
       </div>
 
-      {tab === "local" ? (
+      {tab === "local" && (
         <div className="space-y-6">
           <form
             onSubmit={handleRadarSearch}
@@ -276,7 +388,7 @@ export function RadarView({ snapshot }: { snapshot: WorkspaceSnapshot }) {
                     onChange={(e) => setOnlyWithWebsite(e.target.checked)}
                     className="accent-[#0000F5]"
                   />
-                  <span>Nur Unternehmen mit Website-Eintrag</span>
+                  <span>Nur mit Website</span>
                 </label>
                 <button
                   type="submit"
@@ -285,7 +397,7 @@ export function RadarView({ snapshot }: { snapshot: WorkspaceSnapshot }) {
                 >
                   <Search className="w-4 h-4" />
                   <span>
-                    {searching ? "Suche in OpenStreetMap..." : "Unternehmen finden (0 €)"}
+                    {searching ? "Suche läuft..." : "Unternehmen finden (0 €)"}
                   </span>
                 </button>
               </div>
@@ -302,7 +414,10 @@ export function RadarView({ snapshot }: { snapshot: WorkspaceSnapshot }) {
             <div className="rounded-2xl bg-[#F0F3FF] border border-[#0000F5]/20 p-5 space-y-3">
               <p className="text-[14px] font-semibold text-[#1A1A2E]">
                 {importedLeads.length} Unternehmen in die Pipeline übernommen
-                {autoScanOnImport ? " & technisch gescannt" : ""}.
+                {autoScanOnImport
+                  ? " & inkl. Impressum/Technik analysiert (0 € KI)"
+                  : ""}
+                .
               </p>
               <div className="flex flex-wrap gap-2">
                 {importedLeads.map((l) => (
@@ -321,7 +436,7 @@ export function RadarView({ snapshot }: { snapshot: WorkspaceSnapshot }) {
 
           {candidates.length > 0 && (
             <section className="rounded-2xl bg-white border border-[#E5E7EB] overflow-hidden">
-              <div className="p-5 border-b border-[#E5E7EB] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="p-5 border-b border-[#E5E7EB] flex flex-col lg:flex-row lg:items-center justify-between gap-4">
                 <div>
                   <h2 className="text-[16px] font-semibold text-[#1A1A2E]">
                     {candidates.length} Treffer gefunden
@@ -333,16 +448,33 @@ export function RadarView({ snapshot }: { snapshot: WorkspaceSnapshot }) {
                   )}
                 </div>
 
-                <div className="flex flex-wrap items-center gap-3">
-                  <label className="inline-flex items-center gap-2 text-[12px] text-[#6B7280] cursor-pointer">
+                <div className="flex flex-wrap items-center gap-2.5">
+                  <button
+                    type="button"
+                    onClick={handleFreePrescan}
+                    disabled={
+                      prescanning || !candidates.some((c) => c.websiteUrl)
+                    }
+                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full border border-[#0000F5]/30 bg-[#F0F3FF] text-[#0000F5] text-[12px] font-medium cursor-pointer disabled:opacity-40"
+                  >
+                    <Zap className="w-3.5 h-3.5" />
+                    <span>
+                      {prescanning
+                        ? "Vorcheck läuft..."
+                        : "Websites vorprüfen & sortieren (0 €)"}
+                    </span>
+                  </button>
+
+                  <label className="inline-flex items-center gap-1.5 text-[12px] text-[#6B7280] cursor-pointer">
                     <input
                       type="checkbox"
                       checked={autoScanOnImport}
                       onChange={(e) => setAutoScanOnImport(e.target.checked)}
                       className="accent-[#0000F5]"
                     />
-                    <span>Websites beim Übernehmen technisch prüfen (0 € KI)</span>
+                    <span>Impressum-Check</span>
                   </label>
+
                   <button
                     type="button"
                     disabled={selectedIds.size === 0 || importing}
@@ -351,7 +483,7 @@ export function RadarView({ snapshot }: { snapshot: WorkspaceSnapshot }) {
                   >
                     {importing
                       ? "Übernehme..."
-                      : `Auswahl übernehmen (${selectedIds.size}/${maxBatch} max.)`}
+                      : `Übernehmen (${selectedIds.size}/${maxBatch})`}
                   </button>
                 </div>
               </div>
@@ -360,6 +492,7 @@ export function RadarView({ snapshot }: { snapshot: WorkspaceSnapshot }) {
                 {candidates.map((c) => {
                   const selected = selectedIds.has(c.osmId);
                   const safeUrl = safeHref(c.websiteUrl);
+                  const preview = previews[c.osmId];
                   return (
                     <div
                       key={c.osmId}
@@ -387,9 +520,20 @@ export function RadarView({ snapshot }: { snapshot: WorkspaceSnapshot }) {
                             <span className="text-[11px] px-2 py-0.5 rounded-full bg-[#F3F4F6] text-[#6B7280]">
                               {c.industry}
                             </span>
+                            {preview && (
+                              <span
+                                className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${
+                                  preview.priority === "heiss"
+                                    ? "bg-[#F0F3FF] text-[#0000F5]"
+                                    : "bg-amber-50 text-amber-800"
+                                }`}
+                              >
+                                Bedarf: {PRIORITY_LABELS[preview.priority]}
+                              </span>
+                            )}
                             {c.alreadyInPipeline && (
                               <span className="text-[11px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700">
-                                Bereits in Pipeline
+                                In Pipeline
                               </span>
                             )}
                           </div>
@@ -398,6 +542,14 @@ export function RadarView({ snapshot }: { snapshot: WorkspaceSnapshot }) {
                             {c.contactEmail ? ` · ${c.contactEmail}` : ""}
                             {c.contactPhone ? ` · ${c.contactPhone}` : ""}
                           </p>
+                          {preview && (
+                            <p className="text-[12px] text-[#1A1A2E] mt-1">
+                              {preview.cms} ·{" "}
+                              {preview.httpsEnabled ? "HTTPS" : "Kein HTTPS"} ·{" "}
+                              {preview.hasViewport ? "Viewport OK" : "Kein Mobile-Viewport"}{" "}
+                              · <strong>{preview.topFinding}</strong>
+                            </p>
+                          )}
                         </div>
                       </div>
 
@@ -409,7 +561,7 @@ export function RadarView({ snapshot }: { snapshot: WorkspaceSnapshot }) {
                             rel="noopener noreferrer"
                             className="inline-flex items-center gap-1.5 text-[13px] font-medium text-[#0000F5] hover:underline"
                           >
-                            <span>Website ansehen</span>
+                            <span>Website</span>
                             <ExternalLink className="w-3.5 h-3.5" />
                           </a>
                         ) : (
@@ -425,7 +577,99 @@ export function RadarView({ snapshot }: { snapshot: WorkspaceSnapshot }) {
             </section>
           )}
         </div>
-      ) : (
+      )}
+
+      {tab === "batch" && (
+        <div className="space-y-6">
+          <form
+            onSubmit={handleBatchScan}
+            className="rounded-2xl bg-white border border-[#E5E7EB] p-6 space-y-4"
+          >
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h2 className="text-[16px] font-semibold text-[#1A1A2E] flex items-center gap-2">
+                  <Layers className="w-4 h-4 text-[#0000F5]" />
+                  <span>
+                    Startup- & Produkt-Batch-Scanner (bis zu 5 URLs · 0 € KI)
+                  </span>
+                </h2>
+                <p className="text-[13px] text-[#6B7280] mt-0.5">
+                  Ideal für SaaS-Teams, Agentur-Partner oder Betriebe aus deinen
+                  Notizen: prüft Technik, Impressum, Entscheider & Karriere-Signale.
+                </p>
+              </div>
+              <select
+                value={batchTrack}
+                onChange={(e) => setBatchTrack(e.target.value as TargetTrack)}
+                className="px-3.5 py-2 rounded-xl border border-[#E5E7EB] bg-white text-[13px]"
+              >
+                <option value="startup">Track: Startups & Produktteams</option>
+                <option value="kmu">Track: Lokale Unternehmen / KMU</option>
+              </select>
+            </div>
+
+            <textarea
+              rows={5}
+              value={batchText}
+              onChange={(e) => setBatchText(e.target.value)}
+              placeholder={"https://produkt-startup-1.de\nhttps://agentur-partner-2.de\nhttps://betrieb-3.de"}
+              className="w-full px-3.5 py-2.5 rounded-xl border border-[#E5E7EB] text-[13px] font-mono focus:outline-none focus:border-[#0000F5]"
+            />
+
+            {batchError && (
+              <p className="text-[13px] text-red-700 bg-red-50 border border-red-200 rounded-xl px-4 py-2.5">
+                {batchError}
+              </p>
+            )}
+
+            <button
+              type="submit"
+              disabled={batchScanning || !batchText.trim()}
+              className="px-6 py-2.5 rounded-full bg-[#0000F5] hover:bg-[#0000C8] disabled:opacity-50 text-white text-[14px] font-medium cursor-pointer"
+            >
+              {batchScanning
+                ? "Scanne URLs & Impressum..."
+                : "Bis zu 5 URLs kostenlos scannen & anlegen"}
+            </button>
+          </form>
+
+          {batchResults.length > 0 && (
+            <div className="rounded-2xl bg-white border border-[#E5E7EB] divide-y divide-[#E5E7EB]">
+              {batchResults.map((r, i) => (
+                <div
+                  key={i}
+                  className="p-4 flex items-center justify-between gap-4 text-[13px]"
+                >
+                  <div className="min-w-0">
+                    <p className="font-medium text-[#1A1A2E] truncate">
+                      {r.ok && r.lead ? r.lead.company_name : r.url}
+                    </p>
+                    <p className="text-[#6B7280] truncate">
+                      {r.ok && r.lead
+                        ? r.lead.research_summary
+                        : r.error ?? "Fehler"}
+                    </p>
+                  </div>
+                  {r.ok && r.lead ? (
+                    <Link
+                      href={`/pipeline/${r.lead.id}`}
+                      className="px-4 py-1.5 rounded-full bg-[#F0F3FF] text-[#0000F5] font-medium shrink-0"
+                    >
+                      Öffnen
+                    </Link>
+                  ) : (
+                    <span className="text-red-700 text-[12px] shrink-0">
+                      Fehlgeschlagen
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {tab === "scanner" && (
         <div className="space-y-6">
           <form
             onSubmit={handleSingleScan}
@@ -495,7 +739,8 @@ export function RadarView({ snapshot }: { snapshot: WorkspaceSnapshot }) {
                   />
                   <Sparkles className="w-3.5 h-3.5 text-[#0000F5]" />
                   <span>
-                    Anschließend mit OpenRouter qualifizieren ({snapshot.brand.openrouter_config.researchModel})
+                    Anschließend qualifizieren (
+                    {snapshot.brand.openrouter_config.researchModel})
                   </span>
                 </label>
               </div>
@@ -544,8 +789,10 @@ export function RadarView({ snapshot }: { snapshot: WorkspaceSnapshot }) {
                       HTTPS / Status
                     </span>
                     <span className="font-medium">
-                      {scanResult.lead.scan_data.httpsEnabled ? "HTTPS OK" : "Kein HTTPS"} (
-                      {scanResult.lead.scan_data.statusCode})
+                      {scanResult.lead.scan_data.httpsEnabled
+                        ? "HTTPS OK"
+                        : "Kein HTTPS"}{" "}
+                      ({scanResult.lead.scan_data.statusCode})
                     </span>
                   </div>
                   <div>
@@ -568,10 +815,11 @@ export function RadarView({ snapshot }: { snapshot: WorkspaceSnapshot }) {
                   </div>
                   <div>
                     <span className="text-[#6B7280] block text-[11px]">
-                      Antwortzeit
+                      Seiten & Tempo
                     </span>
                     <span className="font-medium">
-                      {scanResult.lead.scan_data.responseTimeMs} ms
+                      {scanResult.lead.scan_data.checkedPagesCount ?? 1} Seiten
+                      · {scanResult.lead.scan_data.responseTimeMs} ms
                     </span>
                   </div>
                 </div>

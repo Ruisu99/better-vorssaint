@@ -131,9 +131,9 @@ export const DEFAULT_PRICING_BENCHMARKS: PricingBenchmark[] = [
 ];
 
 export const DEFAULT_OPENROUTER_CONFIG: OpenRouterConfig = {
-  researchModel: "google/gemini-2.5-flash",
-  writingModel: "anthropic/claude-sonnet-4",
-  contentModel: "anthropic/claude-sonnet-4",
+  researchModel: "meta/muse-ember",
+  writingModel: "google/gemini-4-hydrogen",
+  contentModel: "google/gemini-4-hydrogen",
   privacyMode: true,
   temperature: 0.4,
 };
@@ -150,6 +150,7 @@ export const DEFAULT_BUDGET_CONFIG: BudgetConfig = {
   maxTokensPerCall: 1200,
   batchMaxLeads: 5,
   stopOnLimit: true,
+  autoDowngradeAt75Pct: true,
   eurPerUsdRate: 0.92,
 };
 

@@ -78,6 +78,7 @@ export interface BudgetConfig {
   maxTokensPerCall: number;
   batchMaxLeads: number;
   stopOnLimit: boolean;
+  autoDowngradeAt75Pct: boolean;
   eurPerUsdRate: number;
 }
 
@@ -129,6 +130,10 @@ export interface LeadScanData {
   hasImprintLink: boolean;
   hasPrivacyLink: boolean;
   hasContactFormOrCta: boolean;
+  hasHiringSignal?: boolean;
+  checkedPagesCount?: number;
+  decisionMakerHint?: string;
+  extractedAddressHint?: string;
   extractedEmails: string[];
   extractedPhones: string[];
   visibleSummary: string;

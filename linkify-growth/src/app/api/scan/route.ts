@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { PRIVATE_JSON_HEADERS, requireScopedIdentity } from "@/lib/auth";
+import { HARD_MAX_BATCH_LEADS } from "@/lib/budget-guard";
 import { runAiTask } from "@/lib/openrouter";
 import {
   buildLinkifySystemPrompt,
@@ -7,6 +8,7 @@ import {
 } from "@/lib/prompts";
 import { scanWebsite } from "@/lib/scanner";
 import type { Lead, LeadPriority, TargetTrack } from "@/lib/types";
+import { cleanStr, errorResponse, parseSafeJsonBody } from "@/lib/validation";
 import {
   ensureWorkspaceSeeded,
   getBrandProfile,
@@ -31,31 +33,113 @@ export async function POST(request: Request) {
   const auth = await requireScopedIdentity(request);
   if (auth instanceof Response) return auth;
 
+  let body: Record<string, unknown>;
+  try {
+    body = await parseSafeJsonBody(request, 24_576);
+  } catch (err) {
+    return errorResponse(err, 400);
+  }
+
   await ensureWorkspaceSeeded(auth.scopeKey);
   const brand = await getBrandProfile(auth.scopeKey);
 
-  let body: {
-    url?: string;
-    leadId?: string;
-    companyName?: string;
-    industry?: string;
-    city?: string;
-    includePageSpeed?: boolean;
-    runAiQualification?: boolean;
-    saveToPipeline?: boolean;
-  };
-  try {
-    body = await request.json();
-  } catch {
+  // Batch scan mode (0 EUR technical multi-URL scan for Startup/KMU lists, capped at HARD_MAX_BATCH_LEADS)
+  if (Array.isArray(body.urls)) {
+    const rawUrls = body.urls
+      .slice(0, HARD_MAX_BATCH_LEADS)
+      .map((u) => cleanStr(u, 400))
+      .filter(Boolean);
+
+    if (rawUrls.length === 0) {
+      return NextResponse.json(
+        { error: "Bitte mindestens eine URL eingeben." },
+        { status: 400, headers: PRIVATE_JSON_HEADERS },
+      );
+    }
+
+    const saveToPipeline = body.saveToPipeline !== false;
+    const forceTrack: TargetTrack | null =
+      body.targetTrack === "startup" || body.targetTrack === "kmu"
+        ? body.targetTrack
+        : null;
+
+    const results: Array<{
+      url: string;
+      ok: boolean;
+      lead?: Lead;
+      error?: string;
+    }> = [];
+
+    for (const rawUrl of rawUrls) {
+      try {
+        const scanResult = await scanWebsite(rawUrl, {
+          includePageSpeed: false,
+          deepSubpages: true,
+        });
+        const hostname = new URL(scanResult.scan.finalUrl).hostname.replace(
+          /^www\./i,
+          "",
+        );
+        const derivedCompany =
+          scanResult.scan.title.split(/[|\-–]/)[0]?.trim() || hostname;
+
+        const leadPayload = {
+          id: crypto.randomUUID(),
+          owner_sub: auth.scopeKey,
+          company_name: derivedCompany.slice(0, 160),
+          industry: forceTrack === "startup" ? "Digitales Produkt / SaaS" : "",
+          target_track: forceTrack ?? scanResult.suggestedTrack,
+          city: "",
+          postal_address: "",
+          website_url: scanResult.scan.finalUrl,
+          decision_maker: scanResult.scan.decisionMakerHint ?? "",
+          contact_email: scanResult.scan.extractedEmails[0] ?? "",
+          contact_phone: scanResult.scan.extractedPhones[0] ?? "",
+          source: forceTrack === "startup" ? "startup_batch" : "batch_scan",
+          priority: scanResult.suggestedPriority,
+          status: "analysiert" as const,
+          contact_channel: "email" as const,
+          first_contact_at: null,
+          next_follow_up_at: null,
+          visual_checked_desktop: false,
+          visual_checked_mobile: false,
+          visual_notes: "",
+          research_summary: `${scanResult.scan.detectedCms} erkannt (${scanResult.scan.responseTimeMs} ms, ${scanResult.scan.checkedPagesCount ?? 1} Seiten geprüft). ${scanResult.findings[0]?.title ?? ""}`,
+          findings: scanResult.findings,
+          scan_data: scanResult.scan,
+          pitch_angle: scanResult.suggestedPitchAngle,
+          is_sample: false,
+        };
+
+        const savedLead = saveToPipeline
+          ? await upsertLead(leadPayload)
+          : {
+              ...leadPayload,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            };
+
+        results.push({ url: rawUrl, ok: true, lead: savedLead });
+      } catch (err) {
+        results.push({
+          url: rawUrl,
+          ok: false,
+          error:
+            err instanceof Error ? err.message : "Scan fehlgeschlagen.",
+        });
+      }
+    }
+
     return NextResponse.json(
-      { error: "Ungültiger JSON-Body." },
-      { status: 400, headers: PRIVATE_JSON_HEADERS },
+      { results },
+      { headers: PRIVATE_JSON_HEADERS },
     );
   }
 
   let existingLead: Lead | null = null;
-  if (body.leadId) {
-    existingLead = await getLeadById(auth.scopeKey, body.leadId);
+  const leadId = cleanStr(body.leadId, 80);
+  if (leadId) {
+    existingLead = await getLeadById(auth.scopeKey, leadId);
     if (!existingLead) {
       return NextResponse.json(
         { error: "Lead nicht gefunden." },
@@ -64,7 +148,8 @@ export async function POST(request: Request) {
     }
   }
 
-  const targetUrl = (body.url ?? existingLead?.website_url ?? "").trim();
+  const targetUrl =
+    cleanStr(body.url, 400) || existingLead?.website_url || "";
   if (!targetUrl) {
     return NextResponse.json(
       { error: "Keine Website-URL für den Scan angegeben." },
@@ -76,6 +161,7 @@ export async function POST(request: Request) {
   try {
     scanResult = await scanWebsite(targetUrl, {
       includePageSpeed: Boolean(body.includePageSpeed),
+      deepSubpages: true,
     });
   } catch (err) {
     const message =
@@ -92,7 +178,7 @@ export async function POST(request: Request) {
   );
   const derivedCompany =
     existingLead?.company_name ??
-    (body.companyName?.trim() ||
+    (cleanStr(body.companyName, 160) ||
       scanResult.scan.title.split(/[|\-–]/)[0]?.trim() ||
       hostname);
 
@@ -100,12 +186,15 @@ export async function POST(request: Request) {
     id: existingLead?.id ?? crypto.randomUUID(),
     owner_sub: auth.scopeKey,
     company_name: derivedCompany.slice(0, 160),
-    industry: existingLead?.industry || body.industry?.trim() || "",
+    industry: existingLead?.industry || cleanStr(body.industry, 100),
     target_track: scanResult.suggestedTrack,
-    city: existingLead?.city || body.city?.trim() || "",
+    city: existingLead?.city || cleanStr(body.city, 80),
     postal_address: existingLead?.postal_address || "",
     website_url: scanResult.scan.finalUrl,
-    decision_maker: existingLead?.decision_maker || "",
+    decision_maker:
+      existingLead?.decision_maker ||
+      scanResult.scan.decisionMakerHint ||
+      "",
     contact_email:
       existingLead?.contact_email || scanResult.scan.extractedEmails[0] || "",
     contact_phone:
@@ -122,7 +211,7 @@ export async function POST(request: Request) {
     visual_checked_desktop: existingLead?.visual_checked_desktop ?? false,
     visual_checked_mobile: existingLead?.visual_checked_mobile ?? false,
     visual_notes: existingLead?.visual_notes ?? "",
-    research_summary: `${scanResult.scan.detectedCms} erkannt (${scanResult.scan.responseTimeMs} ms, HTTPS: ${scanResult.scan.httpsEnabled ? "Ja" : "Nein"}). ${scanResult.findings[0]?.title ?? ""}`,
+    research_summary: `${scanResult.scan.detectedCms} erkannt (${scanResult.scan.responseTimeMs} ms, HTTPS: ${scanResult.scan.httpsEnabled ? "Ja" : "Nein"}, ${scanResult.scan.checkedPagesCount ?? 1} Seiten geprüft). ${scanResult.findings[0]?.title ?? ""}`,
     findings: scanResult.findings,
     scan_data: scanResult.scan,
     pitch_angle: scanResult.suggestedPitchAngle,
@@ -136,6 +225,7 @@ export async function POST(request: Request) {
     modelUsed: string;
     privacyMasked: boolean;
     limitBlockedReason?: string;
+    autoDowngraded?: boolean;
     estimatedCostUsd: number;
     nextVisualCheckHints: string[];
   } | null = null;
@@ -149,7 +239,7 @@ export async function POST(request: Request) {
         systemPrompt: buildLinkifySystemPrompt(brand),
         userPrompt: buildQualificationPrompt(draftLead),
         temperature: 0.25,
-        maxTokens: 900,
+        maxTokens: 700,
         privacyMode: brand.openrouter_config.privacyMode,
         piiContext: {
           decisionMaker: draftLead.decision_maker,
@@ -215,6 +305,7 @@ export async function POST(request: Request) {
         modelUsed: aiRes.modelUsed,
         privacyMasked: aiRes.privacyMasked,
         limitBlockedReason: aiRes.limitBlockedReason,
+        autoDowngraded: aiRes.autoDowngraded,
         estimatedCostUsd: aiRes.estimatedCostUsd,
         nextVisualCheckHints: parsed?.nextVisualCheckHints ?? [],
       };

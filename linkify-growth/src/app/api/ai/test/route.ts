@@ -1,22 +1,26 @@
 import { NextResponse } from "next/server";
 import { PRIVATE_JSON_HEADERS, requireScopedIdentity } from "@/lib/auth";
+import { resolveApprovedModel } from "@/lib/budget-guard";
 import { isOpenRouterConfigured, runAiTask } from "@/lib/openrouter";
+import { cleanStr, errorResponse, parseSafeJsonBody } from "@/lib/validation";
 import { ensureWorkspaceSeeded, getBrandProfile } from "@/lib/workspace-data";
 
 export async function POST(request: Request) {
   const auth = await requireScopedIdentity(request);
   if (auth instanceof Response) return auth;
 
+  let body: Record<string, unknown>;
+  try {
+    body = await parseSafeJsonBody(request, 8_192);
+  } catch (err) {
+    return errorResponse(err, 400);
+  }
+
   await ensureWorkspaceSeeded(auth.scopeKey);
   const brand = await getBrandProfile(auth.scopeKey);
 
-  let model = brand.openrouter_config.researchModel;
-  try {
-    const body = (await request.json()) as { model?: string };
-    if (body.model?.trim()) model = body.model.trim().slice(0, 120);
-  } catch {
-    // default model
-  }
+  const requested = cleanStr(body.model, 120) || brand.openrouter_config.researchModel;
+  const approved = resolveApprovedModel(requested, "meta/muse-ember");
 
   if (!isOpenRouterConfigured()) {
     return NextResponse.json(
@@ -34,14 +38,14 @@ export async function POST(request: Request) {
     const res = await runAiTask({
       scopeKey: auth.scopeKey,
       taskType: "connection_test",
-      model,
+      model: approved.id,
       systemPrompt: "Antworte knapp auf Deutsch in genau einem Satz.",
       userPrompt:
         "Bestätige kurz, dass die Verbindung für Linkify Growth OS aktiv ist.",
       temperature: 0.1,
       maxTokens: 80,
       privacyMode: true,
-      summaryLabel: `Verbindungstest (${model})`,
+      summaryLabel: `Verbindungstest (${approved.id})`,
       fallbackFn: () => "Lokaler Vorschau-Modus aktiv.",
     });
 
@@ -50,6 +54,7 @@ export async function POST(request: Request) {
         connected: true,
         providerMode: res.providerMode,
         modelUsed: res.modelUsed,
+        limitBlockedReason: res.limitBlockedReason,
         reply: res.text,
         usage: res.usage,
       },

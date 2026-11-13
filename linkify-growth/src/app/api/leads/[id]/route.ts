@@ -1,7 +1,19 @@
 import { NextResponse } from "next/server";
 import { PRIVATE_JSON_HEADERS, requireScopedIdentity } from "@/lib/auth";
-import type { Lead } from "@/lib/types";
+import type {
+  ContactChannel,
+  LeadPriority,
+  LeadStatus,
+  TargetTrack,
+} from "@/lib/types";
 import { sanitizeExternalHref } from "@/lib/url-safety";
+import {
+  assertSafeMutationRequest,
+  cleanStr,
+  errorResponse,
+  parseSafeJsonBody,
+  sanitizeFindings,
+} from "@/lib/validation";
 import {
   deleteLead,
   ensureWorkspaceSeeded,
@@ -9,6 +21,31 @@ import {
   listOutreachForLead,
   upsertLead,
 } from "@/lib/workspace-data";
+
+const VALID_PRIORITIES = new Set<LeadPriority>(["heiss", "warm", "kalt"]);
+const VALID_STATUSES = new Set<LeadStatus>([
+  "neu",
+  "analysiert",
+  "kontaktiert",
+  "follow_up_faellig",
+  "im_gespraech",
+  "angebot",
+  "gewonnen",
+  "kein_interesse",
+]);
+const VALID_CHANNELS = new Set<ContactChannel>([
+  "email",
+  "brief",
+  "video_audit",
+  "telefon",
+  "linkedin",
+]);
+
+function safeIsoOrNull(val: unknown): string | null {
+  if (typeof val !== "string" || !val.trim()) return null;
+  const d = new Date(val);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
 
 export async function GET(
   request: Request,
@@ -39,6 +76,13 @@ export async function PATCH(
   const auth = await requireScopedIdentity(request);
   if (auth instanceof Response) return auth;
 
+  let patch: Record<string, unknown>;
+  try {
+    patch = await parseSafeJsonBody(request, 32_768);
+  } catch (err) {
+    return errorResponse(err, 400);
+  }
+
   await ensureWorkspaceSeeded(auth.scopeKey);
   const { id } = await context.params;
   const existing = await getLeadById(auth.scopeKey, id);
@@ -49,68 +93,69 @@ export async function PATCH(
     );
   }
 
-  let patch: Partial<Lead>;
-  try {
-    patch = (await request.json()) as Partial<Lead>;
-  } catch {
-    return NextResponse.json(
-      { error: "Ungültiger Request-Body." },
-      { status: 400, headers: PRIVATE_JSON_HEADERS },
-    );
-  }
-
   const nextWebsite =
-    patch.website_url !== undefined
-      ? sanitizeExternalHref(patch.website_url) ?? ""
+    typeof patch.website_url === "string"
+      ? sanitizeExternalHref(patch.website_url.slice(0, 300)) ?? ""
       : existing.website_url;
+
+  const nextPriority: LeadPriority = VALID_PRIORITIES.has(
+    patch.priority as LeadPriority,
+  )
+    ? (patch.priority as LeadPriority)
+    : existing.priority;
+  const nextStatus: LeadStatus = VALID_STATUSES.has(patch.status as LeadStatus)
+    ? (patch.status as LeadStatus)
+    : existing.status;
+  const nextChannel: ContactChannel = VALID_CHANNELS.has(
+    patch.contact_channel as ContactChannel,
+  )
+    ? (patch.contact_channel as ContactChannel)
+    : existing.contact_channel;
+  const nextTrack: TargetTrack =
+    patch.target_track === "startup" || patch.target_track === "kmu"
+      ? patch.target_track
+      : existing.target_track;
 
   const updated = await upsertLead({
     id: existing.id,
     owner_sub: auth.scopeKey,
     company_name:
-      typeof patch.company_name === "string" && patch.company_name.trim()
-        ? patch.company_name.trim().slice(0, 160)
-        : existing.company_name,
+      cleanStr(patch.company_name, 160) || existing.company_name,
     industry:
       patch.industry !== undefined
-        ? String(patch.industry).trim().slice(0, 100)
+        ? cleanStr(patch.industry, 100)
         : existing.industry,
-    target_track:
-      patch.target_track === "startup" || patch.target_track === "kmu"
-        ? patch.target_track
-        : existing.target_track,
+    target_track: nextTrack,
     city:
-      patch.city !== undefined
-        ? String(patch.city).trim().slice(0, 80)
-        : existing.city,
+      patch.city !== undefined ? cleanStr(patch.city, 80) : existing.city,
     postal_address:
       patch.postal_address !== undefined
-        ? String(patch.postal_address).trim().slice(0, 220)
+        ? cleanStr(patch.postal_address, 220)
         : existing.postal_address,
     website_url: nextWebsite,
     decision_maker:
       patch.decision_maker !== undefined
-        ? String(patch.decision_maker).trim().slice(0, 120)
+        ? cleanStr(patch.decision_maker, 120)
         : existing.decision_maker,
     contact_email:
       patch.contact_email !== undefined
-        ? String(patch.contact_email).trim().slice(0, 140)
+        ? cleanStr(patch.contact_email, 140)
         : existing.contact_email,
     contact_phone:
       patch.contact_phone !== undefined
-        ? String(patch.contact_phone).trim().slice(0, 50)
+        ? cleanStr(patch.contact_phone, 50)
         : existing.contact_phone,
     source: existing.source,
-    priority: patch.priority ?? existing.priority,
-    status: patch.status ?? existing.status,
-    contact_channel: patch.contact_channel ?? existing.contact_channel,
+    priority: nextPriority,
+    status: nextStatus,
+    contact_channel: nextChannel,
     first_contact_at:
       patch.first_contact_at !== undefined
-        ? patch.first_contact_at
+        ? safeIsoOrNull(patch.first_contact_at)
         : existing.first_contact_at,
     next_follow_up_at:
       patch.next_follow_up_at !== undefined
-        ? patch.next_follow_up_at
+        ? safeIsoOrNull(patch.next_follow_up_at)
         : existing.next_follow_up_at,
     visual_checked_desktop:
       patch.visual_checked_desktop !== undefined
@@ -122,20 +167,20 @@ export async function PATCH(
         : existing.visual_checked_mobile,
     visual_notes:
       patch.visual_notes !== undefined
-        ? String(patch.visual_notes).slice(0, 1200)
+        ? cleanStr(patch.visual_notes, 1200)
         : existing.visual_notes,
     research_summary:
       patch.research_summary !== undefined
-        ? String(patch.research_summary).slice(0, 1600)
+        ? cleanStr(patch.research_summary, 1600)
         : existing.research_summary,
-    findings: Array.isArray(patch.findings)
-      ? patch.findings.slice(0, 12)
-      : existing.findings,
-    scan_data:
-      patch.scan_data !== undefined ? patch.scan_data : existing.scan_data,
+    findings:
+      patch.findings !== undefined
+        ? sanitizeFindings(patch.findings)
+        : existing.findings,
+    scan_data: existing.scan_data,
     pitch_angle:
       patch.pitch_angle !== undefined
-        ? String(patch.pitch_angle).slice(0, 800)
+        ? cleanStr(patch.pitch_angle, 800)
         : existing.pitch_angle,
     is_sample: existing.is_sample,
   });
@@ -149,6 +194,12 @@ export async function DELETE(
 ) {
   const auth = await requireScopedIdentity(request);
   if (auth instanceof Response) return auth;
+
+  try {
+    assertSafeMutationRequest(request, { requireJsonContentType: false });
+  } catch (err) {
+    return errorResponse(err, 403);
+  }
 
   const { id } = await context.params;
   const deleted = await deleteLead(auth.scopeKey, id);

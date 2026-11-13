@@ -135,41 +135,49 @@ export function LeadDetailView({
     }
   }
 
-  async function handleGenerateOutreach() {
+  async function handleGenerateOutreach(channelsOverride?: OutreachChannel[]) {
+    const targets = channelsOverride ?? [selectedChannel];
     setGenerating(true);
     setGenError(null);
     setGenNotice(null);
     try {
-      const res = await fetch("/api/outreach", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          action: "generate",
-          leadId: lead.id,
-          channel: selectedChannel,
-          extraContext: extraContext.trim(),
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setGenError(data.error ?? "Generierung fehlgeschlagen.");
-        return;
+      const createdItems: OutreachItem[] = [];
+      let lastNotice = "";
+      for (const ch of targets) {
+        const res = await fetch("/api/outreach", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            action: "generate",
+            leadId: lead.id,
+            channel: ch,
+            extraContext: extraContext.trim(),
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          setGenError(data.error ?? "Generierung fehlgeschlagen.");
+          break;
+        }
+        const item = data.item as OutreachItem;
+        createdItems.push(item);
+        if (data.limitBlockedReason) {
+          lastNotice = `Budget-Schutz aktiv (${data.limitBlockedReason}) – Entwurf im lokalen Vorschau-Modus erzeugt.`;
+        } else if (data.autoDowngraded) {
+          lastNotice = `Spar-Automatik aktiv (>=75% Budget) -> erstellt mit ${item.model_used}.`;
+        } else if (data.providerMode === "openrouter") {
+          lastNotice = `${createdItems.length > 1 ? `${createdItems.length}er-Akquise-Kit` : "Entwurf"} über ${item.model_used} erzeugt${item.privacy_masked ? " (Privacy-Mode)" : ""}.`;
+        } else {
+          lastNotice = `${createdItems.length > 1 ? `${createdItems.length} Entwürfe` : "Entwurf"} im lokalen Vorschau-Modus erstellt (0,00 €).`;
+        }
       }
-      const item = data.item as OutreachItem;
-      setOutreachList((prev) => [item, ...prev]);
-      setActiveDraft(item);
-      setDraftSubject(item.subject);
-      setDraftBody(item.body);
-      if (data.limitBlockedReason) {
-        setGenNotice(
-          `Budget-Schutz aktiv (${data.limitBlockedReason}) – Entwurf im lokalen Vorschau-Modus erzeugt.`,
-        );
-      } else if (data.providerMode === "openrouter") {
-        setGenNotice(
-          `Entwurf über ${item.model_used} erzeugt${item.privacy_masked ? " (Privacy-Mode maskiert)" : ""}.`,
-        );
-      } else {
-        setGenNotice("Entwurf im lokalen Vorschau-Modus erstellt (0,00 €).");
+
+      if (createdItems.length > 0) {
+        setOutreachList((prev) => [...createdItems, ...prev]);
+        setActiveDraft(createdItems[0]);
+        setDraftSubject(createdItems[0].subject);
+        setDraftBody(createdItems[0].body);
+        setGenNotice(lastNotice);
       }
     } catch {
       setGenError("Netzwerkfehler bei der Textgenerierung.");
@@ -451,17 +459,29 @@ export function LeadDetailView({
                     : "Direktmodus"}
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={handleGenerateOutreach}
-                disabled={generating}
-                className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-full bg-[#0000F5] hover:bg-[#0000C8] disabled:opacity-50 text-white text-[13px] font-medium cursor-pointer shrink-0"
-              >
-                <Sparkles className="w-4 h-4" />
-                <span>
-                  {generating ? "Generiere Entwurf..." : "Entwurf erstellen"}
-                </span>
-              </button>
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() =>
+                    handleGenerateOutreach(["email", "video_audit", "follow_up"])
+                  }
+                  disabled={generating}
+                  className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-full border border-[#0000F5]/30 bg-[#F0F3FF] text-[#0000F5] text-[12px] font-medium cursor-pointer disabled:opacity-50"
+                >
+                  <span>3er-Kit (Mail + Video + Follow-up)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleGenerateOutreach()}
+                  disabled={generating}
+                  className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-full bg-[#0000F5] hover:bg-[#0000C8] disabled:opacity-50 text-white text-[13px] font-medium cursor-pointer"
+                >
+                  <Sparkles className="w-4 h-4" />
+                  <span>
+                    {generating ? "Generiere..." : "Entwurf erstellen"}
+                  </span>
+                </button>
+              </div>
             </div>
 
             <div className="flex flex-wrap gap-1.5">
@@ -659,12 +679,14 @@ export function LeadDetailView({
                   </span>
                 </div>
                 <div>
-                  <span className="text-[#6B7280] block">PageSpeed Mobil</span>
+                  <span className="text-[#6B7280] block">Seiten & Karriere</span>
                   <span className="font-medium">
+                    {lead.scan_data.checkedPagesCount ?? 1} geprüft
+                    {lead.scan_data.hasHiringSignal ? " · Recruiting" : ""}
                     {lead.scan_data.pageSpeed?.performanceScore !== null &&
                     lead.scan_data.pageSpeed?.performanceScore !== undefined
-                      ? `${lead.scan_data.pageSpeed.performanceScore}/100`
-                      : "Nicht gemessen"}
+                      ? ` · PSI ${lead.scan_data.pageSpeed.performanceScore}`
+                      : ""}
                   </span>
                 </div>
               </div>

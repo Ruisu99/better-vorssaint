@@ -1,9 +1,15 @@
 import { NextResponse } from "next/server";
 import { PRIVATE_JSON_HEADERS, requireScopedIdentity } from "@/lib/auth";
+import { HARD_MAX_BATCH_LEADS } from "@/lib/budget-guard";
 import { searchLocalBusinesses, type RadarCategory } from "@/lib/radar";
 import { scanWebsite } from "@/lib/scanner";
-import type { RadarCandidate } from "@/lib/types";
 import { sanitizeExternalHref } from "@/lib/url-safety";
+import {
+  cleanStr,
+  errorResponse,
+  parseSafeJsonBody,
+  sanitizeRadarCandidates,
+} from "@/lib/validation";
 import {
   ensureWorkspaceSeeded,
   getBrandProfile,
@@ -11,35 +17,96 @@ import {
   upsertLead,
 } from "@/lib/workspace-data";
 
+const VALID_CATEGORIES = new Set<RadarCategory>([
+  "alle",
+  "handwerk",
+  "gesundheit",
+  "kanzlei",
+  "auto",
+  "bau",
+]);
+
 export async function POST(request: Request) {
   const auth = await requireScopedIdentity(request);
   if (auth instanceof Response) return auth;
 
-  await ensureWorkspaceSeeded(auth.scopeKey);
-
-  let body: {
-    action?: "search" | "import_candidates";
-    city?: string;
-    category?: RadarCategory;
-    keyword?: string;
-    onlyWithWebsite?: boolean;
-    limit?: number;
-    candidates?: RadarCandidate[];
-    autoScanWebsites?: boolean;
-  };
+  let body: Record<string, unknown>;
   try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json(
-      { error: "Ungültiger Request-Body." },
-      { status: 400, headers: PRIVATE_JSON_HEADERS },
-    );
+    body = await parseSafeJsonBody(request, 49_152);
+  } catch (err) {
+    return errorResponse(err, 400);
   }
 
-  if (body.action === "import_candidates") {
+  await ensureWorkspaceSeeded(auth.scopeKey);
+  const action = cleanStr(body.action, 40) || "search";
+
+  // 0-EUR bulk technical pre-scan right inside Radar before importing or using AI tokens
+  if (action === "prescan_candidates") {
+    const items = sanitizeRadarCandidates(body.candidates, 8);
+    if (items.length === 0) {
+      return NextResponse.json(
+        { error: "Keine Websites zum Vorcheck vorhanden." },
+        { status: 400, headers: PRIVATE_JSON_HEADERS },
+      );
+    }
+
+    const previews = await Promise.all(
+      items.map(async (item) => {
+        if (!item.websiteUrl) {
+          return {
+            osmId: item.osmId,
+            ok: false,
+            priority: "heiss" as const,
+            cms: "Keine Website",
+            httpsEnabled: false,
+            hasViewport: false,
+            responseTimeMs: 0,
+            topFinding: "Keine Website hinterlegt",
+          };
+        }
+        try {
+          const res = await scanWebsite(item.websiteUrl, {
+            includePageSpeed: false,
+            deepSubpages: false,
+          });
+          return {
+            osmId: item.osmId,
+            ok: true,
+            priority: res.suggestedPriority,
+            cms: res.scan.detectedCms,
+            httpsEnabled: res.scan.httpsEnabled,
+            hasViewport: res.scan.hasViewportMeta,
+            responseTimeMs: res.scan.responseTimeMs,
+            topFinding: res.findings[0]?.title ?? "Basis-Check abgeschlossen",
+            extractedEmail: res.scan.extractedEmails[0] ?? item.contactEmail,
+            extractedPhone: res.scan.extractedPhones[0] ?? item.contactPhone,
+          };
+        } catch (err) {
+          return {
+            osmId: item.osmId,
+            ok: false,
+            priority: "warm" as const,
+            cms: "Nicht erreichbar",
+            httpsEnabled: false,
+            hasViewport: false,
+            responseTimeMs: 0,
+            topFinding:
+              err instanceof Error ? err.message : "Scan fehlgeschlagen",
+          };
+        }
+      }),
+    );
+
+    return NextResponse.json({ previews }, { headers: PRIVATE_JSON_HEADERS });
+  }
+
+  if (action === "import_candidates") {
     const brand = await getBrandProfile(auth.scopeKey);
-    const maxBatch = Math.min(Math.max(brand.budget_config.batchMaxLeads || 5, 1), 10);
-    const items = (body.candidates ?? []).slice(0, maxBatch);
+    const maxBatch = Math.min(
+      Math.max(brand.budget_config.batchMaxLeads || HARD_MAX_BATCH_LEADS, 1),
+      HARD_MAX_BATCH_LEADS,
+    );
+    const items = sanitizeRadarCandidates(body.candidates, maxBatch);
     if (items.length === 0) {
       return NextResponse.json(
         { error: "Keine Unternehmen zur Übernahme ausgewählt." },
@@ -53,7 +120,10 @@ export async function POST(request: Request) {
       let scanRes: Awaited<ReturnType<typeof scanWebsite>> | null = null;
       if (body.autoScanWebsites !== false && safeSite) {
         try {
-          scanRes = await scanWebsite(safeSite, { includePageSpeed: false });
+          scanRes = await scanWebsite(safeSite, {
+            includePageSpeed: false,
+            deepSubpages: true,
+          });
         } catch {
           scanRes = null;
         }
@@ -62,13 +132,13 @@ export async function POST(request: Request) {
       const lead = await upsertLead({
         id: crypto.randomUUID(),
         owner_sub: auth.scopeKey,
-        company_name: String(item.companyName).trim().slice(0, 160),
-        industry: String(item.industry ?? "").trim().slice(0, 100),
+        company_name: item.companyName,
+        industry: item.industry,
         target_track: scanRes?.suggestedTrack ?? "kmu",
-        city: String(item.city ?? "").trim().slice(0, 80),
-        postal_address: String(item.postalAddress ?? "").trim().slice(0, 220),
+        city: item.city,
+        postal_address: item.postalAddress,
         website_url: scanRes?.scan.finalUrl ?? safeSite,
-        decision_maker: "",
+        decision_maker: scanRes?.scan.decisionMakerHint ?? "",
         contact_email:
           item.contactEmail || scanRes?.scan.extractedEmails[0] || "",
         contact_phone:
@@ -87,7 +157,7 @@ export async function POST(request: Request) {
         visual_checked_mobile: false,
         visual_notes: "",
         research_summary: scanRes
-          ? `${scanRes.scan.detectedCms} erkannt (${scanRes.scan.responseTimeMs} ms). ${scanRes.findings[0]?.title ?? ""}`
+          ? `${scanRes.scan.detectedCms} erkannt (${scanRes.scan.responseTimeMs} ms, ${scanRes.scan.checkedPagesCount ?? 1} Seiten geprüft). ${scanRes.findings[0]?.title ?? ""}`
           : safeSite
             ? "Aus lokalem Branchen-Radar übernommen – Website-Scan noch ausstehend."
             : "Im Branchen-Radar ohne hinterlegte Website gefunden – manuell prüfen, ob Bedarf für eine erste Website besteht.",
@@ -135,13 +205,19 @@ export async function POST(request: Request) {
       .filter(Boolean),
   );
 
+  const category: RadarCategory = VALID_CATEGORIES.has(
+    body.category as RadarCategory,
+  )
+    ? (body.category as RadarCategory)
+    : "alle";
+
   try {
     const result = await searchLocalBusinesses({
-      city: body.city ?? "Erfurt",
-      category: body.category ?? "alle",
-      keyword: body.keyword,
-      onlyWithWebsite: body.onlyWithWebsite ?? false,
-      limit: body.limit ?? 20,
+      city: cleanStr(body.city, 80) || "Erfurt",
+      category,
+      keyword: cleanStr(body.keyword, 60) || undefined,
+      onlyWithWebsite: Boolean(body.onlyWithWebsite),
+      limit: Math.min(Math.max(Number(body.limit) || 20, 5), 35),
       existingNames,
       existingWebsites,
     });

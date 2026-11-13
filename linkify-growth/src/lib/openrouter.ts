@@ -1,6 +1,18 @@
 import {
+  APPROVED_OPENROUTER_MODELS,
+  HARD_EUR_PER_USD_RATE,
+  HARD_MAX_DAILY_CALLS,
+  HARD_MAX_MODEL_COMPLETION_USD_PER_1M,
+  HARD_MAX_MODEL_PROMPT_USD_PER_1M,
+  HARD_MAX_MONTHLY_EUR,
+  HARD_MAX_TOKENS_PER_CALL,
+  resolveApprovedModel,
+  type CuratedModelSpec,
+} from "./budget-guard";
+import {
   getAiUsageSummary,
   getBrandProfile,
+  getGlobalAiUsageSummary,
   logAiRun,
 } from "./workspace-data";
 
@@ -11,59 +23,32 @@ export interface OpenRouterModelOption {
   category: "fast" | "writing" | "reasoning";
   promptPerMillionUsd: number;
   completionPerMillionUsd: number;
+  intelligenceIndex?: number;
+  note?: string;
 }
 
-export const CURATED_OPENROUTER_MODELS: OpenRouterModelOption[] = [
-  {
-    id: "google/gemini-2.5-flash",
-    name: "Google Gemini 2.5 Flash (schnell & extrem sparsam)",
-    category: "fast",
-    promptPerMillionUsd: 0.15,
-    completionPerMillionUsd: 0.6,
-  },
-  {
-    id: "openai/gpt-4o-mini",
-    name: "OpenAI GPT-4o Mini (sehr günstig für Qualifizierung)",
-    category: "fast",
-    promptPerMillionUsd: 0.15,
-    completionPerMillionUsd: 0.6,
-  },
-  {
-    id: "deepseek/deepseek-chat-v3-0324",
-    name: "DeepSeek V3 (kosteneffizient für Research & Texte)",
-    category: "reasoning",
-    promptPerMillionUsd: 0.27,
-    completionPerMillionUsd: 1.1,
-  },
-  {
-    id: "openai/gpt-4.1",
-    name: "OpenAI GPT-4.1 (präzise Konzepte & Outreach)",
-    category: "writing",
-    promptPerMillionUsd: 2.0,
-    completionPerMillionUsd: 8.0,
-  },
-  {
-    id: "anthropic/claude-sonnet-4",
-    name: "Anthropic Claude Sonnet 4 (sehr starkes Deutsch)",
-    category: "writing",
-    promptPerMillionUsd: 3.0,
-    completionPerMillionUsd: 15.0,
-  },
-  {
-    id: "mistralai/mistral-large-2411",
-    name: "Mistral Large (europäisches Modell)",
-    category: "writing",
-    promptPerMillionUsd: 2.0,
-    completionPerMillionUsd: 6.0,
-  },
-];
+export const CURATED_OPENROUTER_MODELS: OpenRouterModelOption[] =
+  APPROVED_OPENROUTER_MODELS.map((m: CuratedModelSpec) => ({
+    id: m.id,
+    name: m.name,
+    category:
+      m.tier === "ultra_sparen"
+        ? "fast"
+        : m.tier === "ausgewogen"
+          ? "reasoning"
+          : "writing",
+    promptPerMillionUsd: m.promptPerMillionUsd,
+    completionPerMillionUsd: m.completionPerMillionUsd,
+    intelligenceIndex: m.intelligenceIndex,
+    note: m.note,
+  }));
 
 const MODEL_PRICE_CACHE = new Map<
   string,
   { promptPerToken: number; completionPerToken: number }
 >();
 
-for (const m of CURATED_OPENROUTER_MODELS) {
+for (const m of APPROVED_OPENROUTER_MODELS) {
   MODEL_PRICE_CACHE.set(m.id, {
     promptPerToken: m.promptPerMillionUsd / 1_000_000,
     completionPerToken: m.completionPerMillionUsd / 1_000_000,
@@ -76,8 +61,8 @@ export function estimateCostUsd(
   completionTokens: number,
 ): number {
   const prices = MODEL_PRICE_CACHE.get(modelId) ?? {
-    promptPerToken: 1.0 / 1_000_000,
-    completionPerToken: 3.0 / 1_000_000,
+    promptPerToken: 1.5 / 1_000_000,
+    completionPerToken: 7.5 / 1_000_000,
   };
   return (
     promptTokens * prices.promptPerToken +
@@ -200,6 +185,9 @@ export function applyPrivacyMask(
   return { maskedText, restore };
 }
 
+/**
+ * Fetches OpenRouter models filtered strictly to Linkify's cost-controlled price ceiling.
+ */
 export async function listOpenRouterModels(): Promise<{
   connected: boolean;
   models: OpenRouterModelOption[];
@@ -228,42 +216,37 @@ export async function listOpenRouterModels(): Promise<{
         pricing?: { prompt?: string; completion?: string };
       }>;
     };
-    const apiModels = (payload.data ?? [])
-      .filter((m) => typeof m.id === "string" && typeof m.name === "string")
-      .slice(0, 90)
-      .map((m) => {
-        const promptPerToken = Number.parseFloat(m.pricing?.prompt ?? "0") || 0;
-        const completionPerToken =
-          Number.parseFloat(m.pricing?.completion ?? "0") || 0;
-        if (promptPerToken > 0 || completionPerToken > 0) {
-          MODEL_PRICE_CACHE.set(m.id!, {
-            promptPerToken,
-            completionPerToken,
-          });
-        }
-        return {
-          id: m.id!,
-          name: m.name!,
-          contextLength: m.context_length,
-          category: (m.id!.includes("flash") || m.id!.includes("mini")
-            ? "fast"
-            : "writing") as OpenRouterModelOption["category"],
-          promptPerMillionUsd: Number((promptPerToken * 1_000_000).toFixed(3)),
-          completionPerMillionUsd: Number(
-            (completionPerToken * 1_000_000).toFixed(3),
-          ),
-        };
-      });
 
-    const merged = [...CURATED_OPENROUTER_MODELS];
-    const seen = new Set(merged.map((m) => m.id));
-    for (const m of apiModels) {
-      if (!seen.has(m.id)) {
-        seen.add(m.id);
-        merged.push(m);
+    const apiById = new Map<string, { p: number; c: number; ctx?: number }>();
+    for (const m of payload.data ?? []) {
+      if (typeof m.id !== "string") continue;
+      const p = (Number.parseFloat(m.pricing?.prompt ?? "0") || 0) * 1_000_000;
+      const c =
+        (Number.parseFloat(m.pricing?.completion ?? "0") || 0) * 1_000_000;
+      if (
+        p <= HARD_MAX_MODEL_PROMPT_USD_PER_1M &&
+        c <= HARD_MAX_MODEL_COMPLETION_USD_PER_1M
+      ) {
+        apiById.set(m.id, { p, c, ctx: m.context_length });
       }
     }
-    return { connected: true, models: merged };
+
+    const updatedCurated = CURATED_OPENROUTER_MODELS.map((m) => {
+      const live = apiById.get(m.id);
+      if (!live) return m;
+      MODEL_PRICE_CACHE.set(m.id, {
+        promptPerToken: live.p / 1_000_000,
+        completionPerToken: live.c / 1_000_000,
+      });
+      return {
+        ...m,
+        contextLength: live.ctx,
+        promptPerMillionUsd: Number(live.p.toFixed(4)),
+        completionPerMillionUsd: Number(live.c.toFixed(4)),
+      };
+    });
+
+    return { connected: true, models: updatedCurated };
   } catch {
     return { connected: true, models: CURATED_OPENROUTER_MODELS };
   }
@@ -287,6 +270,7 @@ export async function runAiTask(params: {
   providerMode: "openrouter" | "local_fallback";
   privacyMasked: boolean;
   limitBlockedReason?: string;
+  autoDowngraded?: boolean;
   estimatedCostUsd: number;
   usage: { promptTokens: number; completionTokens: number };
 }> {
@@ -301,22 +285,37 @@ export async function runAiTask(params: {
         };
 
   const brand = await getBrandProfile(params.scopeKey);
-  const budget = brand.budget_config;
-  const usageSummary = await getAiUsageSummary(params.scopeKey);
-  const currentMonthEur = usageSummary.monthCostUsd * budget.eurPerUsdRate;
+  const [userUsage, globalUsage] = await Promise.all([
+    getAiUsageSummary(params.scopeKey),
+    getGlobalAiUsageSummary(),
+  ]);
+
+  // Hard server-enforced limits — never bypassable by client settings
+  const effectiveMonthlyLimitEur = Math.min(
+    Math.max(brand.budget_config.monthlyBudgetEur, 0),
+    HARD_MAX_MONTHLY_EUR,
+  );
+  const effectiveDailyLimitCalls = Math.min(
+    Math.max(brand.budget_config.dailyMaxCalls, 1),
+    HARD_MAX_DAILY_CALLS,
+  );
+
+  const userMonthEur = userUsage.monthCostUsd * HARD_EUR_PER_USD_RATE;
+  const globalMonthEur = globalUsage.monthCostUsd * HARD_EUR_PER_USD_RATE;
 
   let limitBlockedReason: string | undefined;
-  if (apiKey && budget.stopOnLimit) {
-    if (budget.monthlyBudgetEur <= 0) {
+  if (apiKey) {
+    if (effectiveMonthlyLimitEur <= 0) {
       limitBlockedReason =
         "Monatsbudget steht auf 0 € (nur kostenloser lokaler Modus aktiv).";
-    } else if (currentMonthEur >= budget.monthlyBudgetEur) {
-      limitBlockedReason = `Monatsbudget erreicht (${currentMonthEur.toFixed(2)} € / ${budget.monthlyBudgetEur.toFixed(2)} €).`;
-    } else if (
-      budget.dailyMaxCalls > 0 &&
-      usageSummary.todayCalls >= budget.dailyMaxCalls
-    ) {
-      limitBlockedReason = `Tageslimit erreicht (${usageSummary.todayCalls} / ${budget.dailyMaxCalls} Anfragen heute).`;
+    } else if (globalMonthEur >= HARD_MAX_MONTHLY_EUR) {
+      limitBlockedReason = `Globales Monatsbudget erreicht (${globalMonthEur.toFixed(2)} € / ${HARD_MAX_MONTHLY_EUR.toFixed(2)} €).`;
+    } else if (userMonthEur >= effectiveMonthlyLimitEur) {
+      limitBlockedReason = `Monatsbudget erreicht (${userMonthEur.toFixed(2)} € / ${effectiveMonthlyLimitEur.toFixed(2)} €).`;
+    } else if (globalUsage.todayCalls >= HARD_MAX_DAILY_CALLS) {
+      limitBlockedReason = `Globales Tageslimit erreicht (${globalUsage.todayCalls} / ${HARD_MAX_DAILY_CALLS} Anfragen heute).`;
+    } else if (userUsage.todayCalls >= effectiveDailyLimitCalls) {
+      limitBlockedReason = `Tageslimit erreicht (${userUsage.todayCalls} / ${effectiveDailyLimitCalls} Anfragen heute).`;
     }
   }
 
@@ -347,9 +346,27 @@ export async function runAiTask(params: {
     };
   }
 
-  const chosenModel = params.model.trim() || "google/gemini-2.5-flash";
-  const tokenCap = Math.min(Math.max(budget.maxTokensPerCall || 1200, 200), 3200);
-  const maxTokens = Math.min(Math.max(params.maxTokens ?? tokenCap, 150), tokenCap);
+  // Enforce approved model allowlist & 75%-budget automatic downgrade to Muse Ember
+  let chosenSpec = resolveApprovedModel(params.model, "meta/muse-ember");
+  let autoDowngraded = false;
+  if (
+    brand.budget_config.autoDowngradeAt75Pct &&
+    effectiveMonthlyLimitEur > 0 &&
+    userMonthEur >= effectiveMonthlyLimitEur * 0.75 &&
+    chosenSpec.id !== "meta/muse-ember"
+  ) {
+    chosenSpec = resolveApprovedModel("meta/muse-ember");
+    autoDowngraded = true;
+  }
+
+  const tokenCap = Math.min(
+    Math.max(brand.budget_config.maxTokensPerCall || 1200, 200),
+    HARD_MAX_TOKENS_PER_CALL,
+  );
+  const maxTokens = Math.min(
+    Math.max(params.maxTokens ?? tokenCap, 80),
+    tokenCap,
+  );
   const temperature =
     typeof params.temperature === "number"
       ? Math.min(Math.max(params.temperature, 0), 1)
@@ -365,7 +382,7 @@ export async function runAiTask(params: {
       "x-title": "Linkify Growth OS",
     },
     body: JSON.stringify({
-      model: chosenModel,
+      model: chosenSpec.id,
       temperature,
       max_tokens: maxTokens,
       messages: [
@@ -398,13 +415,13 @@ export async function runAiTask(params: {
   }
 
   const finalContent = masker.restore(rawContent);
-  const actualModel = data.model ?? chosenModel;
+  const actualModel = data.model ?? chosenSpec.id;
   const promptTokens = data.usage?.prompt_tokens ?? 0;
   const completionTokens = data.usage?.completion_tokens ?? 0;
   const computedCostUsd =
     typeof data.usage?.cost === "number" && data.usage.cost >= 0
       ? data.usage.cost
-      : estimateCostUsd(actualModel, promptTokens, completionTokens);
+      : estimateCostUsd(chosenSpec.id, promptTokens, completionTokens);
 
   await logAiRun({
     id: crypto.randomUUID(),
@@ -416,7 +433,9 @@ export async function runAiTask(params: {
     prompt_tokens: promptTokens,
     completion_tokens: completionTokens,
     estimated_cost_usd: computedCostUsd,
-    summary: params.summaryLabel,
+    summary: autoDowngraded
+      ? `${params.summaryLabel} (Auto-Sparmodus -> Muse Ember)`
+      : params.summaryLabel,
   });
 
   return {
@@ -424,6 +443,7 @@ export async function runAiTask(params: {
     modelUsed: actualModel,
     providerMode: "openrouter",
     privacyMasked,
+    autoDowngraded,
     estimatedCostUsd: computedCostUsd,
     usage: { promptTokens, completionTokens },
   };

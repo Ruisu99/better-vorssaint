@@ -7,6 +7,7 @@ import {
   buildOutreachPrompt,
 } from "@/lib/prompts";
 import type { OutreachChannel, OutreachStatus } from "@/lib/types";
+import { cleanStr, errorResponse, parseSafeJsonBody } from "@/lib/validation";
 import {
   ensureWorkspaceSeeded,
   getBrandProfile,
@@ -16,6 +17,21 @@ import {
   updateOutreachStatus,
   upsertLead,
 } from "@/lib/workspace-data";
+
+const VALID_CHANNELS = new Set<OutreachChannel>([
+  "email",
+  "brief",
+  "video_audit",
+  "follow_up",
+  "reply_draft",
+  "angebot_outline",
+]);
+
+const VALID_OUTREACH_STATUS = new Set<OutreachStatus>([
+  "entwurf",
+  "freigegeben",
+  "gesendet",
+]);
 
 function splitSubjectAndBody(
   rawText: string,
@@ -50,34 +66,25 @@ export async function POST(request: Request) {
   const auth = await requireScopedIdentity(request);
   if (auth instanceof Response) return auth;
 
-  await ensureWorkspaceSeeded(auth.scopeKey);
-  const brand = await getBrandProfile(auth.scopeKey);
-
-  let body: {
-    action?: "generate" | "save_manual";
-    leadId?: string;
-    channel?: OutreachChannel;
-    extraContext?: string;
-    subject?: string;
-    body?: string;
-  };
+  let body: Record<string, unknown>;
   try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json(
-      { error: "Ungültiger Request-Body." },
-      { status: 400, headers: PRIVATE_JSON_HEADERS },
-    );
+    body = await parseSafeJsonBody(request, 32_768);
+  } catch (err) {
+    return errorResponse(err, 400);
   }
 
-  if (!body.leadId) {
+  const leadId = cleanStr(body.leadId, 80);
+  if (!leadId) {
     return NextResponse.json(
       { error: "leadId ist erforderlich." },
       { status: 400, headers: PRIVATE_JSON_HEADERS },
     );
   }
 
-  const lead = await getLeadById(auth.scopeKey, body.leadId);
+  await ensureWorkspaceSeeded(auth.scopeKey);
+  const brand = await getBrandProfile(auth.scopeKey);
+
+  const lead = await getLeadById(auth.scopeKey, leadId);
   if (!lead) {
     return NextResponse.json(
       { error: "Lead nicht gefunden." },
@@ -85,16 +92,22 @@ export async function POST(request: Request) {
     );
   }
 
-  const channel: OutreachChannel = body.channel ?? "email";
+  const action = cleanStr(body.action, 40) || "generate";
+  const channel: OutreachChannel = VALID_CHANNELS.has(
+    body.channel as OutreachChannel,
+  )
+    ? (body.channel as OutreachChannel)
+    : "email";
+  const extraContext = cleanStr(body.extraContext, 2500);
 
-  if (body.action === "save_manual") {
+  if (action === "save_manual") {
     const saved = await saveOutreachItem({
       id: crypto.randomUUID(),
       owner_sub: auth.scopeKey,
       lead_id: lead.id,
       channel,
-      subject: String(body.subject ?? "").slice(0, 200),
-      body: String(body.body ?? "").slice(0, 8000),
+      subject: cleanStr(body.subject, 200),
+      body: cleanStr(body.body, 8000),
       notes: "Manuell gespeichert",
       status: "entwurf",
       model_used: "manuell",
@@ -110,7 +123,7 @@ export async function POST(request: Request) {
     brand,
     lead,
     channel,
-    extraContext: body.extraContext,
+    extraContext,
   });
 
   try {
@@ -123,10 +136,10 @@ export async function POST(request: Request) {
         brand,
         lead,
         channel,
-        extraContext: body.extraContext,
+        extraContext,
       }),
       temperature: brand.openrouter_config.temperature,
-      maxTokens: 1300,
+      maxTokens: 1200,
       privacyMode: brand.openrouter_config.privacyMode,
       piiContext: {
         decisionMaker: lead.decision_maker,
@@ -149,8 +162,10 @@ export async function POST(request: Request) {
       body: parsed.body.slice(0, 8000),
       notes:
         aiRes.providerMode === "local_fallback"
-          ? "Erstellt im lokalen Vorschau-Modus (ohne OpenRouter-Key)"
-          : `Generiert mit ${aiRes.modelUsed}`,
+          ? "Erstellt im lokalen Vorschau-Modus"
+          : aiRes.autoDowngraded
+            ? `Auto-Sparmodus -> ${aiRes.modelUsed}`
+            : `Generiert mit ${aiRes.modelUsed}`,
       status: "entwurf",
       model_used: aiRes.modelUsed,
       privacy_masked: aiRes.privacyMasked,
@@ -161,6 +176,7 @@ export async function POST(request: Request) {
         item: saved,
         providerMode: aiRes.providerMode,
         limitBlockedReason: aiRes.limitBlockedReason,
+        autoDowngraded: aiRes.autoDowngraded,
         estimatedCostUsd: aiRes.estimatedCostUsd,
         usage: aiRes.usage,
       },
@@ -180,36 +196,28 @@ export async function PATCH(request: Request) {
   const auth = await requireScopedIdentity(request);
   if (auth instanceof Response) return auth;
 
-  let body: {
-    itemId?: string;
-    status?: OutreachStatus;
-    subject?: string;
-    body?: string;
-    updateLeadAfterSend?: boolean;
-    followUpDays?: number;
-  };
+  let body: Record<string, unknown>;
   try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json(
-      { error: "Ungültiger JSON-Body." },
-      { status: 400, headers: PRIVATE_JSON_HEADERS },
-    );
+    body = await parseSafeJsonBody(request, 32_768);
+  } catch (err) {
+    return errorResponse(err, 400);
   }
 
-  if (!body.itemId || !body.status) {
+  const itemId = cleanStr(body.itemId, 80);
+  const status = body.status as OutreachStatus;
+  if (!itemId || !VALID_OUTREACH_STATUS.has(status)) {
     return NextResponse.json(
-      { error: "itemId und status sind erforderlich." },
+      { error: "itemId und gültiger status sind erforderlich." },
       { status: 400, headers: PRIVATE_JSON_HEADERS },
     );
   }
 
   const updated = await updateOutreachStatus(
     auth.scopeKey,
-    body.itemId,
-    body.status,
-    body.subject?.slice(0, 200),
-    body.body?.slice(0, 8000),
+    itemId,
+    status,
+    typeof body.subject === "string" ? cleanStr(body.subject, 200) : undefined,
+    typeof body.body === "string" ? cleanStr(body.body, 8000) : undefined,
   );
   if (!updated) {
     return NextResponse.json(
@@ -218,10 +226,10 @@ export async function PATCH(request: Request) {
     );
   }
 
-  if (body.status === "gesendet" && body.updateLeadAfterSend !== false) {
+  if (status === "gesendet" && body.updateLeadAfterSend !== false) {
     const lead = await getLeadById(auth.scopeKey, updated.lead_id);
     if (lead) {
-      const days = Math.min(Math.max(body.followUpDays ?? 5, 1), 30);
+      const days = Math.min(Math.max(Number(body.followUpDays) || 5, 1), 30);
       const nextFollowUp = new Date(
         Date.now() + days * 86_400_000,
       ).toISOString();

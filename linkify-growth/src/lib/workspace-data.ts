@@ -1,3 +1,4 @@
+import { clampBudgetSettings, resolveApprovedModel } from "./budget-guard";
 import { sql } from "./db";
 import {
   buildDefaultBrandProfile,
@@ -67,14 +68,34 @@ function mapBrandProfileRow(row: Record<string, unknown>, ownerSub: string): Bra
       row.pricing_benchmarks,
       defaults.pricing_benchmarks,
     ),
-    openrouter_config: asJson(
-      row.openrouter_config,
-      defaults.openrouter_config,
+    openrouter_config: (() => {
+      const parsed = asJson(
+        row.openrouter_config,
+        defaults.openrouter_config,
+      );
+      return {
+        researchModel: resolveApprovedModel(
+          parsed.researchModel,
+          "meta/muse-ember",
+        ).id,
+        writingModel: resolveApprovedModel(
+          parsed.writingModel,
+          "google/gemini-4-hydrogen",
+        ).id,
+        contentModel: resolveApprovedModel(
+          parsed.contentModel,
+          "google/gemini-4-hydrogen",
+        ).id,
+        privacyMode: Boolean(parsed.privacyMode ?? true),
+        temperature: Math.min(
+          Math.max(Number(parsed.temperature ?? 0.4), 0),
+          1,
+        ),
+      };
+    })(),
+    budget_config: clampBudgetSettings(
+      asJson(row.budget_config, defaults.budget_config),
     ),
-    budget_config: {
-      ...defaults.budget_config,
-      ...asJson(row.budget_config, defaults.budget_config),
-    },
     weekly_targets: asJson(row.weekly_targets, defaults.weekly_targets),
     updated_at: asIso(row.updated_at),
   };
@@ -584,5 +605,36 @@ export async function getAiUsageSummary(ownerSub: string): Promise<{
     todayCalls: Number(r?.today_calls ?? 0),
     todayCostUsd: Number(r?.today_cost_usd ?? 0),
     monthTokens: Number(r?.month_tokens ?? 0),
+  };
+}
+
+/**
+ * Global usage across all workspace callers sharing the app's OPENROUTER_API_KEY.
+ */
+export async function getGlobalAiUsageSummary(): Promise<{
+  monthCalls: number;
+  monthCostUsd: number;
+  todayCalls: number;
+  todayCostUsd: number;
+}> {
+  const rows = await sql<{
+    month_calls: string;
+    month_cost_usd: string;
+    today_calls: string;
+    today_cost_usd: string;
+  }>(
+    `select
+      count(*) filter (where provider_mode = 'openrouter' and created_at >= date_trunc('month', now()))::text as month_calls,
+      coalesce(sum(estimated_cost_usd) filter (where provider_mode = 'openrouter' and created_at >= date_trunc('month', now())), 0)::text as month_cost_usd,
+      count(*) filter (where provider_mode = 'openrouter' and created_at >= date_trunc('day', now()))::text as today_calls,
+      coalesce(sum(estimated_cost_usd) filter (where provider_mode = 'openrouter' and created_at >= date_trunc('day', now())), 0)::text as today_cost_usd
+     from ai_runs`,
+  );
+  const r = rows[0];
+  return {
+    monthCalls: Number(r?.month_calls ?? 0),
+    monthCostUsd: Number(r?.month_cost_usd ?? 0),
+    todayCalls: Number(r?.today_calls ?? 0),
+    todayCostUsd: Number(r?.today_cost_usd ?? 0),
   };
 }

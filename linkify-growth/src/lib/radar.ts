@@ -48,6 +48,20 @@ interface NominatimGeoItem {
   extratags?: Record<string, string>;
 }
 
+interface PhotonFeature {
+  properties?: {
+    osm_type?: string;
+    osm_id?: number;
+    osm_key?: string;
+    osm_value?: string;
+    name?: string;
+    street?: string;
+    housenumber?: string;
+    postcode?: string;
+    city?: string;
+  };
+}
+
 interface OverpassElement {
   type: string;
   id: number;
@@ -107,28 +121,57 @@ async function fetchNominatimPois(
   city: string,
   viewbox?: string,
 ): Promise<NominatimGeoItem[]> {
-  const url = new URL("https://nominatim.openstreetmap.org/search");
-  url.searchParams.set("q", `${queryTerm} ${city}`);
-  url.searchParams.set("format", "jsonv2");
-  url.searchParams.set("extratags", "1");
-  url.searchParams.set("addressdetails", "1");
-  url.searchParams.set("limit", "15");
-  if (viewbox) {
-    url.searchParams.set("viewbox", viewbox);
-    url.searchParams.set("bounded", "1");
-  }
+  try {
+    const url = new URL("https://nominatim.openstreetmap.org/search");
+    url.searchParams.set("q", `${queryTerm} ${city}`);
+    url.searchParams.set("format", "jsonv2");
+    url.searchParams.set("extratags", "1");
+    url.searchParams.set("addressdetails", "1");
+    url.searchParams.set("limit", "15");
+    if (viewbox) {
+      url.searchParams.set("viewbox", viewbox);
+      url.searchParams.set("bounded", "1");
+    }
 
-  const res = await fetch(url.toString(), {
-    method: "GET",
-    signal: AbortSignal.timeout(7_000),
-    headers: {
-      "user-agent": "LinkifyGrowthOS/1.0 (https://linkify.tech)",
-      accept: "application/json",
-    },
-  });
-  if (!res.ok) return [];
-  const data = (await res.json()) as NominatimGeoItem[];
-  return Array.isArray(data) ? data : [];
+    const res = await fetch(url.toString(), {
+      method: "GET",
+      signal: AbortSignal.timeout(7_000),
+      headers: {
+        "user-agent": "LinkifyGrowthOS/1.0 (https://linkify.tech)",
+        accept: "application/json",
+      },
+    });
+    if (!res.ok) return [];
+    const data = (await res.json()) as NominatimGeoItem[];
+    return Array.isArray(data) ? data : [];
+  } catch {
+    return [];
+  }
+}
+
+async function fetchPhotonPois(
+  queryTerm: string,
+  city: string,
+): Promise<PhotonFeature[]> {
+  try {
+    const url = new URL("https://photon.komoot.io/api/");
+    url.searchParams.set("q", `${queryTerm} ${city}`);
+    url.searchParams.set("limit", "12");
+    url.searchParams.set("lang", "de");
+    const res = await fetch(url.toString(), {
+      method: "GET",
+      signal: AbortSignal.timeout(6_000),
+      headers: {
+        "user-agent": "LinkifyGrowthOS/1.0 (https://linkify.tech)",
+        accept: "application/json",
+      },
+    });
+    if (!res.ok) return [];
+    const data = (await res.json()) as { features?: PhotonFeature[] };
+    return Array.isArray(data.features) ? data.features : [];
+  } catch {
+    return [];
+  }
 }
 
 async function tryFastOverpass(
@@ -172,14 +215,13 @@ export async function searchLocalBusinesses(params: {
   resolvedLocation: string;
   candidates: RadarCandidate[];
 }> {
-  const city = params.city.trim();
+  const city = params.city.trim().slice(0, 80);
   if (!city) {
     throw new Error("Bitte einen Ort oder eine Stadt eingeben.");
   }
 
-  const limit = Math.min(Math.max(params.limit ?? 20, 5), 40);
+  const limit = Math.min(Math.max(params.limit ?? 20, 5), 35);
 
-  // 1. Resolve city bounding box via Nominatim
   const geoUrl = new URL("https://nominatim.openstreetmap.org/search");
   geoUrl.searchParams.set("q", `${city}, Deutschland`);
   geoUrl.searchParams.set("format", "jsonv2");
@@ -199,7 +241,11 @@ export async function searchLocalBusinesses(params: {
   }
 
   const geoData = (await geoRes.json()) as NominatimGeoItem[];
-  if (!Array.isArray(geoData) || geoData.length === 0 || !geoData[0].boundingbox) {
+  if (
+    !Array.isArray(geoData) ||
+    geoData.length === 0 ||
+    !geoData[0].boundingbox
+  ) {
     throw new Error(`Ort "${city}" konnte nicht gefunden werden.`);
   }
 
@@ -219,15 +265,17 @@ export async function searchLocalBusinesses(params: {
   const overpassBbox = `${clampedSouth},${clampedWest},${clampedNorth},${clampedEast}`;
   const nominatimViewbox = `${clampedWest},${clampedNorth},${clampedEast},${clampedSouth}`;
 
-  const customKeyword = params.keyword?.trim();
+  const customKeyword = params.keyword?.trim().slice(0, 60);
   const terms = customKeyword
     ? [customKeyword]
     : (CATEGORY_KEYWORDS[params.category] ?? CATEGORY_KEYWORDS.alle).slice(0, 3);
 
-  // Run fast Nominatim POI searches + optional 5s Overpass enrichment in parallel
-  const [poiBatches, overpassElements] = await Promise.all([
+  const [poiBatches, photonPois, overpassElements] = await Promise.all([
     Promise.all(terms.map((t) => fetchNominatimPois(t, city, nominatimViewbox))),
-    customKeyword ? Promise.resolve([]) : tryFastOverpass(overpassBbox, params.category, limit),
+    customKeyword ? fetchPhotonPois(customKeyword, city) : Promise.resolve([]),
+    customKeyword
+      ? Promise.resolve([])
+      : tryFastOverpass(overpassBbox, params.category, limit),
   ]);
 
   const seenNames = new Set<string>();
@@ -282,6 +330,30 @@ export async function searchLocalBusinesses(params: {
         contactPhone: (tags.phone ?? tags["contact:phone"] ?? "").trim(),
       });
     }
+  }
+
+  for (const feat of photonPois) {
+    const props = feat.properties;
+    const name = (props?.name ?? "").trim();
+    if (!name) continue;
+    const line1 = `${props?.street ?? ""} ${props?.housenumber ?? ""}`.trim();
+    const line2 = `${props?.postcode ?? ""} ${props?.city ?? city}`.trim();
+    const postalAddress = line1 && line2 ? `${line1}, ${line2}` : line1 || line2;
+    const label =
+      (props?.osm_value && TYPE_LABELS[props.osm_value]) ||
+      customKeyword ||
+      "Lokales Unternehmen";
+
+    pushCandidate({
+      osmId: `ph:${props?.osm_type ?? "N"}:${props?.osm_id ?? name}`,
+      companyName: name,
+      industry: label,
+      city: props?.city ?? city,
+      postalAddress,
+      websiteUrl: "",
+      contactEmail: "",
+      contactPhone: "",
+    });
   }
 
   for (const el of overpassElements) {
