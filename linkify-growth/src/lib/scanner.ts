@@ -10,6 +10,7 @@ const FETCH_TIMEOUT_MS = 8500;
 
 function pinnedHttpGet(
   target: PinnedPublicTarget,
+  timeoutMs = FETCH_TIMEOUT_MS,
 ): Promise<{
   statusCode: number;
   headers: http.IncomingHttpHeaders;
@@ -32,7 +33,7 @@ function pinnedHttpGet(
         port,
         path,
         method: "GET",
-        timeout: FETCH_TIMEOUT_MS,
+        timeout: timeoutMs,
         // Pin DNS resolution callback to the exact already-validated IP
         lookup: (_hostname, _opts, cb) => {
           cb(null, target.pinnedIp, target.family);
@@ -122,7 +123,10 @@ function pinnedHttpGet(
   });
 }
 
-async function safePublicFetch(rawUrl: string): Promise<{
+async function safePublicFetch(
+  rawUrl: string,
+  timeoutMs = FETCH_TIMEOUT_MS,
+): Promise<{
   finalUrl: string;
   statusCode: number;
   responseTimeMs: number;
@@ -132,7 +136,7 @@ async function safePublicFetch(rawUrl: string): Promise<{
   const start = Date.now();
 
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-    const res = await pinnedHttpGet(target);
+    const res = await pinnedHttpGet(target, timeoutMs);
     const locationHeader = res.headers.location;
 
     if (res.statusCode >= 300 && res.statusCode < 400 && locationHeader) {
@@ -481,7 +485,11 @@ export function deriveFindingsFromScan(scan: LeadScanData): {
 
 export async function scanWebsite(
   rawUrl: string,
-  options: { includePageSpeed?: boolean; deepSubpages?: boolean } = {},
+  options: {
+    includePageSpeed?: boolean;
+    deepSubpages?: boolean;
+    timeoutMs?: number;
+  } = {},
 ): Promise<{
   scan: LeadScanData;
   findings: LeadFinding[];
@@ -489,8 +497,9 @@ export async function scanWebsite(
   suggestedTrack: TargetTrack;
   suggestedPitchAngle: string;
 }> {
+  const reqTimeout = options.timeoutMs ?? FETCH_TIMEOUT_MS;
   const { finalUrl, statusCode, responseTimeMs, html } =
-    await safePublicFetch(rawUrl);
+    await safePublicFetch(rawUrl, reqTimeout);
 
   const baseOrigin = new URL(finalUrl).origin;
   const $ = cheerio.load(html);
@@ -575,37 +584,37 @@ export async function scanWebsite(
       .filter((u): u is string => Boolean(u));
 
     const uniqueSubpages = Array.from(new Set(candidateSubpaths)).slice(0, 2);
-    for (const subUrl of uniqueSubpages) {
-      try {
-        const subRes = await safePublicFetch(subUrl);
-        checkedPagesCount += 1;
-        const $sub = cheerio.load(subRes.html);
-        $sub("script, style, noscript, svg").remove();
-        const subText = $sub("body").text().replace(/\s+/g, " ").trim();
+    const subResults = await Promise.allSettled(
+      uniqueSubpages.map((subUrl) => safePublicFetch(subUrl, Math.min(reqTimeout, 4500))),
+    );
+    for (const outcome of subResults) {
+      if (outcome.status !== "fulfilled") continue;
+      const subRes = outcome.value;
+      checkedPagesCount += 1;
+      const $sub = cheerio.load(subRes.html);
+      $sub("script, style, noscript, svg").remove();
+      const subText = $sub("body").text().replace(/\s+/g, " ").trim();
 
-        for (const em of extractEmailsFromHtml($sub, subText)) {
-          if (!extractedEmails.includes(em) && extractedEmails.length < 4) {
-            extractedEmails.push(em);
-          }
+      for (const em of extractEmailsFromHtml($sub, subText)) {
+        if (!extractedEmails.includes(em) && extractedEmails.length < 4) {
+          extractedEmails.push(em);
         }
-        for (const ph of extractPhonesFromHtml($sub)) {
-          if (!extractedPhones.includes(ph) && extractedPhones.length < 4) {
-            extractedPhones.push(ph);
-          }
+      }
+      for (const ph of extractPhonesFromHtml($sub)) {
+        if (!extractedPhones.includes(ph) && extractedPhones.length < 4) {
+          extractedPhones.push(ph);
         }
-        if (!decisionMakerHint) {
-          decisionMakerHint = extractDecisionMakerFromText(subText);
-        }
-        if (
-          !hasHiringSignal &&
-          /\b(karriere|stellenangebote|wir suchen|mitarbeiter gesucht|offene stellen)\b/i.test(
-            subText,
-          )
-        ) {
-          hasHiringSignal = true;
-        }
-      } catch {
-        // Subpage failures must never abort the primary scan
+      }
+      if (!decisionMakerHint) {
+        decisionMakerHint = extractDecisionMakerFromText(subText);
+      }
+      if (
+        !hasHiringSignal &&
+        /\b(karriere|stellenangebote|wir suchen|mitarbeiter gesucht|offene stellen)\b/i.test(
+          subText,
+        )
+      ) {
+        hasHiringSignal = true;
       }
     }
   }

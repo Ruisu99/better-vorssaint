@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { Check, Copy, Mail, Sparkles } from "lucide-react";
 import {
+  apiFetchJson,
   formatBerlinDateTime,
   OUTREACH_CHANNEL_LABELS,
   OUTREACH_STATUS_LABELS,
@@ -66,37 +67,34 @@ export function OutreachView({
     setGenerating(true);
     setError(null);
     setNotice(null);
-    try {
-      const res = await fetch("/api/outreach", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          action: "generate",
-          leadId: selectedLeadId,
-          channel,
-          extraContext: contextInput.trim(),
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.error ?? "Generierung fehlgeschlagen.");
-        return;
-      }
-      const created: OutreachItem & { company_name?: string } = {
-        ...data.item,
-        company_name: selectedLead?.company_name,
-      };
-      setItems((prev) => [created, ...prev]);
-      setNotice(
-        data.limitBlockedReason
-          ? `Budget-Limit aktiv (${data.limitBlockedReason}) – lokaler Entwurf erstellt.`
-          : `Entwurf für ${selectedLead?.company_name ?? "Lead"} erstellt.`,
-      );
-    } catch {
-      setError("Netzwerkfehler.");
-    } finally {
-      setGenerating(false);
+    const res = await apiFetchJson<{
+      item: OutreachItem;
+      limitBlockedReason?: string;
+    }>("/api/outreach", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        action: "generate",
+        leadId: selectedLeadId,
+        channel,
+        extraContext: contextInput.trim(),
+      }),
+    });
+    setGenerating(false);
+    if (!res.ok) {
+      setError(res.error);
+      return;
     }
+    const created: OutreachItem & { company_name?: string } = {
+      ...res.data.item,
+      company_name: selectedLead?.company_name,
+    };
+    setItems((prev) => [created, ...prev]);
+    setNotice(
+      res.data.limitBlockedReason
+        ? `Budget-Limit aktiv (${res.data.limitBlockedReason}) – lokaler Entwurf erstellt.`
+        : `Entwurf für ${selectedLead?.company_name ?? "Lead"} erstellt.`,
+    );
   }
 
   async function copyItem(item: OutreachItem) {

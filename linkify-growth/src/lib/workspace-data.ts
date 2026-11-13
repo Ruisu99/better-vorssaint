@@ -370,6 +370,26 @@ export async function deleteLead(ownerSub: string, leadId: string): Promise<bool
   return rows.length > 0;
 }
 
+export async function deleteLeadsByIds(
+  ownerSub: string,
+  leadIds: string[],
+): Promise<number> {
+  if (leadIds.length === 0) return 0;
+  const rows = await sql<{ id: string }>(
+    "delete from leads where owner_sub = $1 and id = any($2::text[]) returning id",
+    [ownerSub, leadIds],
+  );
+  return rows.length;
+}
+
+export async function deleteAllLeads(ownerSub: string): Promise<number> {
+  const rows = await sql<{ id: string }>(
+    "delete from leads where owner_sub = $1 returning id",
+    [ownerSub],
+  );
+  return rows.length;
+}
+
 export async function clearSampleData(ownerSub: string): Promise<void> {
   await sql("delete from leads where owner_sub = $1 and is_sample = true", [
     ownerSub,

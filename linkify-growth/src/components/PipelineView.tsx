@@ -3,13 +3,17 @@
 import Link from "next/link";
 import { useState } from "react";
 import {
+  CheckSquare,
   Download,
   ExternalLink,
   Plus,
   Search,
+  Square,
+  Trash2,
   X,
 } from "lucide-react";
 import {
+  apiFetchJson,
   formatBerlinDate,
   PRIORITY_LABELS,
   safeHref,
@@ -23,11 +27,7 @@ function escapeCsvCell(val: string): string {
   return `"${safe}"`;
 }
 
-export function PipelineView({
-  snapshot,
-}: {
-  snapshot: WorkspaceSnapshot;
-}) {
+export function PipelineView({ snapshot }: { snapshot: WorkspaceSnapshot }) {
   const [leads, setLeads] = useState<Lead[]>(snapshot.leads);
   const [query, setQuery] = useState("");
   const [trackFilter, setTrackFilter] = useState<"alle" | TargetTrack>("alle");
@@ -36,6 +36,11 @@ export function PipelineView({
   );
   const [statusFilter, setStatusFilter] = useState<"alle" | LeadStatus>("alle");
   const [onlyUnchecked, setOnlyUnchecked] = useState(false);
+
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [deleting, setDeleting] = useState(false);
+  const [confirmClearAll, setConfirmClearAll] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const [showNewModal, setShowNewModal] = useState(false);
   const [newCompany, setNewCompany] = useState("");
@@ -67,6 +72,96 @@ export function PipelineView({
     }
     return true;
   });
+
+  function toggleRow(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleAllVisible() {
+    if (filtered.length === 0) return;
+    const allSelected = filtered.every((l) => selectedIds.has(l.id));
+    if (allSelected) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(filtered.map((l) => l.id)));
+    }
+  }
+
+  async function handleDeleteOne(id: string) {
+    setActionError(null);
+    const res = await apiFetchJson(`/api/leads/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+    if (!res.ok) {
+      setActionError(res.error);
+      return;
+    }
+    setLeads((prev) => prev.filter((l) => l.id !== id));
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+  }
+
+  async function handleDeleteSelected() {
+    if (selectedIds.size === 0) return;
+    setDeleting(true);
+    setActionError(null);
+    const ids = Array.from(selectedIds);
+    const res = await apiFetchJson<{ ok: boolean; deleted: number }>(
+      `/api/leads?ids=${encodeURIComponent(ids.join(","))}`,
+      { method: "DELETE" },
+    );
+    setDeleting(false);
+    if (!res.ok) {
+      setActionError(res.error);
+      return;
+    }
+    setLeads((prev) => prev.filter((l) => !selectedIds.has(l.id)));
+    setSelectedIds(new Set());
+  }
+
+  async function handleDeleteAll() {
+    setDeleting(true);
+    setActionError(null);
+    const res = await apiFetchJson<{ ok: boolean; deleted: number }>(
+      "/api/leads?mode=all",
+      { method: "DELETE" },
+    );
+    setDeleting(false);
+    setConfirmClearAll(false);
+    if (!res.ok) {
+      setActionError(res.error);
+      return;
+    }
+    setLeads([]);
+    setSelectedIds(new Set());
+  }
+
+  async function handleQuickStatus(leadId: string, status: LeadStatus) {
+    setActionError(null);
+    const res = await apiFetchJson<{ lead: Lead }>(
+      `/api/leads/${encodeURIComponent(leadId)}`,
+      {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ status }),
+      },
+    );
+    if (!res.ok) {
+      setActionError(res.error);
+      return;
+    }
+    setLeads((prev) =>
+      prev.map((l) => (l.id === leadId ? res.data.lead : l)),
+    );
+  }
 
   function exportCsv() {
     const header = [
@@ -120,42 +215,39 @@ export function PipelineView({
     if (!newCompany.trim()) return;
     setSaving(true);
     setFormError(null);
-    try {
-      const res = await fetch("/api/leads", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          company_name: newCompany,
-          industry: newIndustry,
-          target_track: newTrack,
-          city: newCity,
-          postal_address: newAddress,
-          website_url: newWebsite,
-          decision_maker: newDecisionMaker,
-          contact_email: newEmail,
-          priority: newPriority,
-          status: "neu",
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setFormError(data.error ?? "Lead konnte nicht angelegt werden.");
-        return;
-      }
-      setLeads((prev) => [data.lead, ...prev]);
-      setShowNewModal(false);
-      setNewCompany("");
-      setNewIndustry("");
-      setNewAddress("");
-      setNewWebsite("");
-      setNewDecisionMaker("");
-      setNewEmail("");
-    } catch {
-      setFormError("Netzwerkfehler beim Speichern.");
-    } finally {
-      setSaving(false);
+    const res = await apiFetchJson<{ lead: Lead }>("/api/leads", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        company_name: newCompany,
+        industry: newIndustry,
+        target_track: newTrack,
+        city: newCity,
+        postal_address: newAddress,
+        website_url: newWebsite,
+        decision_maker: newDecisionMaker,
+        contact_email: newEmail,
+        priority: newPriority,
+        status: "neu",
+      }),
+    });
+    setSaving(false);
+    if (!res.ok) {
+      setFormError(res.error);
+      return;
     }
+    setLeads((prev) => [res.data.lead, ...prev]);
+    setShowNewModal(false);
+    setNewCompany("");
+    setNewIndustry("");
+    setNewAddress("");
+    setNewWebsite("");
+    setNewDecisionMaker("");
+    setNewEmail("");
   }
+
+  const allVisibleSelected =
+    filtered.length > 0 && filtered.every((l) => selectedIds.has(l.id));
 
   return (
     <div className="space-y-6">
@@ -174,6 +266,49 @@ export function PipelineView({
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5">
+          {selectedIds.size > 0 && (
+            <button
+              type="button"
+              onClick={handleDeleteSelected}
+              disabled={deleting}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-red-600 hover:bg-red-700 text-white text-[13px] font-medium cursor-pointer"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Auswahl löschen ({selectedIds.size})</span>
+            </button>
+          )}
+          {leads.length > 0 && !confirmClearAll && (
+            <button
+              type="button"
+              onClick={() => setConfirmClearAll(true)}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full border border-[#E5E7EB] bg-white hover:border-red-300 text-[13px] font-medium text-[#6B7280] hover:text-red-700 cursor-pointer"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Pipeline leeren</span>
+            </button>
+          )}
+          {confirmClearAll && (
+            <div className="inline-flex items-center gap-2 rounded-full border border-red-200 bg-red-50 px-3 py-1.5 text-[12px]">
+              <span className="text-red-800 font-medium">
+                Alle {leads.length} Leads löschen?
+              </span>
+              <button
+                type="button"
+                onClick={handleDeleteAll}
+                disabled={deleting}
+                className="px-2.5 py-0.5 rounded-full bg-red-600 text-white font-medium cursor-pointer"
+              >
+                Ja
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmClearAll(false)}
+                className="px-2 py-0.5 rounded-full bg-white border border-[#E5E7EB] text-[#6B7280] cursor-pointer"
+              >
+                Nein
+              </button>
+            </div>
+          )}
           <button
             type="button"
             onClick={exportCsv}
@@ -192,6 +327,12 @@ export function PipelineView({
           </button>
         </div>
       </div>
+
+      {actionError && (
+        <p className="text-[13px] text-red-700 bg-red-50 border border-red-200 rounded-xl px-4 py-2.5">
+          {actionError}
+        </p>
+      )}
 
       {/* Filter Bar */}
       <div className="rounded-2xl bg-white border border-[#E5E7EB] p-4 flex flex-wrap items-center gap-3">
@@ -260,6 +401,20 @@ export function PipelineView({
         <table className="w-full text-left border-collapse">
           <thead>
             <tr className="border-b border-[#E5E7EB] text-[12px] font-medium text-[#6B7280] bg-[#F8F9FC]">
+              <th className="py-3 px-3 w-10">
+                <button
+                  type="button"
+                  onClick={toggleAllVisible}
+                  className="text-[#6B7280] hover:text-[#0000F5] cursor-pointer"
+                  aria-label="Alle auswählen"
+                >
+                  {allVisibleSelected ? (
+                    <CheckSquare className="w-4 h-4 text-[#0000F5]" />
+                  ) : (
+                    <Square className="w-4 h-4" />
+                  )}
+                </button>
+              </th>
               <th className="py-3 px-4">Unternehmen & Branche</th>
               <th className="py-3 px-4">Track</th>
               <th className="py-3 px-4">Bewertung</th>
@@ -274,8 +429,23 @@ export function PipelineView({
               const safeUrl = safeHref(lead.website_url);
               const visualDone =
                 lead.visual_checked_desktop && lead.visual_checked_mobile;
+              const isSelected = selectedIds.has(lead.id);
               return (
                 <tr key={lead.id} className="hover:bg-[#F8F9FC]">
+                  <td className="py-3.5 px-3">
+                    <button
+                      type="button"
+                      onClick={() => toggleRow(lead.id)}
+                      className="text-[#6B7280] hover:text-[#0000F5] cursor-pointer"
+                      aria-label={`${lead.company_name} auswählen`}
+                    >
+                      {isSelected ? (
+                        <CheckSquare className="w-4 h-4 text-[#0000F5]" />
+                      ) : (
+                        <Square className="w-4 h-4" />
+                      )}
+                    </button>
+                  </td>
                   <td className="py-3.5 px-4">
                     <Link
                       href={`/pipeline/${lead.id}`}
@@ -316,9 +486,19 @@ export function PipelineView({
                     </span>
                   </td>
                   <td className="py-3.5 px-4 whitespace-nowrap">
-                    <span className="inline-block px-2.5 py-0.5 rounded-full text-[11px] border border-[#E5E7EB] bg-white text-[#1A1A2E]">
-                      {STATUS_LABELS[lead.status]}
-                    </span>
+                    <select
+                      value={lead.status}
+                      onChange={(e) =>
+                        handleQuickStatus(lead.id, e.target.value as LeadStatus)
+                      }
+                      className="px-2.5 py-1 rounded-full text-[11px] border border-[#E5E7EB] bg-white text-[#1A1A2E]"
+                    >
+                      {(Object.keys(STATUS_LABELS) as LeadStatus[]).map((s) => (
+                        <option key={s} value={s}>
+                          {STATUS_LABELS[s]}
+                        </option>
+                      ))}
+                    </select>
                   </td>
                   <td className="py-3.5 px-4 whitespace-nowrap">
                     <span
@@ -338,12 +518,22 @@ export function PipelineView({
                     {formatBerlinDate(lead.next_follow_up_at)}
                   </td>
                   <td className="py-3.5 px-4 text-right whitespace-nowrap">
-                    <Link
-                      href={`/pipeline/${lead.id}`}
-                      className="text-[13px] font-medium text-[#0000F5] hover:underline"
-                    >
-                      Öffnen
-                    </Link>
+                    <div className="inline-flex items-center gap-3">
+                      <Link
+                        href={`/pipeline/${lead.id}`}
+                        className="text-[13px] font-medium text-[#0000F5] hover:underline"
+                      >
+                        Öffnen
+                      </Link>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteOne(lead.id)}
+                        className="text-[#6B7280] hover:text-red-700 cursor-pointer"
+                        title="Lead löschen"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               );
@@ -351,10 +541,18 @@ export function PipelineView({
             {filtered.length === 0 && (
               <tr>
                 <td
-                  colSpan={7}
+                  colSpan={8}
                   className="py-10 text-center text-[14px] text-[#6B7280]"
                 >
-                  Keine passenden Leads in dieser Ansicht.
+                  Keine Leads in dieser Ansicht. Starte im{" "}
+                  <Link href="/" className="text-[#0000F5] underline">
+                    Cockpit-Autopilot
+                  </Link>{" "}
+                  oder im{" "}
+                  <Link href="/radar" className="text-[#0000F5] underline">
+                    Kunden-Radar
+                  </Link>
+                  .
                 </td>
               </tr>
             )}

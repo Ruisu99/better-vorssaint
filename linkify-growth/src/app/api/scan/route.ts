@@ -16,6 +16,8 @@ import {
   upsertLead,
 } from "@/lib/workspace-data";
 
+export const maxDuration = 60;
+
 function parseJsonSafe<T>(text: string): T | null {
   const cleaned = text
     .replace(/^```json\s*/i, "")

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Check, Copy, Sparkles, Trash2 } from "lucide-react";
 import {
+  apiFetchJson,
   CONTENT_FORMAT_LABELS,
   CONTENT_STATUS_LABELS,
   formatBerlinDate,
@@ -40,63 +41,54 @@ export function ContentView({
     setGenerating(true);
     setError(null);
     setNotice(null);
-    try {
-      const res = await fetch("/api/content", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          format,
-          targetTrack,
-          sourceBasis,
-          topic: topic.trim(),
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.error ?? "Content-Generierung fehlgeschlagen.");
-        return;
-      }
-      setPosts((prev) => [data.post, ...prev]);
-      setTopic("");
-      setNotice(
-        data.limitBlockedReason
-          ? `Budget-Limit aktiv (${data.limitBlockedReason}) – Entwurf im Vorschau-Modus erzeugt.`
-          : "Beitragsentwurf erstellt – vor Veröffentlichung Fakten kurz gegenprüfen.",
-      );
-    } catch {
-      setError("Netzwerkfehler.");
-    } finally {
-      setGenerating(false);
+    const res = await apiFetchJson<{
+      post: ContentPost;
+      limitBlockedReason?: string;
+    }>("/api/content", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        format,
+        targetTrack,
+        sourceBasis,
+        topic: topic.trim(),
+      }),
+    });
+    setGenerating(false);
+    if (!res.ok) {
+      setError(res.error);
+      return;
     }
+    setPosts((prev) => [res.data.post, ...prev]);
+    setTopic("");
+    setNotice(
+      res.data.limitBlockedReason
+        ? `Budget-Limit aktiv (${res.data.limitBlockedReason}) – Entwurf lokal erstellt.`
+        : "Beitragsentwurf erstellt – vor Veröffentlichung Fakten kurz gegenprüfen.",
+    );
   }
 
   async function handleWeeklyPack() {
     setPackGenerating(true);
     setError(null);
     setNotice(null);
-    try {
-      const res = await fetch("/api/content", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          action: "weekly_pack",
-          topic: topic.trim() || undefined,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.error ?? "Wochen-Paket fehlgeschlagen.");
-        return;
-      }
-      setPosts((prev) => [...(data.posts ?? []), ...prev]);
-      setNotice(
-        `${(data.posts ?? []).length} Beiträge (KMU, Startup & Akquise-Aufhänger) erstellt.`,
-      );
-    } catch {
-      setError("Netzwerkfehler beim Wochen-Paket.");
-    } finally {
-      setPackGenerating(false);
+    const res = await apiFetchJson<{ posts?: ContentPost[] }>("/api/content", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        action: "weekly_pack",
+        topic: topic.trim() || undefined,
+      }),
+    });
+    setPackGenerating(false);
+    if (!res.ok) {
+      setError(res.error);
+      return;
     }
+    setPosts((prev) => [...(res.data.posts ?? []), ...prev]);
+    setNotice(
+      `${(res.data.posts ?? []).length} Beiträge (KMU, Startup & Akquise-Aufhänger) erstellt.`,
+    );
   }
 
   async function handleStatusChange(postId: string, status: ContentStatus) {

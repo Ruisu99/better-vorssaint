@@ -12,16 +12,16 @@ export type RadarCategory =
 
 const CATEGORY_KEYWORDS: Record<RadarCategory, string[]> = {
   handwerk: [
-    "Tischlerei",
     "Dachdecker",
+    "Tischlerei",
     "Elektro",
     "Sanitär",
-    "Malerbetrieb",
-    "Heizungsbau",
+    "Maler",
+    "Heizung",
   ],
   gesundheit: [
-    "Physiotherapie",
     "Zahnarzt",
+    "Physiotherapie",
     "Arztpraxis",
     "Pflegedienst",
     "Ergotherapie",
@@ -34,16 +34,18 @@ const CATEGORY_KEYWORDS: Record<RadarCategory, string[]> = {
     "Ingenieurbüro",
   ],
   auto: ["Autohaus", "Autowerkstatt", "Kfz"],
-  bau: ["Bauunternehmen", "Zimmerei", "Gerüstbau", "Tiefbau"],
-  alle: [
-    "Physiotherapie",
-    "Tischlerei",
-    "Rechtsanwalt",
-    "Autohaus",
-    "Zahnarzt",
-    "Dachdecker",
-  ],
+  bau: ["Bauunternehmen", "Dachdecker", "Zimmerei", "Tiefbau"],
+  alle: ["Zahnarzt", "Physiotherapie", "Dachdecker", "Autohaus", "Tischlerei"],
 };
+
+const KEYWORD_CATEGORY_ALIASES: Array<[RegExp, RadarCategory]> = [
+  [/^(handwerk|handwerker|betriebe?)$/i, "handwerk"],
+  [/^(gesundheit|praxis|praxen|pflege|medizin|arzt)$/i, "gesundheit"],
+  [/^(kanzlei|kanzleien|beratung|recht|steuer)$/i, "kanzlei"],
+  [/^(auto|autohaus|autohäuser|kfz|werkstatt)$/i, "auto"],
+  [/^(bau|bauunternehmen|baubranche|architektur)$/i, "bau"],
+  [/^(alle|allgemein|unternehmen|kmu|lokal)$/i, "alle"],
+];
 
 interface NominatimGeoItem {
   osm_type?: string;
@@ -116,7 +118,7 @@ async function fetchNominatimPois(
     url.searchParams.set("format", "jsonv2");
     url.searchParams.set("extratags", "1");
     url.searchParams.set("addressdetails", "1");
-    url.searchParams.set("limit", "12");
+    url.searchParams.set("limit", "15");
     if (viewbox) {
       url.searchParams.set("viewbox", viewbox);
       url.searchParams.set("bounded", "1");
@@ -124,7 +126,7 @@ async function fetchNominatimPois(
 
     const res = await fetch(url.toString(), {
       method: "GET",
-      signal: AbortSignal.timeout(6_000),
+      signal: AbortSignal.timeout(5_000),
       headers: {
         "user-agent": "LinkifyGrowthOS/1.0 (https://linkify.tech)",
         accept: "application/json",
@@ -149,7 +151,7 @@ async function fetchPhotonPois(
     url.searchParams.set("lang", "de");
     const res = await fetch(url.toString(), {
       method: "GET",
-      signal: AbortSignal.timeout(5_000),
+      signal: AbortSignal.timeout(4_500),
       headers: {
         "user-agent": "LinkifyGrowthOS/1.0 (https://linkify.tech)",
         accept: "application/json",
@@ -161,6 +163,22 @@ async function fetchPhotonPois(
   } catch {
     return [];
   }
+}
+
+function expandSearchTerms(
+  category: RadarCategory,
+  keyword?: string,
+): string[] {
+  const clean = keyword?.trim() ?? "";
+  if (!clean) {
+    return CATEGORY_KEYWORDS[category] ?? CATEGORY_KEYWORDS.alle;
+  }
+  for (const [rx, mappedCat] of KEYWORD_CATEGORY_ALIASES) {
+    if (rx.test(clean)) {
+      return CATEGORY_KEYWORDS[mappedCat];
+    }
+  }
+  return [clean];
 }
 
 export async function searchLocalBusinesses(params: {
@@ -189,56 +207,67 @@ export async function searchLocalBusinesses(params: {
 
   const geoRes = await fetch(geoUrl.toString(), {
     method: "GET",
-    signal: AbortSignal.timeout(7_000),
+    signal: AbortSignal.timeout(5_000),
     headers: {
       "user-agent": "LinkifyGrowthOS/1.0 (https://linkify.tech)",
       accept: "application/json",
     },
   });
 
-  if (!geoRes.ok) {
-    throw new Error(`Standortsuche fehlgeschlagen (HTTP ${geoRes.status}).`);
+  let resolvedLocation = city;
+  let nominatimViewbox: string | undefined;
+
+  if (geoRes.ok) {
+    const geoData = (await geoRes.json()) as NominatimGeoItem[];
+    if (Array.isArray(geoData) && geoData.length > 0) {
+      resolvedLocation = geoData[0].display_name ?? city;
+      if (geoData[0].boundingbox) {
+        const [southRaw, northRaw, westRaw, eastRaw] = geoData[0].boundingbox;
+        const south = Number.parseFloat(southRaw);
+        const north = Number.parseFloat(northRaw);
+        const west = Number.parseFloat(westRaw);
+        const east = Number.parseFloat(eastRaw);
+        const latMid = (south + north) / 2;
+        const lonMid = (west + east) / 2;
+        const clampedSouth = Math.max(south, latMid - 0.18).toFixed(5);
+        const clampedNorth = Math.min(north, latMid + 0.18).toFixed(5);
+        const clampedWest = Math.max(west, lonMid - 0.25).toFixed(5);
+        const clampedEast = Math.min(east, lonMid + 0.25).toFixed(5);
+        nominatimViewbox = `${clampedWest},${clampedNorth},${clampedEast},${clampedSouth}`;
+      }
+    }
   }
 
-  const geoData = (await geoRes.json()) as NominatimGeoItem[];
-  if (
-    !Array.isArray(geoData) ||
-    geoData.length === 0 ||
-    !geoData[0].boundingbox
-  ) {
-    throw new Error(`Ort "${city}" konnte nicht gefunden werden.`);
+  const terms = expandSearchTerms(params.category, params.keyword).slice(0, 4);
+
+  // Run in two gentle pairs (200ms stagger) so OSM Nominatim never rate-limits shared cloud IPs
+  const poiBatches: NominatimGeoItem[][] = [];
+  for (let i = 0; i < terms.length; i += 2) {
+    const slice = terms.slice(i, i + 2);
+    const batch = await Promise.all(
+      slice.map((t) => fetchNominatimPois(t, city, nominatimViewbox)),
+    );
+    poiBatches.push(...batch);
+    if (i + 2 < terms.length) {
+      await new Promise((r) => setTimeout(r, 200));
+    }
   }
 
-  const [southRaw, northRaw, westRaw, eastRaw] = geoData[0].boundingbox;
-  const south = Number.parseFloat(southRaw);
-  const north = Number.parseFloat(northRaw);
-  const west = Number.parseFloat(westRaw);
-  const east = Number.parseFloat(eastRaw);
-
-  const latMid = (south + north) / 2;
-  const lonMid = (west + east) / 2;
-  const clampedSouth = Math.max(south, latMid - 0.18).toFixed(5);
-  const clampedNorth = Math.min(north, latMid + 0.18).toFixed(5);
-  const clampedWest = Math.max(west, lonMid - 0.25).toFixed(5);
-  const clampedEast = Math.min(east, lonMid + 0.25).toFixed(5);
-  const nominatimViewbox = `${clampedWest},${clampedNorth},${clampedEast},${clampedSouth}`;
-
-  const customKeyword = params.keyword?.trim().slice(0, 60);
-  const terms = customKeyword
-    ? [customKeyword]
-    : CATEGORY_KEYWORDS[params.category] ?? CATEGORY_KEYWORDS.alle;
-
-  const [poiBatches, photonPois] = await Promise.all([
-    Promise.all(terms.map((t) => fetchNominatimPois(t, city, nominatimViewbox))),
-    customKeyword ? fetchPhotonPois(customKeyword, city) : Promise.resolve([]),
-  ]);
+  const photonPois =
+    params.keyword?.trim() && terms.length === 1
+      ? await fetchPhotonPois(params.keyword.trim(), city)
+      : [];
 
   const seenNames = new Set<string>();
   const candidates: RadarCandidate[] = [];
 
+  const INSTITUTIONAL_SKIP =
+    /\b(berufsgenossenschaft|handwerkskammer|ihk|industrie- und handelskammer|universität|hochschule|finanzamt|stadtverwaltung|landratsamt|jobcenter|bundesagentur|arbeitsagentur|polizei|feuerwehr|rathaus|ministerium|krankenkasse|aok|barmer|tk |dekra|tüv )\b/i;
+
   const pushCandidate = (c: Omit<RadarCandidate, "alreadyInPipeline">) => {
     const normName = c.companyName.toLowerCase();
     if (!c.companyName || seenNames.has(normName)) return;
+    if (INSTITUTIONAL_SKIP.test(c.companyName)) return;
     if (params.onlyWithWebsite && !c.websiteUrl) return;
     seenNames.add(normName);
 
@@ -258,7 +287,7 @@ export async function searchLocalBusinesses(params: {
   };
 
   for (let i = 0; i < poiBatches.length; i++) {
-    const term = terms[i];
+    const term = terms[i] ?? "Unternehmen";
     for (const item of poiBatches[i]) {
       const name = (item.name ?? "").trim();
       if (!name) continue;
@@ -296,7 +325,7 @@ export async function searchLocalBusinesses(params: {
     const postalAddress = line1 && line2 ? `${line1}, ${line2}` : line1 || line2;
     const label =
       (props?.osm_value && TYPE_LABELS[props.osm_value]) ||
-      customKeyword ||
+      params.keyword?.trim() ||
       "Lokales Unternehmen";
 
     pushCandidate({
@@ -312,14 +341,14 @@ export async function searchLocalBusinesses(params: {
   }
 
   return {
-    resolvedLocation: geoData[0].display_name ?? city,
+    resolvedLocation,
     candidates: candidates.slice(0, limit),
   };
 }
 
 /**
  * Live Web Discovery via OpenRouter's Perplexity Sonar ($1/$1 per 1M tokens)
- * to discover real DACH startups, SaaS teams, and local businesses not in OSM.
+ * to discover real DACH startups, SaaS teams, and local businesses.
  */
 export async function searchWebProspectsWithOpenRouter(params: {
   scopeKey: string;
@@ -339,14 +368,14 @@ export async function searchWebProspectsWithOpenRouter(params: {
   const region = params.city.trim() || "Deutschland / DACH";
   const focus =
     params.track === "startup"
-      ? `junge B2B-Startups, SaaS-Produkte oder digitale Plattformen mit Sitz in ${region} (die potenziell Web-App-, UI/UX- oder Fullstack-Entwicklung benötigen)`
+      ? `junge B2B-Startups, SaaS-Produkte oder digitale Plattformen mit Sitz in ${region}`
       : `lokale KMU, Handwerksbetriebe, Praxen, Kanzleien oder Dienstleister in ${region}`;
 
-  const prompt = `Finde ${count} reale, aktuell existierende Unternehmen (${focus}) passend zum Suchbegriff "${params.query}".
-WICHTIGE REGELN:
-- Nenne NUR Unternehmen mit verifizierter, echter Website-URL aus deinen aktuellen Suchergebnissen (keine Verzeichnisse wie GelbeSeiten, KennstDuEinen, ProvenExpert, LinkedIn oder Instagram).
+  const prompt = `Finde ${count} reale, aktuell existierende Unternehmen (${focus}) passend zu "${params.query}".
+REGELN:
+- Nur Unternehmen mit echter eigener Unternehmenswebsite (keine Verzeichnisse wie GelbeSeiten, KennstDuEinen, ProvenExpert, LinkedIn, Instagram, Northdata).
 - Erfinde NIEMALS eine Domain oder Firma.
-- Gib ausschließlich ein valides JSON-Array ohne Markdown-Codeblock zurück:
+- Antworte ausschließlich mit einem validen JSON-Array ohne Markdown oder Erklärtext:
 [
   {
     "companyName": "Exakter Unternehmensname",
@@ -362,7 +391,7 @@ WICHTIGE REGELN:
     taskType: "web_discovery",
     model: "perplexity/sonar",
     systemPrompt:
-      "Du bist ein präziser B2B-Recherche-Assistent für den DACH-Raum. Gib ausschließlich ein JSON-Array real existierender Unternehmen mit eigener Firmenwebsite zurück.",
+      "Du bist ein B2B-Recherche-Assistent für Deutschland. Antworte ausschließlich mit einem JSON-Array realer Unternehmen samt eigener Website.",
     userPrompt: prompt,
     temperature: 0.1,
     maxTokens: 1100,
@@ -404,6 +433,9 @@ WICHTIGE REGELN:
     "crunchbase.com",
     "yelp.",
     "jameda.de",
+    "doctolib.de",
+    "provenexpert.com",
+    "wer-zu-wem.de",
   ];
 
   const seen = new Set<string>();

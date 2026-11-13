@@ -62,6 +62,44 @@ export function formatBerlinDateTime(iso: string | null | undefined): string {
   }).format(d);
 }
 
+export async function apiFetchJson<T = Record<string, unknown>>(
+  url: string,
+  init: RequestInit = {},
+): Promise<
+  | { ok: true; status: number; data: T }
+  | { ok: false; status: number; error: string }
+> {
+  try {
+    const res = await fetch(url, init);
+    const rawText = await res.text();
+    let parsed: Record<string, unknown> | null = null;
+    try {
+      parsed = rawText ? (JSON.parse(rawText) as Record<string, unknown>) : null;
+    } catch {
+      parsed = null;
+    }
+    if (!res.ok) {
+      const serverErr =
+        (parsed && typeof parsed.error === "string" && parsed.error) ||
+        (res.status === 504 || res.status === 502
+          ? `Zeitüberschreitung beim Server (HTTP ${res.status}). Bitte erneut versuchen.`
+          : `Server-Fehler (HTTP ${res.status}).`);
+      return { ok: false, status: res.status, error: serverErr };
+    }
+    return {
+      ok: true,
+      status: res.status,
+      data: (parsed ?? {}) as T,
+    };
+  } catch (err) {
+    const msg =
+      err instanceof Error && err.message
+        ? `Verbindungsfehler: ${err.message}`
+        : "Verbindung zum Server unterbrochen.";
+    return { ok: false, status: 0, error: msg };
+  }
+}
+
 export const PRIORITY_LABELS: Record<LeadPriority, string> = {
   heiss: "Heiß",
   warm: "Warm",

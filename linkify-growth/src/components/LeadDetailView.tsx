@@ -16,6 +16,7 @@ import {
   Trash2,
 } from "lucide-react";
 import {
+  apiFetchJson,
   formatBerlinDate,
   formatBerlinDateTime,
   OUTREACH_CHANNEL_LABELS,
@@ -86,18 +87,14 @@ export function LeadDetailView({
 
   async function saveLeadPatch(patch: Partial<Lead>) {
     setSavingLead(true);
-    try {
-      const res = await fetch(`/api/leads/${lead.id}`, {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(patch),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setLead(data.lead);
-      }
-    } finally {
-      setSavingLead(false);
+    const res = await apiFetchJson<{ lead: Lead }>(`/api/leads/${lead.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(patch),
+    });
+    setSavingLead(false);
+    if (res.ok) {
+      setLead(res.data.lead);
     }
   }
 
@@ -105,34 +102,37 @@ export function LeadDetailView({
     if (!lead.website_url) return;
     setRescanning(true);
     setScanMsg(null);
-    try {
-      const res = await fetch("/api/scan", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          leadId: lead.id,
-          url: lead.website_url,
-          includePageSpeed: true,
-          runAiQualification: withAi,
-          saveToPipeline: true,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setScanMsg(data.error ?? "Scan fehlgeschlagen.");
-        return;
-      }
-      setLead(data.lead);
-      setScanMsg(
-        data.aiMeta?.limitBlockedReason
-          ? `Scan aktualisiert (${data.aiMeta.limitBlockedReason})`
-          : data.aiMeta?.providerMode === "openrouter"
-            ? `Technischer Scan + KI-Bewertung (${data.aiMeta.modelUsed}) aktualisiert.`
-            : "Technischer Website-Scan & PageSpeed aktualisiert (0,00 € KI-Kosten).",
-      );
-    } finally {
-      setRescanning(false);
+    const res = await apiFetchJson<{
+      lead: Lead;
+      aiMeta?: {
+        providerMode: string;
+        modelUsed: string;
+        limitBlockedReason?: string;
+      } | null;
+    }>("/api/scan", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        leadId: lead.id,
+        url: lead.website_url,
+        includePageSpeed: true,
+        runAiQualification: withAi,
+        saveToPipeline: true,
+      }),
+    });
+    setRescanning(false);
+    if (!res.ok) {
+      setScanMsg(res.error);
+      return;
     }
+    setLead(res.data.lead);
+    setScanMsg(
+      res.data.aiMeta?.limitBlockedReason
+        ? `Scan aktualisiert (${res.data.aiMeta.limitBlockedReason})`
+        : res.data.aiMeta?.providerMode === "openrouter"
+          ? `Technischer Scan + KI-Bewertung (${res.data.aiMeta.modelUsed}) aktualisiert.`
+          : "Technischer Website-Scan & PageSpeed aktualisiert (0,00 € KI-Kosten).",
+    );
   }
 
   async function handleGenerateOutreach(channelsOverride?: OutreachChannel[]) {
@@ -140,11 +140,15 @@ export function LeadDetailView({
     setGenerating(true);
     setGenError(null);
     setGenNotice(null);
-    try {
-      const createdItems: OutreachItem[] = [];
-      let lastNotice = "";
-      for (const ch of targets) {
-        const res = await fetch("/api/outreach", {
+
+    const outcomes = await Promise.all(
+      targets.map((ch) =>
+        apiFetchJson<{
+          item: OutreachItem;
+          providerMode?: string;
+          limitBlockedReason?: string;
+          autoDowngraded?: boolean;
+        }>("/api/outreach", {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
@@ -153,36 +157,40 @@ export function LeadDetailView({
             channel: ch,
             extraContext: extraContext.trim(),
           }),
-        });
-        const data = await res.json();
-        if (!res.ok) {
-          setGenError(data.error ?? "Generierung fehlgeschlagen.");
-          break;
-        }
-        const item = data.item as OutreachItem;
-        createdItems.push(item);
-        if (data.limitBlockedReason) {
-          lastNotice = `Budget-Schutz aktiv (${data.limitBlockedReason}) – Entwurf im lokalen Vorschau-Modus erzeugt.`;
-        } else if (data.autoDowngraded) {
-          lastNotice = `Spar-Automatik aktiv (>=75% Budget) -> erstellt mit ${item.model_used}.`;
-        } else if (data.providerMode === "openrouter") {
-          lastNotice = `${createdItems.length > 1 ? `${createdItems.length}er-Akquise-Kit` : "Entwurf"} über ${item.model_used} erzeugt${item.privacy_masked ? " (Privacy-Mode)" : ""}.`;
-        } else {
-          lastNotice = `${createdItems.length > 1 ? `${createdItems.length} Entwürfe` : "Entwurf"} im lokalen Vorschau-Modus erstellt (0,00 €).`;
-        }
-      }
+        }),
+      ),
+    );
 
-      if (createdItems.length > 0) {
-        setOutreachList((prev) => [...createdItems, ...prev]);
-        setActiveDraft(createdItems[0]);
-        setDraftSubject(createdItems[0].subject);
-        setDraftBody(createdItems[0].body);
-        setGenNotice(lastNotice);
+    setGenerating(false);
+    const createdItems: OutreachItem[] = [];
+    let firstError: string | null = null;
+    let lastNotice = "";
+
+    for (const r of outcomes) {
+      if (!r.ok) {
+        if (!firstError) firstError = r.error;
+        continue;
       }
-    } catch {
-      setGenError("Netzwerkfehler bei der Textgenerierung.");
-    } finally {
-      setGenerating(false);
+      const item = r.data.item;
+      createdItems.push(item);
+      if (r.data.limitBlockedReason) {
+        lastNotice = `Budget-Schutz aktiv (${r.data.limitBlockedReason}) – Entwurf lokal erstellt.`;
+      } else if (r.data.autoDowngraded) {
+        lastNotice = `Spar-Automatik aktiv (>=75% Budget) -> erstellt mit ${item.model_used}.`;
+      } else if (r.data.providerMode === "openrouter") {
+        lastNotice = `${createdItems.length > 1 ? `${createdItems.length}er-Akquise-Kit` : "Entwurf"} über ${item.model_used} erzeugt.`;
+      } else {
+        lastNotice = `${createdItems.length > 1 ? `${createdItems.length} Entwürfe` : "Entwurf"} lokal erstellt (0,00 €).`;
+      }
+    }
+
+    if (firstError) setGenError(firstError);
+    if (createdItems.length > 0) {
+      setOutreachList((prev) => [...createdItems, ...prev]);
+      setActiveDraft(createdItems[0]);
+      setDraftSubject(createdItems[0].subject);
+      setDraftBody(createdItems[0].body);
+      setGenNotice(lastNotice);
     }
   }
 

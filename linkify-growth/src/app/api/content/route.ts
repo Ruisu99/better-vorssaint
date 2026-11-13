@@ -17,6 +17,8 @@ import {
   listContentPosts,
 } from "@/lib/workspace-data";
 
+export const maxDuration = 60;
+
 const VALID_FORMATS = new Set<ContentFormat>([
   "linkedin",
   "website_insight",
@@ -102,57 +104,60 @@ export async function POST(request: Request) {
       },
     ];
 
-    const createdPosts = [];
-    for (const spec of packSpecs) {
-      try {
-        const aiRes = await runAiTask({
-          scopeKey: auth.scopeKey,
-          taskType: "content_pack",
-          model: brand.openrouter_config.contentModel,
-          systemPrompt: buildLinkifySystemPrompt(brand),
-          userPrompt: buildContentPrompt({
-            brand,
-            format: spec.format,
-            targetTrack: spec.track,
-            sourceBasis: spec.basis,
-            userTopic: spec.topic,
-          }),
-          temperature: brand.openrouter_config.temperature,
-          maxTokens: 1100,
-          privacyMode: true,
-          summaryLabel: `Content-Paket (${spec.format}/${spec.track})`,
-          fallbackFn: () =>
-            JSON.stringify({
-              title: `${spec.track === "startup" ? "Produktteam" : "KMU"}: ${focusTopic.slice(0, 60)}`,
-              body: `Praxisimpuls für ${spec.track === "startup" ? "Startups & Produktteams" : "lokale Unternehmen"}: ${spec.topic}\n\nBasis: ${spec.basis}`,
-              verificationNotes: ["Vor Veröffentlichung Details prüfen."],
-            }),
-        });
-        const parsed = parseJsonSafe<{
-          title?: string;
-          body?: string;
-          verificationNotes?: string[];
-        }>(aiRes.text);
-        const post = await createContentPost({
-          id: crypto.randomUUID(),
-          owner_sub: auth.scopeKey,
-          title: (parsed?.title || spec.topic).slice(0, 180),
-          format: spec.format,
-          target_track: spec.track,
-          source_basis: spec.basis.slice(0, 200),
-          body: (parsed?.body || aiRes.text).slice(0, 8000),
-          verification_notes: Array.isArray(parsed?.verificationNotes)
-            ? parsed.verificationNotes.map(String).slice(0, 8)
-            : ["Vor Veröffentlichung kurz prüfen."],
-          status: "entwurf",
-          model_used: aiRes.modelUsed,
-          is_sample: false,
-        });
-        createdPosts.push(post);
-      } catch {
-        // continue with remaining pack items
-      }
-    }
+    const createdPosts = (
+      await Promise.all(
+        packSpecs.map(async (spec) => {
+          try {
+            const aiRes = await runAiTask({
+              scopeKey: auth.scopeKey,
+              taskType: "content_pack",
+              model: brand.openrouter_config.contentModel,
+              systemPrompt: buildLinkifySystemPrompt(brand),
+              userPrompt: buildContentPrompt({
+                brand,
+                format: spec.format,
+                targetTrack: spec.track,
+                sourceBasis: spec.basis,
+                userTopic: spec.topic,
+              }),
+              temperature: brand.openrouter_config.temperature,
+              maxTokens: 1000,
+              reasoningEffort: "low",
+              privacyMode: true,
+              summaryLabel: `Content-Paket (${spec.format}/${spec.track})`,
+              fallbackFn: () =>
+                JSON.stringify({
+                  title: `${spec.track === "startup" ? "Produktteam" : "KMU"}: ${focusTopic.slice(0, 60)}`,
+                  body: `Praxisimpuls für ${spec.track === "startup" ? "Startups & Produktteams" : "lokale Unternehmen"}: ${spec.topic}\n\nBasis: ${spec.basis}`,
+                  verificationNotes: ["Vor Veröffentlichung Details prüfen."],
+                }),
+            });
+            const parsed = parseJsonSafe<{
+              title?: string;
+              body?: string;
+              verificationNotes?: string[];
+            }>(aiRes.text);
+            return await createContentPost({
+              id: crypto.randomUUID(),
+              owner_sub: auth.scopeKey,
+              title: (parsed?.title || spec.topic).slice(0, 180),
+              format: spec.format,
+              target_track: spec.track,
+              source_basis: spec.basis.slice(0, 200),
+              body: (parsed?.body || aiRes.text).slice(0, 8000),
+              verification_notes: Array.isArray(parsed?.verificationNotes)
+                ? parsed.verificationNotes.map(String).slice(0, 8)
+                : ["Vor Veröffentlichung kurz prüfen."],
+              status: "entwurf",
+              model_used: aiRes.modelUsed,
+              is_sample: false,
+            });
+          } catch {
+            return null;
+          }
+        }),
+      )
+    ).filter((p): p is NonNullable<typeof p> => p !== null);
 
     return NextResponse.json(
       { posts: createdPosts },

@@ -13,7 +13,7 @@ import {
   Square,
   Zap,
 } from "lucide-react";
-import { PRIORITY_LABELS, safeHref } from "@/lib/client-utils";
+import { apiFetchJson, PRIORITY_LABELS, safeHref } from "@/lib/client-utils";
 import type { WorkspaceSnapshot } from "@/lib/initial-state";
 import type {
   Lead,
@@ -107,32 +107,29 @@ export function RadarView({ snapshot }: { snapshot: WorkspaceSnapshot }) {
     setSearchError(null);
     setImportedLeads([]);
     setPreviews({});
-    try {
-      const res = await fetch("/api/radar", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          action: "search",
-          city,
-          category,
-          keyword: keyword.trim() || undefined,
-          onlyWithWebsite,
-          limit: 25,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setSearchError(data.error ?? "Branchensuche fehlgeschlagen.");
-        return;
-      }
-      setResolvedLocation(data.resolvedLocation ?? city);
-      setCandidates(data.candidates ?? []);
-      setSelectedIds(new Set());
-    } catch {
-      setSearchError("Verbindung zur Branchensuche fehlgeschlagen.");
-    } finally {
-      setSearching(false);
+    const res = await apiFetchJson<{
+      resolvedLocation?: string;
+      candidates?: RadarCandidate[];
+    }>("/api/radar", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        action: "search",
+        city,
+        category,
+        keyword: keyword.trim() || undefined,
+        onlyWithWebsite,
+        limit: 25,
+      }),
+    });
+    setSearching(false);
+    if (!res.ok) {
+      setSearchError(res.error);
+      return;
     }
+    setResolvedLocation(res.data.resolvedLocation ?? city);
+    setCandidates(res.data.candidates ?? []);
+    setSelectedIds(new Set());
   }
 
   async function handleLiveWebSearch(e: React.FormEvent) {
@@ -141,39 +138,39 @@ export function RadarView({ snapshot }: { snapshot: WorkspaceSnapshot }) {
     setSearchError(null);
     setImportedLeads([]);
     setPreviews({});
-    try {
-      const res = await fetch("/api/radar", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          action: "web_search",
-          track: webTrack,
-          city: webCity.trim() || "Deutschland",
-          keyword: webQuery.trim(),
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setSearchError(data.error ?? "KI-Websuche fehlgeschlagen.");
-        return;
-      }
-      if (data.limitBlockedReason) {
-        setSearchError(`Budget-Limit aktiv: ${data.limitBlockedReason}`);
-      } else if (data.providerMode === "local_fallback") {
-        setSearchError(
-          "OpenRouter Key fehlt – für die Live-Websuche bitte in den Cursor Secrets OPENROUTER_API_KEY hinterlegen.",
-        );
-      }
-      setResolvedLocation(
-        `${data.resolvedLocation ?? webCity} · Modell: ${data.modelUsed}`,
-      );
-      setCandidates(data.candidates ?? []);
-      setSelectedIds(new Set());
-    } catch {
-      setSearchError("Verbindung zur KI-Websuche fehlgeschlagen.");
-    } finally {
-      setWebSearching(false);
+    const res = await apiFetchJson<{
+      resolvedLocation?: string;
+      candidates?: RadarCandidate[];
+      providerMode?: string;
+      modelUsed?: string;
+      limitBlockedReason?: string;
+    }>("/api/radar", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        action: "web_search",
+        track: webTrack,
+        city: webCity.trim() || "Deutschland",
+        keyword: webQuery.trim(),
+      }),
+    });
+    setWebSearching(false);
+    if (!res.ok) {
+      setSearchError(res.error);
+      return;
     }
+    if (res.data.limitBlockedReason) {
+      setSearchError(`Budget-Limit aktiv: ${res.data.limitBlockedReason}`);
+    } else if (res.data.providerMode === "local_fallback") {
+      setSearchError(
+        "OpenRouter Key fehlt – für die Live-Websuche bitte in den Cursor Secrets OPENROUTER_API_KEY hinterlegen.",
+      );
+    }
+    setResolvedLocation(
+      `${res.data.resolvedLocation ?? webCity} · Modell: ${res.data.modelUsed}`,
+    );
+    setCandidates(res.data.candidates ?? []);
+    setSelectedIds(new Set());
   }
 
   async function handleFreePrescan() {
@@ -181,37 +178,31 @@ export function RadarView({ snapshot }: { snapshot: WorkspaceSnapshot }) {
     if (withWeb.length === 0) return;
     setPrescanning(true);
     setSearchError(null);
-    try {
-      const res = await fetch("/api/radar", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          action: "prescan_candidates",
-          candidates: withWeb,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setSearchError(data.error ?? "Vorcheck fehlgeschlagen.");
-        return;
-      }
-      const nextMap: Record<string, RadarPreview> = { ...previews };
-      for (const p of (data.previews ?? []) as RadarPreview[]) {
-        nextMap[p.osmId] = p;
-      }
-      setPreviews(nextMap);
-
-      const score = (c: RadarCandidate) => {
-        const p = nextMap[c.osmId];
-        if (!p) return 2;
-        return p.priority === "heiss" ? 0 : p.priority === "warm" ? 1 : 2;
-      };
-      setCandidates((prev) => [...prev].sort((a, b) => score(a) - score(b)));
-    } catch {
-      setSearchError("Netzwerkfehler beim kostenlosen Vorcheck.");
-    } finally {
-      setPrescanning(false);
+    const res = await apiFetchJson<{ previews?: RadarPreview[] }>("/api/radar", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        action: "prescan_candidates",
+        candidates: withWeb,
+      }),
+    });
+    setPrescanning(false);
+    if (!res.ok) {
+      setSearchError(res.error);
+      return;
     }
+    const nextMap: Record<string, RadarPreview> = { ...previews };
+    for (const p of res.data.previews ?? []) {
+      nextMap[p.osmId] = p;
+    }
+    setPreviews(nextMap);
+
+    const score = (c: RadarCandidate) => {
+      const p = nextMap[c.osmId];
+      if (!p) return 2;
+      return p.priority === "heiss" ? 0 : p.priority === "warm" ? 1 : 2;
+    };
+    setCandidates((prev) => [...prev].sort((a, b) => score(a) - score(b)));
   }
 
   function toggleCandidate(osmId: string) {
@@ -231,33 +222,27 @@ export function RadarView({ snapshot }: { snapshot: WorkspaceSnapshot }) {
     if (picked.length === 0) return;
     setImporting(true);
     setSearchError(null);
-    try {
-      const res = await fetch("/api/radar", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          action: "import_candidates",
-          candidates: picked,
-          autoScanWebsites: autoScanOnImport,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setSearchError(data.error ?? "Import fehlgeschlagen.");
-        return;
-      }
-      setImportedLeads(data.leads ?? []);
-      setCandidates((prev) =>
-        prev.map((c) =>
-          selectedIds.has(c.osmId) ? { ...c, alreadyInPipeline: true } : c,
-        ),
-      );
-      setSelectedIds(new Set());
-    } catch {
-      setSearchError("Netzwerkfehler beim Importieren.");
-    } finally {
-      setImporting(false);
+    const res = await apiFetchJson<{ leads?: Lead[] }>("/api/radar", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        action: "import_candidates",
+        candidates: picked,
+        autoScanWebsites: autoScanOnImport,
+      }),
+    });
+    setImporting(false);
+    if (!res.ok) {
+      setSearchError(res.error);
+      return;
     }
+    setImportedLeads(res.data.leads ?? []);
+    setCandidates((prev) =>
+      prev.map((c) =>
+        selectedIds.has(c.osmId) ? { ...c, alreadyInPipeline: true } : c,
+      ),
+    );
+    setSelectedIds(new Set());
   }
 
   async function handleBatchScan(e: React.FormEvent) {
@@ -271,27 +256,23 @@ export function RadarView({ snapshot }: { snapshot: WorkspaceSnapshot }) {
     setBatchScanning(true);
     setBatchError(null);
     setBatchResults([]);
-    try {
-      const res = await fetch("/api/scan", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          urls,
-          targetTrack: batchTrack,
-          saveToPipeline: true,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setBatchError(data.error ?? "Batch-Scan fehlgeschlagen.");
-        return;
-      }
-      setBatchResults(data.results ?? []);
-    } catch {
-      setBatchError("Netzwerkfehler beim Batch-Scan.");
-    } finally {
-      setBatchScanning(false);
+    const res = await apiFetchJson<{
+      results?: Array<{ url: string; ok: boolean; lead?: Lead; error?: string }>;
+    }>("/api/scan", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        urls,
+        targetTrack: batchTrack,
+        saveToPipeline: true,
+      }),
+    });
+    setBatchScanning(false);
+    if (!res.ok) {
+      setBatchError(res.error);
+      return;
     }
+    setBatchResults(res.data.results ?? []);
   }
 
   async function handleSingleScan(e: React.FormEvent) {
@@ -300,30 +281,33 @@ export function RadarView({ snapshot }: { snapshot: WorkspaceSnapshot }) {
     setScanning(true);
     setScanError(null);
     setScanResult(null);
-    try {
-      const res = await fetch("/api/scan", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          url: scanUrl.trim(),
-          companyName: scanCompany.trim(),
-          city: scanCity.trim(),
-          includePageSpeed,
-          runAiQualification: runAi,
-          saveToPipeline: true,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setScanError(data.error ?? "Scan fehlgeschlagen.");
-        return;
-      }
-      setScanResult({ lead: data.lead, aiMeta: data.aiMeta ?? null });
-    } catch {
-      setScanError("Netzwerkfehler beim Scan.");
-    } finally {
-      setScanning(false);
+    const res = await apiFetchJson<{
+      lead: Lead;
+      aiMeta?: {
+        providerMode: string;
+        modelUsed: string;
+        limitBlockedReason?: string;
+        autoDowngraded?: boolean;
+        nextVisualCheckHints?: string[];
+      } | null;
+    }>("/api/scan", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        url: scanUrl.trim(),
+        companyName: scanCompany.trim(),
+        city: scanCity.trim(),
+        includePageSpeed,
+        runAiQualification: runAi,
+        saveToPipeline: true,
+      }),
+    });
+    setScanning(false);
+    if (!res.ok) {
+      setScanError(res.error);
+      return;
     }
+    setScanResult({ lead: res.data.lead, aiMeta: res.data.aiMeta ?? null });
   }
 
   const showCandidateList = tab === "local" || tab === "web";

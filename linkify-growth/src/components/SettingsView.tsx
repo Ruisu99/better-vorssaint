@@ -17,7 +17,7 @@ import {
   HARD_MAX_MONTHLY_EUR,
   HARD_MAX_TOKENS_PER_CALL,
 } from "@/lib/budget-guard";
-import { formatBerlinDateTime } from "@/lib/client-utils";
+import { apiFetchJson, formatBerlinDateTime } from "@/lib/client-utils";
 import type { WorkspaceSnapshot } from "@/lib/initial-state";
 import type { OpenRouterModelOption } from "@/lib/openrouter";
 import type { BrandProfile } from "@/lib/types";
@@ -92,71 +92,61 @@ export function SettingsView({
     e.preventDefault();
     setSaving(true);
     setSaveMessage(null);
-    try {
-      const res = await fetch("/api/settings", {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(brand),
-      });
-      const data = await res.json();
-      if (res.ok && data.brand) {
-        setBrand(data.brand);
-        setSaveMessage(
-          "Einstellungen, Budget-Schutzschalter & Marken-Profil gespeichert.",
-        );
-      } else {
-        setSaveMessage(data.error ?? "Speichern fehlgeschlagen.");
-      }
-    } catch {
-      setSaveMessage("Netzwerkfehler beim Speichern.");
-    } finally {
-      setSaving(false);
+    const res = await apiFetchJson<{ brand?: BrandProfile }>("/api/settings", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(brand),
+    });
+    setSaving(false);
+    if (res.ok && res.data.brand) {
+      setBrand(res.data.brand);
+      setSaveMessage(
+        "Einstellungen, Budget-Schutzschalter & Marken-Profil gespeichert.",
+      );
+    } else {
+      setSaveMessage(res.ok ? "Speichern fehlgeschlagen." : res.error);
     }
   }
 
   async function handleLoadModels() {
     setLoadingModels(true);
-    try {
-      const res = await fetch("/api/settings?models=1");
-      if (res.ok) {
-        const data = await res.json();
-        if (data.modelsResult?.models) {
-          setModels(
-            data.modelsResult.models.map((m: OpenRouterModelOption) => ({
-              ...m,
-              name: `${m.name}${m.intelligenceIndex ? ` · AA-Index ${m.intelligenceIndex}` : ""}`,
-            })),
-          );
-        }
-      }
-    } finally {
-      setLoadingModels(false);
+    const res = await apiFetchJson<{
+      modelsResult?: { models?: OpenRouterModelOption[] };
+    }>("/api/settings?models=1");
+    setLoadingModels(false);
+    if (res.ok && res.data.modelsResult?.models) {
+      setModels(
+        res.data.modelsResult.models.map((m) => ({
+          ...m,
+          name: `${m.name}${m.intelligenceIndex ? ` · AA-Index ${m.intelligenceIndex}` : ""}`,
+        })),
+      );
     }
   }
 
   async function handleTestOpenRouter() {
     setTesting(true);
     setTestResult(null);
-    try {
-      const res = await fetch("/api/ai/test", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ model: brand.openrouter_config.researchModel }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setTestResult(data.error ?? "Test fehlgeschlagen.");
-      } else if (!data.connected) {
-        setTestResult(data.message);
-      } else if (data.limitBlockedReason) {
-        setTestResult(`Budget-Stopp aktiv: ${data.limitBlockedReason}`);
-      } else {
-        setTestResult(`Verbunden (${data.modelUsed}): "${data.reply}"`);
-      }
-    } catch {
-      setTestResult("Verbindungstest fehlgeschlagen.");
-    } finally {
-      setTesting(false);
+    const res = await apiFetchJson<{
+      connected?: boolean;
+      limitBlockedReason?: string;
+      modelUsed?: string;
+      reply?: string;
+      message?: string;
+    }>("/api/ai/test", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model: brand.openrouter_config.researchModel }),
+    });
+    setTesting(false);
+    if (!res.ok) {
+      setTestResult(res.error);
+    } else if (!res.data.connected) {
+      setTestResult(res.data.message ?? "OpenRouter Key nicht hinterlegt.");
+    } else if (res.data.limitBlockedReason) {
+      setTestResult(`Budget-Stopp aktiv: ${res.data.limitBlockedReason}`);
+    } else {
+      setTestResult(`Verbunden (${res.data.modelUsed}): "${res.data.reply}"`);
     }
   }
 

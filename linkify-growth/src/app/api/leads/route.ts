@@ -8,12 +8,15 @@ import type {
 } from "@/lib/types";
 import { sanitizeExternalHref } from "@/lib/url-safety";
 import {
+  assertSafeMutationRequest,
   cleanStr,
   errorResponse,
   parseSafeJsonBody,
   sanitizeFindings,
 } from "@/lib/validation";
 import {
+  deleteAllLeads,
+  deleteLeadsByIds,
   ensureWorkspaceSeeded,
   listLeads,
   upsertLead,
@@ -125,5 +128,45 @@ export async function POST(request: Request) {
   return NextResponse.json(
     { lead: created },
     { status: 201, headers: PRIVATE_JSON_HEADERS },
+  );
+}
+
+export async function DELETE(request: Request) {
+  const auth = await requireScopedIdentity(request);
+  if (auth instanceof Response) return auth;
+
+  try {
+    assertSafeMutationRequest(request, { requireJsonContentType: false });
+  } catch (err) {
+    return errorResponse(err, 403);
+  }
+
+  const url = new URL(request.url);
+  const mode = url.searchParams.get("mode");
+  if (mode === "all") {
+    const deleted = await deleteAllLeads(auth.scopeKey);
+    return NextResponse.json(
+      { ok: true, deleted },
+      { headers: PRIVATE_JSON_HEADERS },
+    );
+  }
+
+  const rawIds = url.searchParams.get("ids") ?? "";
+  const ids = rawIds
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .slice(0, 100);
+  if (ids.length === 0) {
+    return NextResponse.json(
+      { error: "Keine Lead-IDs angegeben." },
+      { status: 400, headers: PRIVATE_JSON_HEADERS },
+    );
+  }
+
+  const deleted = await deleteLeadsByIds(auth.scopeKey, ids);
+  return NextResponse.json(
+    { ok: true, deleted },
+    { headers: PRIVATE_JSON_HEADERS },
   );
 }

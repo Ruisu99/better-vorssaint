@@ -22,6 +22,8 @@ import {
   upsertLead,
 } from "@/lib/workspace-data";
 
+export const maxDuration = 60;
+
 const VALID_CATEGORIES = new Set<RadarCategory>([
   "alle",
   "handwerk",

@@ -16,6 +16,7 @@ export interface CuratedModelSpec {
   tier: "ultra_sparen" | "ausgewogen" | "premium_text" | "websuche";
   promptPerMillionUsd: number;
   completionPerMillionUsd: number;
+  supportsReasoning: boolean;
   intelligenceIndex?: number;
   note: string;
 }
@@ -30,6 +31,7 @@ export const APPROVED_OPENROUTER_MODELS: CuratedModelSpec[] = [
     tier: "ultra_sparen",
     promptPerMillionUsd: 0.1,
     completionPerMillionUsd: 0.5,
+    supportsReasoning: true,
     intelligenceIndex: 36,
     note: "Pareto-Spitze (AA-Index 36, 443 tok/s, minimale Halluzinationen) – Standard für Analyse & Qualifizierung",
   },
@@ -39,6 +41,7 @@ export const APPROVED_OPENROUTER_MODELS: CuratedModelSpec[] = [
     tier: "ultra_sparen",
     promptPerMillionUsd: 0.022,
     completionPerMillionUsd: 0.4,
+    supportsReasoning: true,
     note: "Extrem günstig für schnelle Vor-Qualifizierung & kurze Extraktionen",
   },
   {
@@ -47,6 +50,7 @@ export const APPROVED_OPENROUTER_MODELS: CuratedModelSpec[] = [
     tier: "ultra_sparen",
     promptPerMillionUsd: 0.03,
     completionPerMillionUsd: 0.13,
+    supportsReasoning: true,
     note: "Niedrigster Token-Preis im Katalog",
   },
   {
@@ -55,6 +59,7 @@ export const APPROVED_OPENROUTER_MODELS: CuratedModelSpec[] = [
     tier: "ultra_sparen",
     promptPerMillionUsd: 0.1,
     completionPerMillionUsd: 0.5,
+    supportsReasoning: true,
     intelligenceIndex: 36,
     note: "Sehr starkes Deutsch im Ultra-Spar-Segment",
   },
@@ -64,6 +69,7 @@ export const APPROVED_OPENROUTER_MODELS: CuratedModelSpec[] = [
     tier: "ultra_sparen",
     promptPerMillionUsd: 0.1,
     completionPerMillionUsd: 0.5,
+    supportsReasoning: true,
     note: "Kompaktes, schnelles OpenAI-Sparmodell",
   },
   {
@@ -72,6 +78,7 @@ export const APPROVED_OPENROUTER_MODELS: CuratedModelSpec[] = [
     tier: "websuche",
     promptPerMillionUsd: 1.0,
     completionPerMillionUsd: 1.0,
+    supportsReasoning: false,
     note: "Findet echte Unternehmen & Startups direkt im Live-Web (~0,003 € pro Suche)",
   },
   {
@@ -80,6 +87,7 @@ export const APPROVED_OPENROUTER_MODELS: CuratedModelSpec[] = [
     tier: "ausgewogen",
     promptPerMillionUsd: 1.0,
     completionPerMillionUsd: 5.0,
+    supportsReasoning: true,
     note: "Ausgewogen für Konzepte & Scope-Entwürfe",
   },
   {
@@ -88,6 +96,7 @@ export const APPROVED_OPENROUTER_MODELS: CuratedModelSpec[] = [
     tier: "ausgewogen",
     promptPerMillionUsd: 1.25,
     completionPerMillionUsd: 4.25,
+    supportsReasoning: true,
     note: "Starkes Allround-Modell im mittleren Preisspektrum",
   },
   {
@@ -96,6 +105,7 @@ export const APPROVED_OPENROUTER_MODELS: CuratedModelSpec[] = [
     tier: "ausgewogen",
     promptPerMillionUsd: 1.5,
     completionPerMillionUsd: 7.5,
+    supportsReasoning: true,
     intelligenceIndex: 54,
     note: "Starkes Reasoning & natürliches Deutsch (AA-Index 54 Xhigh / 41 Medium) – Standard für Akquise & Content",
   },
@@ -105,6 +115,7 @@ export const APPROVED_OPENROUTER_MODELS: CuratedModelSpec[] = [
     tier: "ausgewogen",
     promptPerMillionUsd: 2.0,
     completionPerMillionUsd: 6.0,
+    supportsReasoning: true,
     note: "Direkter Stil, gutes Preis-Leistungs-Verhältnis für Output",
   },
   {
@@ -113,6 +124,7 @@ export const APPROVED_OPENROUTER_MODELS: CuratedModelSpec[] = [
     tier: "premium_text",
     promptPerMillionUsd: 2.0,
     completionPerMillionUsd: 10.0,
+    supportsReasoning: true,
     intelligenceIndex: 54,
     note: "Exzellente deutsche Tonalität für wichtige Kundenmails & Briefe (~0,01 € pro Brief)",
   },
@@ -122,6 +134,7 @@ export const APPROVED_OPENROUTER_MODELS: CuratedModelSpec[] = [
     tier: "premium_text",
     promptPerMillionUsd: 2.0,
     completionPerMillionUsd: 10.0,
+    supportsReasoning: true,
     intelligenceIndex: 60,
     note: "Sehr hohes Niveau (AA-Index 60) für komplexe Angebote & Strategien",
   },
@@ -131,6 +144,7 @@ export const APPROVED_OPENROUTER_MODELS: CuratedModelSpec[] = [
     tier: "premium_text",
     promptPerMillionUsd: 2.0,
     completionPerMillionUsd: 10.0,
+    supportsReasoning: true,
     note: "Präzises Flaggschiff im 2$/10$-Spektrum",
   },
 ];

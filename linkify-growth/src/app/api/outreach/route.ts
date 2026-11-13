@@ -18,6 +18,8 @@ import {
   upsertLead,
 } from "@/lib/workspace-data";
 
+export const maxDuration = 60;
+
 const VALID_CHANNELS = new Set<OutreachChannel>([
   "email",
   "brief",

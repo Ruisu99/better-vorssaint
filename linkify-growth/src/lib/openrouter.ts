@@ -99,7 +99,7 @@ export async function getOpenRouterKeyStatus(): Promise<OpenRouterKeyStatus> {
   try {
     const res = await fetch("https://openrouter.ai/api/v1/key", {
       method: "GET",
-      signal: AbortSignal.timeout(8_000),
+      signal: AbortSignal.timeout(6_000),
       headers: {
         authorization: `Bearer ${apiKey}`,
       },
@@ -175,7 +175,7 @@ export function applyPrivacyMask(
   pushPair(ctx.websiteUrl, "[WEBSITE_URL]");
   pushPair(ctx.companyName, "[UNTERNEHMEN]");
 
-  // Longest strings first so partial names never corrupt full names/addresses
+  // Longest strings first so partial strings never corrupt full values
   pairs.sort((a, b) => b[0].length - a[0].length);
 
   let maskedText = text;
@@ -183,7 +183,7 @@ export function applyPrivacyMask(
     maskedText = maskedText.split(original).join(token);
   }
 
-  // Scrub any residual email addresses or phone numbers in arbitrary notes/context
+  // Scrub any residual email addresses or phone numbers in notes/context
   maskedText = maskedText.replace(
     /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g,
     "[EMAIL_ENTFERNT]",
@@ -216,7 +216,7 @@ export async function listOpenRouterModels(): Promise<{
   try {
     const res = await fetch("https://openrouter.ai/api/v1/models", {
       method: "GET",
-      signal: AbortSignal.timeout(10_000),
+      signal: AbortSignal.timeout(8_000),
       headers: {
         authorization: `Bearer ${apiKey}`,
       },
@@ -268,6 +268,65 @@ export async function listOpenRouterModels(): Promise<{
   }
 }
 
+async function callOpenRouterCompletion(params: {
+  apiKey: string;
+  spec: CuratedModelSpec;
+  systemPrompt: string;
+  userPrompt: string;
+  temperature: number;
+  maxTokens: number;
+  reasoningEffort?: "low" | "medium";
+}) {
+  const payload: Record<string, unknown> = {
+    model: params.spec.id,
+    temperature: params.temperature,
+    max_tokens: params.maxTokens,
+    messages: [
+      { role: "system", content: params.systemPrompt },
+      { role: "user", content: params.userPrompt },
+    ],
+  };
+
+  // Critical: keep reasoning models fast (1.5-3s instead of 20-35s) and avoid burning max_tokens on hidden thoughts
+  if (params.spec.supportsReasoning) {
+    payload.reasoning = {
+      effort: params.reasoningEffort ?? "low",
+      exclude: true,
+    };
+  }
+
+  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    signal: AbortSignal.timeout(16_000),
+    headers: {
+      authorization: `Bearer ${params.apiKey}`,
+      "content-type": "application/json",
+      "http-referer": "https://linkify.tech",
+      "x-title": "Linkify Growth OS",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const errText = await response.text().catch(() => "");
+    throw new Error(
+      `OpenRouter (${params.spec.id}) Fehler ${response.status}: ${errText.slice(0, 180)}`,
+    );
+  }
+
+  const data = (await response.json()) as {
+    model?: string;
+    choices?: Array<{ message?: { content?: string | null } }>;
+    usage?: {
+      prompt_tokens?: number;
+      completion_tokens?: number;
+      cost?: number;
+    };
+  };
+
+  return data;
+}
+
 export async function runAiTask(params: {
   scopeKey: string;
   taskType: string;
@@ -276,6 +335,7 @@ export async function runAiTask(params: {
   userPrompt: string;
   temperature?: number;
   maxTokens?: number;
+  reasoningEffort?: "low" | "medium";
   privacyMode?: boolean;
   piiContext?: PiiMaskContext;
   summaryLabel: string;
@@ -291,7 +351,6 @@ export async function runAiTask(params: {
   usage: { promptTokens: number; completionTokens: number };
 }> {
   const apiKey = process.env.OPENROUTER_API_KEY?.trim() ?? "";
-  // Privacy scrubbing is always enforced on third-party AI calls
   const privacyMasked = true;
   const masker = applyPrivacyMask(params.userPrompt, params.piiContext ?? {});
 
@@ -382,46 +441,35 @@ export async function runAiTask(params: {
       ? Math.min(Math.max(params.temperature, 0), 1)
       : 0.4;
 
-  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    signal: AbortSignal.timeout(45_000),
-    headers: {
-      authorization: `Bearer ${apiKey}`,
-      "content-type": "application/json",
-      "http-referer": "https://linkify.tech",
-      "x-title": "Linkify Growth OS",
-    },
-    body: JSON.stringify({
-      model: chosenSpec.id,
-      temperature,
-      max_tokens: maxTokens,
-      messages: [
-        { role: "system", content: params.systemPrompt },
-        { role: "user", content: masker.maskedText },
-      ],
-    }),
+  let data = await callOpenRouterCompletion({
+    apiKey,
+    spec: chosenSpec,
+    systemPrompt: params.systemPrompt,
+    userPrompt: masker.maskedText,
+    temperature,
+    maxTokens,
+    reasoningEffort: params.reasoningEffort,
   });
 
-  if (!response.ok) {
-    const errText = await response.text().catch(() => "");
-    throw new Error(
-      `OpenRouter Anfrage fehlgeschlagen (${response.status}): ${errText.slice(0, 180)}`,
-    );
+  let rawContent = data.choices?.[0]?.message?.content?.trim() ?? "";
+
+  // If a model spent tokens reasoning and returned empty content, fall back once to ultra-fast Muse Ember
+  if (!rawContent && chosenSpec.id !== "meta/muse-ember") {
+    chosenSpec = resolveApprovedModel("meta/muse-ember");
+    data = await callOpenRouterCompletion({
+      apiKey,
+      spec: chosenSpec,
+      systemPrompt: params.systemPrompt,
+      userPrompt: masker.maskedText,
+      temperature,
+      maxTokens: Math.max(maxTokens, 1000),
+      reasoningEffort: "low",
+    });
+    rawContent = data.choices?.[0]?.message?.content?.trim() ?? "";
   }
 
-  const data = (await response.json()) as {
-    model?: string;
-    choices?: Array<{ message?: { content?: string } }>;
-    usage?: {
-      prompt_tokens?: number;
-      completion_tokens?: number;
-      cost?: number;
-    };
-  };
-
-  const rawContent = data.choices?.[0]?.message?.content?.trim() ?? "";
   if (!rawContent) {
-    throw new Error("OpenRouter hat keine Antwort geliefert.");
+    throw new Error(`OpenRouter (${chosenSpec.id}) hat keinen Text zurückgegeben.`);
   }
 
   const finalContent = masker.restore(rawContent);
