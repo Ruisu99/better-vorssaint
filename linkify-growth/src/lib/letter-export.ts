@@ -2,7 +2,6 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import fontkit from "@pdf-lib/fontkit";
 import {
-  AlignmentType,
   BorderStyle,
   Document,
   Footer,
@@ -180,20 +179,20 @@ function renderLetterPage(params: {
 
   const textDark = rgb(0.1, 0.1, 0.18);
   const textMuted = rgb(0.38, 0.42, 0.48);
-  const markColor = rgb(0.7, 0.72, 0.76);
+  const markColor = rgb(0.68, 0.7, 0.75);
 
-  // DIN 5008-B Fold & Punch Marks on left paper edge
-  for (const mmFromTop of [87, 148.5, 192]) {
+  // Exact DIN 5008 Form B Fold & Punch Marks on left paper edge (105mm, 148.5mm, 210mm)
+  for (const mmFromTop of [105, 148.5, 210]) {
     const yMark = A4_HEIGHT_PT - mm(mmFromTop);
     page.drawLine({
       start: { x: 0, y: yMark },
-      end: { x: mm(4.5), y: yMark },
+      end: { x: mm(5), y: yMark },
       thickness: 0.5,
       color: markColor,
     });
   }
 
-  // Top-left Linkify Logo (proportional height from 1011x301)
+  // Top-left Linkify Logo inside 45mm DIN 5008-B header zone
   const logoWidth = mm(38);
   const logoHeight = logoWidth * (logo.height / logo.width);
   page.drawImage(logo, {
@@ -203,40 +202,58 @@ function renderLetterPage(params: {
     height: logoHeight,
   });
 
-  // Left Address Window (starts ~45mm from top)
+  // DIN 5008-B Window Address Zone (left: 25mm, top: 45mm to 90mm, width: 85mm)
   const leftX = mm(25);
   const returnLine = `${sender.company} · ${sender.owner} · ${sender.street} · ${sender.zipCity}`;
+  const returnY = A4_HEIGHT_PT - mm(57.5);
+  let returnFontSize = 7.2;
+  while (
+    returnFontSize > 5.8 &&
+    regularFont.widthOfTextAtSize(returnLine, returnFontSize) > mm(84)
+  ) {
+    returnFontSize -= 0.2;
+  }
   page.drawText(returnLine, {
     x: leftX,
-    y: A4_HEIGHT_PT - mm(45),
-    size: 7.5,
+    y: returnY,
+    size: returnFontSize,
     font: regularFont,
     color: textMuted,
   });
+  page.drawLine({
+    start: { x: leftX, y: returnY - 2.5 },
+    end: { x: leftX + mm(85), y: returnY - 2.5 },
+    thickness: 0.4,
+    color: rgb(0.84, 0.86, 0.89),
+  });
 
   const recipientLines = buildRecipientLines(letter);
-  let recY = A4_HEIGHT_PT - mm(53);
+  let recY = A4_HEIGHT_PT - mm(63.5);
   for (const line of recipientLines) {
-    page.drawText(line, {
-      x: leftX,
-      y: recY,
-      size: 10,
-      font: regularFont,
-      color: textDark,
-    });
-    recY -= 14;
+    const wrappedRec = wrapTextLines(line, regularFont, 10, mm(84));
+    for (const wRec of wrappedRec) {
+      if (recY < A4_HEIGHT_PT - mm(88.5)) break;
+      page.drawText(wRec, {
+        x: leftX,
+        y: recY,
+        size: 10,
+        font: regularFont,
+        color: textDark,
+      });
+      recY -= 13.5;
+    }
   }
 
-  // Right Sender Info Block (x: 125mm)
+  // Right Sender Info Block (DIN 5008 Form B: x=125mm, starts at 50mm from top)
   const rightX = mm(125);
-  let infoY = A4_HEIGHT_PT - mm(45);
+  let infoY = A4_HEIGHT_PT - mm(50);
   const rightRows: Array<{ text: string; gapAfter: number }> = [
-    { text: `${sender.owner} - ${sender.company}`, gapAfter: 20 },
-    { text: sender.street, gapAfter: 13 },
-    { text: sender.zipCity, gapAfter: 20 },
-    { text: sender.phone, gapAfter: 13 },
-    { text: sender.email, gapAfter: 13 },
-    { text: sender.website, gapAfter: 22 },
+    { text: `${sender.owner} - ${sender.company}`, gapAfter: 17 },
+    { text: sender.street, gapAfter: 12.5 },
+    { text: sender.zipCity, gapAfter: 17 },
+    { text: sender.phone, gapAfter: 12.5 },
+    { text: sender.email, gapAfter: 12.5 },
+    { text: sender.website, gapAfter: 18 },
     { text: `${sender.city}, ${dateLabel}`, gapAfter: 0 },
   ];
   for (const row of rightRows) {
@@ -250,9 +267,9 @@ function renderLetterPage(params: {
     infoY -= row.gapAfter;
   }
 
-  // Subject & Body (~102mm from top)
+  // Subject & Body (DIN 5008 Form B starts at ~104mm from top)
   const maxBodyWidth = mm(165);
-  let cursorY = A4_HEIGHT_PT - mm(102);
+  let cursorY = A4_HEIGHT_PT - mm(104);
 
   const subjectLines = wrapTextLines(
     letter.subject.trim() || `Neuer Internetauftritt für ${letter.companyName}`,
@@ -291,7 +308,7 @@ function renderLetterPage(params: {
     for (const sub of subLines) {
       const wrapped = wrapTextLines(sub.trim(), regularFont, fontSize, maxBodyWidth);
       for (const wLine of wrapped) {
-        if (cursorY < mm(32)) break;
+        if (cursorY < mm(30)) break;
         page.drawText(wLine, {
           x: leftX,
           y: cursorY,
@@ -311,17 +328,7 @@ function renderLetterPage(params: {
     }
   }
 
-  // Footer ("Seite 1 von 1" + 2-column business footer)
-  const pageLabel = "Seite 1 von 1";
-  const pageLabelW = regularFont.widthOfTextAtSize(pageLabel, 8);
-  page.drawText(pageLabel, {
-    x: A4_WIDTH_PT - mm(20) - pageLabelW,
-    y: mm(27),
-    size: 8,
-    font: regularFont,
-    color: textMuted,
-  });
-
+  // Clean 2-column business footer (without page counter)
   const footerCol1 = [sender.company, sender.street, sender.zipCity];
   const footerCol2 = [
     `Inhaber: ${sender.owner}`,
@@ -445,12 +452,12 @@ export async function buildLetterDocxBuffer(
               height: 16838, // 297mm A4
             },
             margin: {
-              top: 794, // ~14mm
+              top: 2551, // 45mm DIN 5008-B address window start
               left: 1417, // 25mm DIN 5008-B
               right: 1134, // 20mm
-              bottom: 1100,
-              header: 450,
-              footer: 450,
+              bottom: 1134, // 20mm
+              header: 794, // 14mm logo start
+              footer: 567,
             },
           },
         },
@@ -476,18 +483,6 @@ export async function buildLetterDocxBuffer(
         footers: {
           default: new Footer({
             children: [
-              new Paragraph({
-                alignment: AlignmentType.RIGHT,
-                spacing: { after: 100 },
-                children: [
-                  new TextRun({
-                    text: "Seite 1 von 1",
-                    size: 16,
-                    color: "555555",
-                    font: "Figtree",
-                  }),
-                ],
-              }),
               new Table({
                 width: { size: 100, type: WidthType.PERCENTAGE },
                 borders: noBorders,
@@ -562,7 +557,6 @@ export async function buildLetterDocxBuffer(
           }),
         },
         children: [
-          new Paragraph({ spacing: { after: 360 } }),
           new Table({
             width: { size: 100, type: WidthType.PERCENTAGE },
             borders: noBorders,
@@ -574,11 +568,11 @@ export async function buildLetterDocxBuffer(
                     borders: cellNoBorder,
                     children: [
                       new Paragraph({
-                        spacing: { after: 180 },
+                        spacing: { before: 520, after: 140 },
                         children: [
                           new TextRun({
                             text: `${sender.company} · ${sender.owner} · ${sender.street} · ${sender.zipCity}`,
-                            size: 15,
+                            size: 14,
                             color: "555555",
                             font: "Figtree",
                           }),

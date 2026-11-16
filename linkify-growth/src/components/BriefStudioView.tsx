@@ -6,6 +6,7 @@ import {
   CheckCircle2,
   CheckSquare,
   Download,
+  ExternalLink,
   FileArchive,
   FileText,
   Printer,
@@ -16,6 +17,7 @@ import {
   apiFetchJson,
   formatBerlinDate,
   PRIORITY_LABELS,
+  safeHref,
 } from "@/lib/client-utils";
 import type { WorkspaceSnapshot } from "@/lib/initial-state";
 import { buildFallbackOutreach } from "@/lib/prompts";
@@ -100,6 +102,7 @@ export function BriefStudioView({
   );
   const [savingEdit, setSavingEdit] = useState(false);
   const [downloading, setDownloading] = useState<string | null>(null);
+  const [showWindowGuide, setShowWindowGuide] = useState(true);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -463,35 +466,56 @@ export function BriefStudioView({
                       )}
                     </button>
 
-                    <button
-                      type="button"
-                      onClick={() => selectLead(l)}
-                      className="text-left min-w-0 flex-1 cursor-pointer"
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-[13px] font-semibold text-[#1A1A2E] truncate">
-                          {l.company_name}
-                        </span>
-                        <span
-                          className={`text-[10px] font-medium px-2 py-0.5 rounded-full shrink-0 ${
-                            l.priority === "heiss"
-                              ? "bg-[#0000F5] text-white"
-                              : "bg-[#F3F4F6] text-[#6B7280]"
-                          }`}
-                        >
-                          {PRIORITY_LABELS[l.priority]}
-                        </span>
-                      </div>
-                      <p className="text-[11px] text-[#6B7280] truncate mt-0.5">
-                        {l.decision_maker || "Ohne Entscheider"} ·{" "}
-                        {l.postal_address || l.city || "Adresse prüfen"}
-                      </p>
-                      {l.letter_printed_at && (
-                        <p className="text-[10px] text-emerald-700 mt-0.5">
-                          Gedruckt am {formatBerlinDate(l.letter_printed_at)}
+                    <div className="min-w-0 flex-1">
+                      <button
+                        type="button"
+                        onClick={() => selectLead(l)}
+                        className="text-left w-full cursor-pointer"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-[13px] font-semibold text-[#1A1A2E] truncate">
+                            {l.company_name}
+                          </span>
+                          <span
+                            className={`text-[10px] font-medium px-2 py-0.5 rounded-full shrink-0 ${
+                              l.priority === "heiss"
+                                ? "bg-[#0000F5] text-white"
+                                : "bg-[#F3F4F6] text-[#6B7280]"
+                            }`}
+                          >
+                            {PRIORITY_LABELS[l.priority]}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-[#6B7280] truncate mt-0.5">
+                          {l.decision_maker || "Ohne Entscheider"} ·{" "}
+                          {l.postal_address || l.city || "Adresse prüfen"}
                         </p>
-                      )}
-                    </button>
+                      </button>
+                      <div className="mt-1 flex items-center justify-between gap-2 text-[11px]">
+                        {(() => {
+                          const site = safeHref(l.website_url);
+                          if (!site) return <span className="text-[#6B7280]">Keine URL</span>;
+                          return (
+                            <a
+                              href={site}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 text-[#0000F5] hover:underline truncate"
+                            >
+                              <span className="truncate">
+                                {site.replace(/^https?:\/\/(www\.)?/i, "").replace(/\/$/, "")}
+                              </span>
+                              <ExternalLink className="w-3 h-3 shrink-0" />
+                            </a>
+                          );
+                        })()}
+                        {l.letter_printed_at && (
+                          <span className="text-[10px] text-emerald-700 shrink-0">
+                            Gedruckt {formatBerlinDate(l.letter_printed_at)}
+                          </span>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 );
               })}
@@ -508,19 +532,49 @@ export function BriefStudioView({
             <div className="lg:col-span-8 space-y-5">
               {/* Toolbar for active lead */}
               <div className="no-print rounded-2xl bg-white border border-[#E5E7EB] p-4 flex flex-wrap items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <Link
-                    href={`/pipeline/${activeLead.id}`}
-                    className="text-[15px] font-semibold text-[#1A1A2E] hover:text-[#0000F5]"
-                  >
-                    {activeLead.company_name}
-                  </Link>
+                <div className="min-w-0 space-y-0.5">
+                  <div className="flex items-center gap-2.5 flex-wrap">
+                    <Link
+                      href={`/pipeline/${activeLead.id}`}
+                      className="text-[15px] font-semibold text-[#1A1A2E] hover:text-[#0000F5]"
+                    >
+                      {activeLead.company_name}
+                    </Link>
+                    {(() => {
+                      const activeSite = safeHref(activeLead.website_url);
+                      if (!activeSite) return null;
+                      return (
+                        <a
+                          href={activeSite}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-[#F0F3FF] text-[#0000F5] text-[12px] font-medium hover:underline"
+                        >
+                          <span>Website prüfen</span>
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                      );
+                    })()}
+                  </div>
                   <p className="text-[12px] text-[#6B7280]">
-                    Direkt bearbeiten, speichern oder als Einzeldatei herunterladen.
+                    Direkt bearbeiten, speichern oder als DIN-5008-Datei
+                    herunterladen.
                   </p>
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowWindowGuide((v) => !v)}
+                    className={`px-3 py-2 rounded-full border text-[12px] font-medium cursor-pointer ${
+                      showWindowGuide
+                        ? "border-[#0000F5]/40 bg-[#F0F3FF] text-[#0000F5]"
+                        : "border-[#E5E7EB] text-[#6B7280]"
+                    }`}
+                  >
+                    DIN-Fenster
+                  </button>
+
                   <button
                     type="button"
                     onClick={handleSaveEdits}
@@ -615,27 +669,40 @@ export function BriefStudioView({
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-12 gap-6 pt-2">
-                  <div className="sm:col-span-7 space-y-3">
-                    <p className="text-[10px] text-[#6B7280]">
-                      {snapshot.brand.brand_name} · {snapshot.brand.owner_name} ·{" "}
-                      {senderStreet} · {senderZipCity}
-                    </p>
-                    <div className="text-[13px] leading-snug">
-                      <p>{activeLead.company_name}</p>
-                      {editDecisionMaker.trim() && (
-                        <p>
-                          {/^z\.\s*hd\./i.test(editDecisionMaker)
-                            ? editDecisionMaker
-                            : `z. Hd. ${editDecisionMaker}`}
-                        </p>
+                  <div className="sm:col-span-7">
+                    <div
+                      className={
+                        showWindowGuide
+                          ? "rounded-lg border border-dashed border-[#0000F5]/40 bg-[#F0F3FF]/30 px-3 py-3 space-y-2"
+                          : "space-y-2 pt-3"
+                      }
+                    >
+                      {showWindowGuide && (
+                        <span className="no-print block text-[9px] uppercase tracking-wider text-[#0000F5] font-medium">
+                          DIN 5008-B Briefumschlag-Fenster (45 × 90 mm)
+                        </span>
                       )}
-                      {recipientAddressLines.length > 0 ? (
-                        recipientAddressLines.map((line, i) => (
-                          <p key={i}>{line}</p>
-                        ))
-                      ) : (
-                        <p>{activeLead.city}</p>
-                      )}
+                      <p className="text-[9.5px] text-[#6B7280] border-b border-[#E5E7EB] pb-1 whitespace-nowrap overflow-hidden text-ellipsis">
+                        {snapshot.brand.brand_name} · {snapshot.brand.owner_name}{" "}
+                        · {senderStreet} · {senderZipCity}
+                      </p>
+                      <div className="text-[13px] leading-snug pt-0.5">
+                        <p>{activeLead.company_name}</p>
+                        {editDecisionMaker.trim() && (
+                          <p>
+                            {/^z\.\s*hd\./i.test(editDecisionMaker)
+                              ? editDecisionMaker
+                              : `z. Hd. ${editDecisionMaker}`}
+                          </p>
+                        )}
+                        {recipientAddressLines.length > 0 ? (
+                          recipientAddressLines.map((line, i) => (
+                            <p key={i}>{line}</p>
+                          ))
+                        ) : (
+                          <p>{activeLead.city}</p>
+                        )}
+                      </div>
                     </div>
                   </div>
 
@@ -663,10 +730,7 @@ export function BriefStudioView({
                   <div className="whitespace-pre-wrap">{editBody}</div>
                 </div>
 
-                <div className="pt-6 space-y-2 border-t border-[#E5E7EB]">
-                  <p className="text-right text-[10px] text-[#6B7280]">
-                    Seite 1 von 1
-                  </p>
+                <div className="pt-6 border-t border-[#E5E7EB]">
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 text-[10px] text-[#6B7280]">
                     <div>
                       <p>{snapshot.brand.brand_name}</p>
@@ -682,6 +746,62 @@ export function BriefStudioView({
                     </div>
                   </div>
                 </div>
+              </div>
+
+              {/* Briefing, Verified Findings & Source Links */}
+              <div className="no-print rounded-2xl bg-white border border-[#E5E7EB] p-6 space-y-4">
+                <div className="flex items-center justify-between gap-3 flex-wrap">
+                  <h3 className="text-[15px] font-semibold text-[#1A1A2E]">
+                    KI-Briefing, Befunde & Quellen für {activeLead.company_name}
+                  </h3>
+                  <Link
+                    href={`/pipeline/${activeLead.id}`}
+                    className="text-[12px] font-medium text-[#0000F5] hover:underline"
+                  >
+                    Vollständiges Dossier öffnen
+                  </Link>
+                </div>
+
+                {activeLead.research_summary && (
+                  <p className="text-[13px] text-[#1A1A2E] bg-[#F8F9FC] rounded-xl p-3.5 leading-relaxed">
+                    {activeLead.research_summary}
+                  </p>
+                )}
+
+                {activeLead.findings.length > 0 && (
+                  <div className="space-y-2">
+                    {activeLead.findings.map((f, idx) => {
+                      const src = safeHref(f.sourceUrl);
+                      return (
+                        <div
+                          key={idx}
+                          className="rounded-xl border border-[#E5E7EB] p-3 text-[12px] space-y-1"
+                        >
+                          <p className="font-semibold text-[#1A1A2E]">
+                            {f.title}
+                          </p>
+                          <p className="text-[#6B7280]">{f.evidence}</p>
+                          {f.quote && (
+                            <p className="text-[#1A1A2E] bg-[#F8F9FC] rounded px-2 py-1">
+                              Zitat: „{f.quote}“
+                            </p>
+                          )}
+                          {src && (
+                            <a
+                              href={src}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 text-[#0000F5] hover:underline"
+                            >
+                              <span>Quelle: {src}</span>
+                              <ExternalLink className="w-3 h-3" />
+                            </a>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             </div>
           )}

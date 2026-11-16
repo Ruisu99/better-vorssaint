@@ -129,11 +129,11 @@ export const DEFAULT_PRICING_BENCHMARKS: PricingBenchmark[] = [
 ];
 
 export const DEFAULT_OPENROUTER_CONFIG: OpenRouterConfig = {
-  researchModel: "meta/muse-ember",
+  researchModel: "google/gemini-4-hydrogen",
   writingModel: "google/gemini-4-hydrogen",
   contentModel: "google/gemini-4-hydrogen",
   privacyMode: true,
-  temperature: 0.4,
+  temperature: 0.35,
 };
 
 export const DEFAULT_WEEKLY_TARGETS: WeeklyTargets = {

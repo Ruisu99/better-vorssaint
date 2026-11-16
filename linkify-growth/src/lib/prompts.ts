@@ -42,7 +42,8 @@ ${excluded}`;
 
 /**
  * Builds the strict 5-condition Notion Lead-Radar prompt that qualifies/rejects
- * AND produces Kurzprofil, Befunde+Zitate, Kaufsignale, E-Mail-Pitch & DIN-5008 Brieffassung in ONE call.
+ * AND extracts Geschäftsführer/Inhaber + Postanschrift + Kurzprofil, Befunde+Zitate,
+ * Kaufsignale, E-Mail-Pitch & DIN-5008 Brieffassung in ONE high-quality pass.
  */
 export function buildStrictNotionQualificationPrompt(params: {
   brand: BrandProfile;
@@ -55,68 +56,81 @@ export function buildStrictNotionQualificationPrompt(params: {
       ? pages
           .map(
             (p) =>
-              `--- SEITE [${p.kind.toUpperCase()}] URL: ${p.url}\nTitel: ${p.title}\nSichtbarer Text:\n${p.excerpt.slice(0, 1600)}`,
+              `--- SEITE [${p.kind.toUpperCase()}] URL: ${p.url}\nTitel: ${p.title}\nSichtbarer Text:\n${p.excerpt.slice(0, 2100)}`,
           )
           .join("\n\n")
       : `--- STARTSEITE URL: ${lead.website_url}\n${lead.scan_data?.visibleSummary ?? lead.research_summary}`;
 
   const techSignals = lead.scan_data
-    ? `HTTPS: ${lead.scan_data.httpsEnabled ? "Ja" : "Nein"} | Viewport-Tag: ${lead.scan_data.hasViewportMeta ? "Ja" : "Nein"} | System: ${lead.scan_data.detectedCms} | Antwortzeit: ${lead.scan_data.responseTimeMs} ms | Kontaktformular/CTA: ${lead.scan_data.hasContactFormOrCta ? "Ja" : "Nein"} | Karriere-Signal: ${lead.scan_data.hasHiringSignal ? "Ja" : "Nein"}`
+    ? `HTTPS: ${lead.scan_data.httpsEnabled ? "Ja" : "Nein"} | Mobile-Viewport-Tag im HTML: ${lead.scan_data.hasViewportMeta ? "Ja" : "Nein"} | System: ${lead.scan_data.detectedCms} | Antwortzeit: ${lead.scan_data.responseTimeMs} ms | Kontaktformular/CTA: ${lead.scan_data.hasContactFormOrCta ? "Ja" : "Nein"} | Karriere-Signal: ${lead.scan_data.hasHiringSignal ? "Ja" : "Nein"}`
     : "Keine technischen Scan-Daten";
 
-  return `Prüfe diesen Kandidaten streng nach der Linkify-Qualifikationshürde (Qualität geht vor Menge!):
+  return `Prüfe diesen Kandidaten streng wie ein erfahrener Webdesigner & Strategie-Analyst nach der Linkify-Qualifikationshürde (Qualität geht vor Menge!):
 
 KANDIDAT:
 Unternehmen: ${lead.company_name}
 Branche: ${lead.industry || "unbekannt"}
 Ort: ${lead.city || "unbekannt"}
-Postanschrift: ${lead.postal_address || "keine erkannt"}
-Entscheider: ${lead.decision_maker || "unbekannt"}
-Geschäftliche E-Mail: ${lead.contact_email || "keine erkannt"}
+Bisher erkannte Postanschrift: ${lead.postal_address || "keine erkannt"}
+Bisher erkannter Entscheider: ${lead.decision_maker || "unbekannt"}
+Bisher erkannte E-Mail: ${lead.contact_email || "keine erkannt"}
 Website: ${lead.website_url}
 Technische Basis: ${techSignals}
 
-ABGERUFENE SEITENINHALTE:
+ABGERUFENE SEITENINHALTE (Startseite, Impressum, Unternehmen, Leistungen, Karriere):
 ${pageDump}
 
-QUALIFIKATIONSHÜRDE (ALLE 5 BEDINGUNGEN PRÜFEN):
-1. Ist die Website im Gesamteindruck klar und substanziell relaunch-bedürftig? (Wenn sie bereits aktuell, professionell, klar strukturiert und mobil schlüssig wirkt -> qualified: false!)
-2. Liegen mindestens 2 voneinander unabhängige, geschäftlich relevante harte Website-Signale vor?
-   HARTE SIGNALE: seit >=2 Jahren stehengebliebene geschäftliche Hinweise (z. B. Corona 2020-2022, alte News/Termine), sichtbare Platzhalter/Testtexte/kaputte Bilder, veraltete/widersprüchliche Kontaktdaten/Leistungen, defekter Anfrage-/Bewerbungsweg, klar fehlende mobile Nutzbarkeit/Viewport oder veraltete Struktur.
-   NICHT ZULÄSSIG als hartes Signal: einzelne Tippfehler, ".php"-URLs, altes Copyright-Jahr im Footer allein, allgemeines Kontaktformular, fehlende Online-Buchung allein, isolierte Zähler/DOM-Artefakte wie "0", "0%", "0123456789".
-3. Liegt mindestens 1 starkes (mehrere Standorte, Expansion, aktive Werbung auf schwache Seite, hochpreisige Leistungen + etablierter Betrieb) ODER 2 moderate Kaufsignale (aktuelle Stellenangebote, starke lokale Position, erklärungsbedürftige Leistungen) öffentlich belegt vor?
-4. Hat ein vollständiger Relaunch einen klaren wirtschaftlichen Nutzen im mittleren vierstelligen Bereich (kein Konzern/Filialkette ab ~100 MA, kein Kleinstbetrieb ohne Budget)?
-5. Liegt für jeden Befund ein exaktes wörtliches Zitat aus dem obigen Text und die konkrete Quell-URL vor?
+SCHRITT 1: ENTSCHEIDER & ANSCHRIFT AUS IMPRESSUM EXTRAHIEREN
+- Lies den Impressum-/Unternehmens-Text sehr genau!
+- Extrahiere den vollständigen Namen des Geschäftsführers, Inhabers, Praxisinhabers oder Kanzleiinhabers (z. B. "Thomas Mihm", "Cornelia Funk", "Dr. med. Bernd Mansel"). Falls es mehrere sind, nenne sie mit Komma getrennt. Falls wirklich niemand genannt ist, lass "decisionMaker" leer.
+- Bestimme "salutationGender": "herr" (ein männlicher Empfänger), "frau" (eine weibliche Empfängerin), "mehrere" (mehrere Personen -> Anrede "Sehr geehrte Damen und Herren,"), oder "unbekannt".
+- Extrahiere aus dem Impressum die saubere Postanschrift im Format "Straße Hausnummer, PLZ Ort" (OHNE Firmennamen!).
+
+SCHRITT 2: QUALIFIKATIONSHÜRDE (ALLE 5 BEDINGUNGEN PRÜFEN!)
+1. Ist die Website im Gesamteindruck klar und substanziell relaunch-bedürftig?
+   - AUSSCHLUSS: Konzerne, Filialketten, große Online-Shops/Großhandel (z. B. BTI, Würth), Betriebe ab ~100 Beschäftigten, Kleinstbetriebe ohne Budget, oder bereits moderne, aktuelle, professionell strukturierte Websites -> qualified: false!
+   - Frage dich ehrlich: "Würde ich dem Geschäftsführer aus geschäftlicher Sicht ernsthaft empfehlen, diese Website vollständig zu ersetzen?" Wenn nicht eindeutig Ja -> qualified: false!
+2. Mindestens 2 voneinander unabhängige, geschäftlich relevante HARTE Website-Signale im sichtbaren Text:
+   - ZULÄSSIG: seit >=2 Jahren stehengebliebene geschäftliche Inhalte (z. B. alte News/Termine/Corona/Geschäftsjahr 2014–2023), sichtbare Platzhalter/Testtexte/Fehlerhinweise ("{{...}}", "Dieser Browser wird nicht unterstützt", "Lorem ipsum", defekte Seiten), widersprüchliche Kontaktdaten/Leistungen, defekter Anfrage-/Bewerbungsweg, oder fehlende Leistungen/überholte Struktur.
+   - VERBOTEN als Hauptbefund in Brief/Mail: Reine Technik-/DOM-Meldungen wie "Kein Mobile-Viewport-Meta-Tag gefunden", ".php-URL", "Meta-Description fehlt", "altes Copyright-Jahr im Footer allein", "allgemeines Kontaktformular", isolierte Zähler ("0", "0%", "0123456789"). Schreibe solche technischen Begriffe NIEMALS in den Brief oder die E-Mail!
+3. Mindestens 1 starkes (mehrere Standorte, Expansion, aktive Kampagnen, hochpreisige Leistungen + etablierter Betrieb) ODER 2 moderate Kaufsignale (aktuelle Stellenangebote, starke lokale Position, erklärungsbedürftige Leistungen, Website wichtig für Anfragen/Bewerbungen) öffentlich belegt.
+4. Wirtschaftlicher Nutzen eines vollständigen Relaunchs im mittleren vierstelligen Bereich plausibel.
+5. Für jeden Befund ein exaktes wörtliches Zitat aus dem obigen Text und die konkrete Quell-URL.
 
 SCORE-REGEL:
 - "heiss": >=2 starke harte Signale + >=1 starkes oder 2 moderate Kaufsignale + klarer Nutzen + namentlicher Entscheider UND vollständige Postanschrift vorhanden -> contactChannel: "brief"
 - "warm": >=2 harte Signale + wirtschaftliche Passung, aber Entscheider, Adresse oder Kaufsignal schwächer -> contactChannel: "email" (wenn E-Mail vorhanden, sonst "brief")
-- "kalt": qualified: false setzen!
+- "kalt": qualified: false!
 
-FORMELLE TEXT-REGELN FÜR E-MAIL UND BRIEF (STRIKT!):
-- Anrede: Bei bekanntem Nachnamen "Sehr geehrte Frau [Nachname]," oder "Sehr geehrter Herr [Nachname],", sonst "Sehr geehrte Damen und Herren,". Nach dem Komma geht der erste Satz klein weiter (außer Nomen/Name). Kein "Guten Tag"!
+SCHRITT 3: FORMELLE E-MAIL & BRIEFFASSUNG (NUR WENN qualified=true)
+- Anrede: "Sehr geehrter Herr [Nachname]," oder "Sehr geehrte Frau [Nachname]," (bei Dr. inkl. "Dr. [Nachname]"), sonst "Sehr geehrte Damen und Herren,". Nach dem Komma geht der erste Satz klein weiter ("ich bin ..."). Kein "Guten Tag"!
 - Betreff: Konkret und sachlich, z. B. "Neuer Internetauftritt für [Unternehmen]" oder "Neue Website für [Praxisname]". Nicht "Ihre Website" oder "Kurze Frage".
-- Ton: KEIN Lob ("starke Kombination", "tolles Unternehmen"), KEIN Nacherzählen der Firmengeschichte/Gründungsjahr, KEINE Belehrung, KEINE Gedankenstriche ("—" oder " – ") zur Satztrennung, KEINE Erwähnung von Anlagen oder Screenshots!
-- E-Mail-Pitch (max. 140 Wörter ohne Anrede/Signatur, genau 3 Absätze):
-  Absatz 1 beginnt exakt mit: "ich bin selbstständiger Webdesigner aus Erfurt und habe mir Ihre Website angesehen." Danach stärkster harter Befund mit wörtlichem Zitat + 1 Satz, was er für Kunden/Patienten/Bewerber bedeutet (+ optional 2. Befund in 1 Satz).
-  Absatz 2: Linkify als kompletter Neuaufbau von Gestaltung bis Technik mit Luis als direktem Ansprechpartner + www.Linkify.tech im Fließtext + 1 Satz Nutzen für dieses Unternehmen.
-  Absatz 3: Angebot kostenloses 5-Minuten-Video + "Eine kurze Antwort auf diese Mail genügt."
-- Brieffassung (max. 150 Wörter ohne Anrede/Grußformel, genau 3 Absätze):
+- Ton: Höflich, formell, direkt, erfahren. KEIN Lob ("tolle Stärke", "beeindruckend"), KEIN Nacherzählen der Firmengeschichte/Gründungsjahr, KEINE Belehrung, KEINE Gedankenstriche ("—" oder " – ") zur Satztrennung, KEINE Erwähnung von Anlagen, Screenshots oder technischen Tags ("Viewport", "HTML", "Meta-Tag")!
+- E-Mail-Pitch (max. 140 Wörter ohne Anrede/Signatur, genau 3 kurze Absätze):
+  1. "ich bin selbstständiger Webdesigner aus Erfurt und habe mir Ihre Website angesehen." + stärkster harter Befund mit wörtlichem Zitat + 1 Satz geschäftliche Bedeutung für Kunden/Patienten/Bewerber (+ optional 2. Befund in 1 Satz).
+  2. "Mit Linkify baue ich Websites komplett neu, von der Gestaltung bis zur Technik, und bin dabei selbst Ihr Ansprechpartner unter www.Linkify.tech." + 1 konkreter Satz, was die neue Seite für genau dieses Unternehmen leisten würde.
+  3. Angebot kostenloses Video von etwa fünf Minuten + "Eine kurze Antwort auf diese Mail genügt."
+- Brieffassung (max. 150 Wörter ohne Anrede/Grußformel, genau 3 kurze Absätze):
   Gleicher direkter Aufbau und Ton wie die E-Mail; Absatz 1 beginnt mit "ich bin selbstständiger Webdesigner aus Erfurt und habe mir Ihre Website angesehen.", im 3. Absatz info@linkify.tech und +49 155 63477504 als Antwortweg nennen.
 
 Gib deine Antwort exakt als valides JSON ohne Markdown-Codeblock zurück:
 {
   "qualified": true | false,
   "rejectionReason": "Nur ausfüllen wenn qualified=false",
+  "decisionMaker": "Vollständiger Name des Geschäftsführers/Inhabers oder leer",
+  "salutationGender": "herr" | "frau" | "mehrere" | "unbekannt",
+  "postalAddress": "Straße Hausnummer, PLZ Ort (ohne Firmenname) oder leer",
+  "contactEmail": "Öffentliche geschäftliche E-Mail oder leer",
+  "contactPhone": "Öffentliche geschäftliche Telefonnummer oder leer",
   "score": "heiss" | "warm",
   "contactChannel": "brief" | "email",
-  "kurzprofil": "3-4 präzise Sätze zu Unternehmen, Standort, Angebot und konkretem Kaufsignal.",
+  "kurzprofil": "3-4 präzise Sätze zu Unternehmen, Standort, Angebot, Team/Größe und konkretem Kaufsignal.",
   "relaunchBenefit": "Ein Satz aus Sicht des Unternehmens zum geschäftlichen Nutzen eines Relaunchs.",
   "scoreReason": "Ein Satz Begründung für Heiß oder Warm.",
   "hardSignals": [
     {
       "title": "Kurztitel des Befunds",
-      "evidence": "Sachliche Beobachtung",
+      "evidence": "Sachliche Beobachtung für normale Besuchende",
       "quote": "Exaktes wörtliches Zitat aus dem Text oben",
       "sourceUrl": "Exakte URL aus den abgerufenen Seiten",
       "verification": "Warum es sichtbarer Endzustand und kein Artefakt ist",
@@ -136,20 +150,27 @@ Gib deine Antwort exakt als valides JSON ohne Markdown-Codeblock zurück:
   ],
   "followUpNote": "Sinnvollste Ansprechperson, natürlicher Einstiegssatz nach 8-10 Tagen und stärkstes geschäftliches Argument in einem Satz.",
   "emailSubject": "Neuer Internetauftritt für ...",
-  "emailBody": "Sehr geehrte(r) ...,\n\nich bin selbstständiger Webdesigner aus Erfurt...\n\n...\n\n...",
+  "emailBody": "Sehr geehrte(r) ...,\n\nich bin selbstständiger Webdesigner aus Erfurt...",
   "letterSubject": "Neuer Internetauftritt für ...",
-  "letterBody": "Sehr geehrte(r) ...,\n\nich bin selbstständiger Webdesigner aus Erfurt...\n\n...\n\n..."
+  "letterBody": "Sehr geehrte(r) ...,\n\nich bin selbstständiger Webdesigner aus Erfurt..."
 }`;
 }
 
-export function buildFormalSalutation(decisionMaker: string): string {
+export function buildFormalSalutation(
+  decisionMaker: string,
+  genderHint?: string,
+): string {
   const dm = decisionMaker.trim();
-  if (!dm || dm === "[ANSPRECHPARTNER]") {
+  if (!dm || dm === "[ANSPRECHPARTNER]" || genderHint === "mehrere") {
     return "Sehr geehrte Damen und Herren,";
   }
 
-  // Handle multiple persons separated by ; or , or "und" -> fall back to single if unclear
-  const firstPerson = dm.split(/[;]/)[0].trim();
+  // Handle multiple persons separated by ; or " und "
+  if (/[;]|\s+und\s+/i.test(dm)) {
+    return "Sehr geehrte Damen und Herren,";
+  }
+
+  const firstPerson = dm.split(",")[0].trim();
   const parts = firstPerson.split(/\s+/).filter(Boolean);
   const lastName = parts[parts.length - 1]?.replace(/,$/, "") ?? "";
   if (!lastName || lastName.length < 2) {
@@ -157,12 +178,24 @@ export function buildFormalSalutation(decisionMaker: string): string {
   }
 
   const lower = firstPerson.toLowerCase();
-  if (/^frau\b/.test(lower) || /\b(anna|anne|bianca|cornelia|katrin|michaela|peggy|silke|barby|sandra|sabine|julia|laura|katharina|petra|susanne|claudia|andrea|martina|stefanie|christina|monika)\b/i.test(lower)) {
-    const titlePrefix = /\bdr\./i.test(firstPerson) ? "Dr. " : "";
+  const titlePrefix = /\bdr\./i.test(firstPerson) ? "Dr. " : "";
+
+  if (
+    genderHint === "frau" ||
+    /^frau\b/.test(lower) ||
+    /\b(anna|anne|bianca|cornelia|katrin|michaela|peggy|silke|barby|sandra|sabine|julia|laura|katharina|petra|susanne|claudia|andrea|martina|stefanie|christina|monika|heike|anja|birgit|ute|kerstin|nicole|jana|daniela|manuela)\b/i.test(
+      lower,
+    )
+  ) {
     return `Sehr geehrte Frau ${titlePrefix}${lastName},`;
   }
-  if (/^herr\b/.test(lower) || /\b(thomas|stefan|ulrich|stephan|rolf-martin|carsten|andreas|sven|tobias|frank|ingo|wolfram|heiko|alexander|jürgen|danny|bernd|ferenc|kuno|jan|hans-joachim|martin|michael|markus|christian|matthias|sebastian|daniel|peter|klaus|jörg|uwe|dirk|ralf|holger|torsten|jens)\b/i.test(lower)) {
-    const titlePrefix = /\bdr\./i.test(firstPerson) ? "Dr. " : "";
+  if (
+    genderHint === "herr" ||
+    /^herr\b/.test(lower) ||
+    /\b(thomas|stefan|ulrich|stephan|rolf-martin|carsten|andreas|sven|tobias|frank|ingo|wolfram|heiko|alexander|jürgen|danny|bernd|ferenc|kuno|jan|hans-joachim|martin|michael|markus|christian|matthias|sebastian|daniel|peter|klaus|jörg|uwe|dirk|ralf|holger|torsten|jens|roland|wolfgang|rainer|dieter|bernhard|lars|marco|rené|rene|maik|steffen|ronny|rico)\b/i.test(
+      lower,
+    )
+  ) {
     return `Sehr geehrter Herr ${titlePrefix}${lastName},`;
   }
 
@@ -216,6 +249,11 @@ export function ensureLetterClosing(
 export interface ParsedNotionQualification {
   qualified: boolean;
   rejectionReason: string;
+  decisionMaker: string;
+  salutationGender: "herr" | "frau" | "mehrere" | "unbekannt";
+  postalAddress: string;
+  contactEmail: string;
+  contactPhone: string;
   score: LeadPriority;
   contactChannel: "brief" | "email";
   kurzprofil: string;
@@ -255,6 +293,37 @@ export function parseAndValidateNotionOutput(params: {
 
   const qualified = Boolean(data.qualified);
   const rejectionReason = String(data.rejectionReason ?? "").trim();
+
+  const aiDecisionMaker = String(data.decisionMaker ?? "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 120);
+  const finalDecisionMaker = aiDecisionMaker || lead.decision_maker;
+
+  const rawGender = String(data.salutationGender ?? "unbekannt").toLowerCase();
+  const salutationGender: ParsedNotionQualification["salutationGender"] =
+    rawGender === "herr" ||
+    rawGender === "frau" ||
+    rawGender === "mehrere"
+      ? rawGender
+      : "unbekannt";
+
+  const aiAddress = String(data.postalAddress ?? "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 200);
+  const finalPostalAddress = aiAddress || lead.postal_address;
+
+  const aiEmail = String(data.contactEmail ?? "")
+    .trim()
+    .slice(0, 140);
+  const finalEmail =
+    /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(aiEmail) ? aiEmail : lead.contact_email;
+
+  const aiPhone = String(data.contactPhone ?? "")
+    .trim()
+    .slice(0, 50);
+  const finalPhone = aiPhone || lead.contact_phone;
 
   const rawFindings = Array.isArray(data.hardSignals) ? data.hardSignals : [];
   const findings: LeadFinding[] = rawFindings
@@ -300,7 +369,7 @@ export function parseAndValidateNotionOutput(params: {
     })
     .filter((b) => b.signal && b.evidence);
 
-  // Enforce strict 5-condition hurdle: must have >=2 independent hard signals & >=1 strong or 2 moderate buying signals
+  // Enforce strict 5-condition hurdle
   const hasEnoughBuyingSignals =
     buyingSignals.some((b) => b.strength === "stark") ||
     buyingSignals.filter((b) => b.strength === "moderat").length >= 2;
@@ -311,6 +380,11 @@ export function parseAndValidateNotionOutput(params: {
       rejectionReason:
         rejectionReason ||
         "Qualifikationshürde nicht erfüllt (mind. 2 unabhängige harte Website-Signale + belegtes Kaufsignal erforderlich).",
+      decisionMaker: finalDecisionMaker,
+      salutationGender,
+      postalAddress: finalPostalAddress,
+      contactEmail: finalEmail,
+      contactPhone: finalPhone,
       score: "kalt",
       contactChannel: "email",
       kurzprofil: "",
@@ -326,8 +400,8 @@ export function parseAndValidateNotionOutput(params: {
     };
   }
 
-  const hasNamedDecisionMaker = lead.decision_maker.trim().length >= 4;
-  const hasFullPostal = lead.postal_address.trim().length >= 8;
+  const hasNamedDecisionMaker = finalDecisionMaker.length >= 4;
+  const hasFullPostal = finalPostalAddress.length >= 8;
 
   const requestedScore = String(data.score ?? "warm").toLowerCase();
   const score: LeadPriority =
@@ -338,13 +412,16 @@ export function parseAndValidateNotionOutput(params: {
   const contactChannel: "brief" | "email" =
     score === "heiss"
       ? "brief"
-      : lead.contact_email.trim()
+      : finalEmail
         ? "email"
         : hasFullPostal
           ? "brief"
           : "email";
 
-  const salutation = buildFormalSalutation(lead.decision_maker);
+  const salutation = buildFormalSalutation(
+    finalDecisionMaker,
+    salutationGender,
+  );
 
   let emailBody = String(data.emailBody ?? "").trim();
   if (!/^sehr geehrte/i.test(emailBody)) {
@@ -367,6 +444,11 @@ export function parseAndValidateNotionOutput(params: {
   return {
     qualified: true,
     rejectionReason: "",
+    decisionMaker: finalDecisionMaker,
+    salutationGender,
+    postalAddress: finalPostalAddress,
+    contactEmail: finalEmail,
+    contactPhone: finalPhone,
     score,
     contactChannel,
     kurzprofil: String(data.kurzprofil ?? "").trim().slice(0, 1200),
@@ -531,11 +613,15 @@ export function buildFallbackOutreach(params: {
 }): { subject: string; body: string } {
   const { brand, lead, channel, extraContext } = params;
   const salutation = buildFormalSalutation(lead.decision_maker);
-  const firstFinding = lead.findings[0];
+  const firstFinding = lead.findings.find(
+    (f) =>
+      f.quote ||
+      !/viewport|meta-tag|response|status/i.test(f.title),
+  );
   const findingSentence = firstFinding?.quote
     ? `Auf Ihrer Website steht sichtbar „${firstFinding.quote}“ (${firstFinding.title}).`
     : firstFinding?.title
-      ? `Bei der Durchsicht ist mir aufgefallen: ${firstFinding.title}.`
+      ? `Bei der Durchsicht Ihrer Website fiel auf, dass zentrale Inhalte für Kunden und Bewerber aktuell nicht klar strukturiert sind (${firstFinding.title}).`
       : "Auf Ihrer Website sind wichtige Leistungs- und Kontaktinformationen für Interessenten und Bewerber aktuell nicht klar geführt.";
 
   const phone = brand.phone_mobile || "+49 155 63477504";

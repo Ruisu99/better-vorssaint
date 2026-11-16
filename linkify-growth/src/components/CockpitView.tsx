@@ -5,6 +5,7 @@ import { useRef, useState } from "react";
 import {
   ArrowRight,
   CheckCircle2,
+  ExternalLink,
   Loader2,
   Mail,
   Printer,
@@ -14,7 +15,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { apiFetchJson, PRIORITY_LABELS } from "@/lib/client-utils";
+import { apiFetchJson, PRIORITY_LABELS, safeHref } from "@/lib/client-utils";
 import type { WorkspaceSnapshot } from "@/lib/initial-state";
 import type {
   Lead,
@@ -390,7 +391,7 @@ export function CockpitView({ snapshot }: { snapshot: WorkspaceSnapshot }) {
             </div>
           </div>
           <span className="text-[12px] font-medium px-3 py-1 rounded-full bg-[#F0F3FF] text-[#0000F5] shrink-0">
-            Modell: {snapshot.brand.openrouter_config.researchModel}
+            Briefing-KI: {snapshot.brand.openrouter_config.writingModel}
           </span>
         </div>
 
@@ -634,41 +635,67 @@ export function CockpitView({ snapshot }: { snapshot: WorkspaceSnapshot }) {
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {qualifiedLeads.map((l) => (
-                  <Link
-                    key={l.id}
-                    href={`/pipeline/${l.id}`}
-                    className="rounded-xl border border-[#E5E7EB] p-4 hover:border-[#0000F5] transition-colors space-y-1.5"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="font-semibold text-[14px] text-[#1A1A2E] truncate">
-                        {l.company_name}
-                      </span>
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        <span
-                          className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${
-                            l.priority === "heiss"
-                              ? "bg-[#F0F3FF] text-[#0000F5]"
-                              : "bg-amber-50 text-amber-800"
-                          }`}
+                {qualifiedLeads.map((l) => {
+                  const siteHref = safeHref(l.website_url);
+                  return (
+                    <div
+                      key={l.id}
+                      className="rounded-xl border border-[#E5E7EB] p-4 hover:border-[#0000F5] transition-colors space-y-2"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <Link
+                          href={`/pipeline/${l.id}`}
+                          className="font-semibold text-[14px] text-[#1A1A2E] hover:text-[#0000F5] truncate"
                         >
-                          {PRIORITY_LABELS[l.priority]}
-                        </span>
-                        <span className="text-[11px] px-2 py-0.5 rounded-full bg-[#F3F4F6] text-[#1A1A2E]">
-                          {l.contact_channel === "brief" ? "Brief" : "E-Mail"}
-                        </span>
+                          {l.company_name}
+                        </Link>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <span
+                            className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${
+                              l.priority === "heiss"
+                                ? "bg-[#F0F3FF] text-[#0000F5]"
+                                : "bg-amber-50 text-amber-800"
+                            }`}
+                          >
+                            {PRIORITY_LABELS[l.priority]}
+                          </span>
+                          <span className="text-[11px] px-2 py-0.5 rounded-full bg-[#F3F4F6] text-[#1A1A2E]">
+                            {l.contact_channel === "brief" ? "Brief" : "E-Mail"}
+                          </span>
+                        </div>
+                      </div>
+                      <p className="text-[12px] text-[#6B7280] truncate">
+                        {l.city} · {l.decision_maker || "Entscheider offen"} ·{" "}
+                        {l.findings.length} harte Signale
+                      </p>
+                      <p className="text-[12px] text-[#1A1A2E] line-clamp-2">
+                        {l.findings[0]?.title}
+                        {l.findings[0]?.quote ? ` („${l.findings[0].quote}“)` : ""}
+                      </p>
+                      <div className="pt-1 flex items-center justify-between gap-3 text-[12px]">
+                        {siteHref ? (
+                          <a
+                            href={siteHref}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 font-medium text-[#0000F5] hover:underline truncate"
+                          >
+                            <span>Website prüfen</span>
+                            <ExternalLink className="w-3 h-3 shrink-0" />
+                          </a>
+                        ) : (
+                          <span className="text-[#6B7280]">Keine URL</span>
+                        )}
+                        <Link
+                          href={`/pipeline/${l.id}`}
+                          className="text-[#6B7280] hover:text-[#1A1A2E] shrink-0"
+                        >
+                          Dossier öffnen →
+                        </Link>
                       </div>
                     </div>
-                    <p className="text-[12px] text-[#6B7280] truncate">
-                      {l.city} · {l.decision_maker || "Entscheider offen"} ·{" "}
-                      {l.findings.length} harte Signale
-                    </p>
-                    <p className="text-[12px] text-[#1A1A2E] line-clamp-2">
-                      {l.findings[0]?.title}
-                      {l.findings[0]?.quote ? ` („${l.findings[0].quote}“)` : ""}
-                    </p>
-                  </Link>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}

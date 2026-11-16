@@ -362,25 +362,21 @@ export async function POST(request: Request) {
     };
 
     const piiContext = {
-      companyName: draftLead.company_name,
-      websiteUrl: draftLead.website_url,
-      decisionMaker: draftLead.decision_maker,
       contactEmail: draftLead.contact_email,
       contactPhone: draftLead.contact_phone,
-      postalAddress: draftLead.postal_address,
     };
 
     const aiRes = await runAiTask({
       scopeKey: auth.scopeKey,
       taskType: "notion_qualify_and_write",
-      model: brand.openrouter_config.researchModel,
+      model: brand.openrouter_config.writingModel,
       systemPrompt: buildLinkifySystemPrompt(brand),
       userPrompt: buildStrictNotionQualificationPrompt({
         brand,
         lead: draftLead,
       }),
       temperature: 0.2,
-      maxTokens: 1700,
+      maxTokens: 1800,
       reasoningEffort: "low",
       privacyMode: true,
       piiContext,
@@ -396,20 +392,30 @@ export async function POST(request: Request) {
           lead: draftLead,
           channel: "brief",
         });
-        const hasTwoHard = scanResult.findings.filter((f) => f.severity !== "hinweis").length >= 2;
+        const realBusinessHard = scanResult.findings.filter(
+          (f) =>
+            f.severity === "hoch" &&
+            !/viewport|meta-tag|response/i.test(f.title),
+        );
+        const hasTwoHard = realBusinessHard.length >= 2;
         return JSON.stringify({
           qualified: hasTwoHard || !strictMode,
           rejectionReason:
             hasTwoHard || !strictMode
               ? ""
-              : "Im lokalen Modus ohne OpenRouter-Key wurden weniger als 2 harte Signale erkannt.",
+              : "Im lokalen Modus ohne OpenRouter-Key wurden weniger als 2 harte geschäftliche Signale erkannt.",
+          decisionMaker: draftLead.decision_maker,
+          salutationGender: "unbekannt",
+          postalAddress: draftLead.postal_address,
+          contactEmail: draftLead.contact_email,
+          contactPhone: draftLead.contact_phone,
           score: scanResult.suggestedPriority === "heiss" ? "heiss" : "warm",
           contactChannel: draftLead.contact_channel,
           kurzprofil: `${draftLead.company_name} aus ${draftLead.city || "Deutschland"} (${draftLead.industry}) betreibt einen eigenen Webauftritt unter ${draftLead.website_url}.`,
           relaunchBenefit:
             "Ein vollständiger Relaunch ordnet Leistungen, Vertrauen und Bewerbungswege auf dem Stand von heute.",
           scoreReason:
-            "Technische Signale belegen strukturellen Nachholbedarf.",
+            "Sichtbare geschäftliche Befunde belegen strukturellen Nachholbedarf.",
           hardSignals: scanResult.findings.slice(0, 3),
           buyingSignals: scanResult.scan.hasHiringSignal
             ? [
@@ -491,11 +497,11 @@ export async function POST(request: Request) {
       industry: draftLead.industry,
       target_track: draftLead.target_track,
       city: draftLead.city,
-      postal_address: draftLead.postal_address,
+      postal_address: validated.postalAddress || draftLead.postal_address,
       website_url: draftLead.website_url,
-      decision_maker: draftLead.decision_maker,
-      contact_email: draftLead.contact_email,
-      contact_phone: draftLead.contact_phone,
+      decision_maker: validated.decisionMaker || draftLead.decision_maker,
+      contact_email: validated.contactEmail || draftLead.contact_email,
+      contact_phone: validated.contactPhone || draftLead.contact_phone,
       source: draftLead.source,
       priority: finalPriority,
       status: "neu",

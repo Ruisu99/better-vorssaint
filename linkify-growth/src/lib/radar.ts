@@ -152,7 +152,7 @@ const TYPE_LABELS: Record<string, string> = {
 };
 
 const INSTITUTIONAL_OR_CHAIN_SKIP =
-  /\b(berufsgenossenschaft|handwerkskammer|ihk|industrie- und handelskammer|universität|hochschule|finanzamt|stadtverwaltung|landratsamt|jobcenter|bundesagentur|arbeitsagentur|polizei|feuerwehr|rathaus|ministerium|krankenkasse|aok|barmer|dak|techniker krankenkasse|dekra|tüv|sparkasse|volksbank|raiffeisenbank|commerzbank|deutsche bank|postbank|aldi|lidl|rewe|edeka|kaufland|penny|netto|rossmann|dm-drogerie|obi|hornbach|bauhaus|toom|ikea|xxxlutz|poco|atu|carglass|fielmann|apollo)\b/i;
+  /\b(berufsgenossenschaft|handwerkskammer|ihk|industrie- und handelskammer|universität|hochschule|finanzamt|stadtverwaltung|landratsamt|jobcenter|bundesagentur|arbeitsagentur|polizei|feuerwehr|rathaus|ministerium|krankenkasse|aok|barmer|dak|techniker krankenkasse|dekra|tüv|sparkasse|volksbank|raiffeisenbank|commerzbank|deutsche bank|postbank|aldi|lidl|rewe|edeka|kaufland|penny|netto|rossmann|dm-drogerie|obi|hornbach|bauhaus|toom|ikea|xxxlutz|poco|atu|carglass|fielmann|apollo|bti|würth|berner|hoffmann group|handwerker-center|globus|hellweg|hagebau|baywa|raab karcher|sonepar|rexel|hilti|bosch|siemens|telekom|vodafone|o2|allianz|axa|ergo|huk-coburg|provinzial|debeka|signal iduna|mcfit|fitx|mcdonald|burger king|starbucks|subway|kfc|dm|müller|thalia|douglas|deichmann|mediamarkt|saturn|euronics|expert)\b/i;
 
 const DIRECTORY_BLOCKLIST = [
   "gelbeseiten.de",
@@ -190,6 +190,7 @@ export function isEligibleBusinessCandidate(params: {
   if (!domain) return false;
   if (DIRECTORY_BLOCKLIST.some((d) => domain.includes(d))) return false;
   if (params.onlyDeDomains && !domain.endsWith(".de")) return false;
+  if (/\/(shop-de|onlineshop|webshop)\b/i.test(url)) return false;
   if (isHistoricalNotionLead(name, url)) return false;
 
   return true;

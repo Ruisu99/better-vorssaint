@@ -2,12 +2,13 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { Check, Copy, Mail, Sparkles } from "lucide-react";
+import { Check, Copy, ExternalLink, Mail, Sparkles } from "lucide-react";
 import {
   apiFetchJson,
   formatBerlinDateTime,
   OUTREACH_CHANNEL_LABELS,
   OUTREACH_STATUS_LABELS,
+  safeHref,
   safeMailto,
 } from "@/lib/client-utils";
 import type { WorkspaceSnapshot } from "@/lib/initial-state";
@@ -342,6 +343,21 @@ export function OutreachView({
                     >
                       {item.company_name ?? lead?.company_name ?? "Lead"}
                     </Link>
+                    {(() => {
+                      const site = safeHref(lead?.website_url);
+                      if (!site) return null;
+                      return (
+                        <a
+                          href={site}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-[12px] font-medium text-[#0000F5] hover:underline"
+                        >
+                          <span>Website</span>
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                      );
+                    })()}
                     <span className="text-[11px] px-2.5 py-0.5 rounded-full bg-[#F0F3FF] text-[#0000F5]">
                       {OUTREACH_CHANNEL_LABELS[item.channel]}
                     </span>

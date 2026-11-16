@@ -201,31 +201,107 @@ function detectOldestCopyrightYear(text: string): number | null {
   return Math.max(...years);
 }
 
+/**
+ * Extracts clean line-separated visible text so adjacent HTML tags never concatenate words/emails/numbers.
+ */
+function extractVisibleTextClean(
+  $: cheerio.CheerioAPI,
+  stripNavigation = false,
+): string {
+  $(
+    "script, style, noscript, svg, template, [aria-hidden='true'], [hidden]",
+  ).remove();
+  if (stripNavigation) {
+    $("nav").remove();
+  }
+  $("br").replaceWith("\n");
+  $(
+    "p, div, li, td, th, tr, h1, h2, h3, h4, h5, h6, section, article, footer, header, address, dt, dd",
+  ).after("\n");
+  $("a, span, strong, b, em, label").after(" ");
+  return $("body")
+    .text()
+    .replace(/[ \t\r]+/g, " ")
+    .replace(/ *\n */g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 function extractDecisionMakerFromText(text: string): string {
-  const patterns = [
-    /(?:Geschäftsführer(?:in)?|Inhaber(?:in)?|Praxisinhaber(?:in)?|Vertreten durch|Verantwortlich(?:er)?(?:\s+i\.S\.d\.)?)\s*:?\s*((?:Dr\.?\s*(?:med\.?\s*(?:dent\.?\s*)?)?|Dipl\.-\w+\s+|Prof\.?\s+)?[A-ZÄÖÜ][a-zäöüß-]{1,22}(?:\s+(?:von|van|de)?\s*[A-ZÄÖÜ][a-zäöüß-]{1,25}){1,2})/,
-  ];
-  for (const rx of patterns) {
-    const m = text.match(rx);
-    if (m?.[1]) {
-      const candidate = m[1].replace(/\s+/g, " ").trim();
-      if (
-        candidate.length >= 5 &&
-        candidate.length <= 75 &&
-        !/gmbh|ug|ag|impressum|datenschutz|kontakt|straße|str\./i.test(candidate)
-      ) {
-        return candidate;
+  const lines = text
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+  const labelPattern =
+    /^(?:Geschäftsführer(?:in|innen|\/in)?|Geschäftsführung|Geschäftsleitung|Inhaber(?:in|\/in)?|Praxisinhaber(?:in)?|Kanzleiinhaber(?:in)?|Vertreten durch|Vertretungsberechtigt(?:e|er|e\(r\))?(?:[^:\n]{0,30})?|inhaltl\.?\s*Verantwortlich(?:er)?|Verantwortlich(?:er)?(?:\s+(?:für\s+den\s+Inhalt|i\.?\s*S\.?\s*d\.?)[^:]*)?)\s*:?\s*(.*)$/i;
+
+  const namePattern =
+    /((?:(?:Herr|Frau|Dr\.?\s*(?:med\.?\s*(?:dent\.?\s*)?)?|Prof\.?\s*(?:Dr\.?\s*)?|Dipl\.-[A-Za-zÄÖÜäöüß.]+\s+|RA\s+|StB\s+)?)[A-ZÄÖÜ][a-zäöüß-]{1,22}(?:\s+(?:von|van|de)?\s*[A-ZÄÖÜ][a-zäöüß-]{1,24}){0,3})/;
+
+  const cleanCandidate = (raw: string): string => {
+    const trimmed = raw
+      .replace(/\b(?:Website|Telefon|Tel\.?|Fax|E-Mail|Mail|USt|Amtsgericht|Registergericht|HRB|HRA|Sitz|Rechtsform)\b[\s\S]*$/i, "")
+      .replace(/[,;|].*$/, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (
+      trimmed.length >= 5 &&
+      trimmed.length <= 72 &&
+      !/^(?:geschäftsführer(?:in|innen)?|geschäftsführung|geschäftsleitung|inhaber(?:in)?|vorstand|prokurist(?:in)?|rechtsform|herr|frau)$/i.test(
+        trimmed,
+      ) &&
+      !/\b(?:geschäftsführer|inhaber|rechtsform|handelsregister|umsatzsteuer|steuernummer|gmbh|ug|ag|ohg|kg|impressum|datenschutz|kontakt|straße|str\.|platz|weg|allee|ring|telefon|fax|email|website|internet|thüringen|erfurt|leipzig|deutschland)\b/i.test(
+        trimmed,
+      )
+    ) {
+      return trimmed;
+    }
+    return "";
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(labelPattern);
+    if (m) {
+      const sameLine = (m[1] ?? "")
+        .replace(/^(?:Geschäftsführer(?:in|\/in)?|Inhaber(?:in|\/in)?)\s*:?\s*/i, "")
+        .trim();
+      if (sameLine) {
+        const nm = sameLine.match(namePattern);
+        if (nm?.[1]) {
+          const cleaned = cleanCandidate(nm[1]);
+          if (cleaned) return cleaned;
+        }
+      }
+      // Check next 1-2 lines when HTML placed label and name in adjacent tags
+      for (let offset = 1; offset <= 2 && i + offset < lines.length; offset++) {
+        const nextLine = lines[i + offset];
+        if (!nextLine || nextLine.length > 90) continue;
+        const nm = nextLine.match(namePattern);
+        if (nm?.[1]) {
+          const cleaned = cleanCandidate(nm[1]);
+          if (cleaned) return cleaned;
+        }
       }
     }
+  }
+
+  // Fallback inline match across flat text
+  const flat = text.replace(/\n+/g, " ");
+  const inlineRx =
+    /(?:Geschäftsführer(?:in)?|Inhaber(?:in)?|Praxisinhaber(?:in)?|Vertreten durch)\s*:?\s*((?:Dr\.?\s*(?:med\.?\s*(?:dent\.?\s*)?)?|Prof\.?\s*)?[A-ZÄÖÜ][a-zäöüß-]{1,22}(?:\s+[A-ZÄÖÜ][a-zäöüß-]{1,24}){1,2})/;
+  const inlineMatch = flat.match(inlineRx);
+  if (inlineMatch?.[1]) {
+    return cleanCandidate(inlineMatch[1]);
   }
   return "";
 }
 
 function extractAddressFromText(text: string): string {
-  // Match German street + house number followed by 5-digit ZIP + city
+  const flat = text.replace(/\n+/g, ", ").replace(/\s*,\s*/g, ", ");
   const rx =
-    /([A-ZÄÖÜ][A-Za-zÄÖÜäöüß.\-\s]{2,42}(?:straße|strasse|str\.|weg|allee|ring|platz|gasse|chaussee|damm|ufer|berg|garten)\s+\d{1,4}[a-zA-Z]?(?:\s*[-–/]\s*\d{1,4}[a-zA-Z]?)?)\s*[,\n|·•]?\s*(\d{5}\s+[A-ZÄÖÜ][A-Za-zÄÖÜäöüß\-\s]{2,32})/;
-  const m = text.match(rx);
+    /([A-ZÄÖÜ][A-Za-zÄÖÜäöüß.\- ]{2,44}?(?:[Ss]traße|[Ss]trasse|[Ss]tr\.|[Ww]eg|[Aa]llee|[Rr]ing|[Pp]latz|[Gg]asse|[Cc]haussee|[Dd]amm|[Uu]fer|[Bb]erg|[Gg]arten|[Mm]arkt)\s+\d{1,4}[a-zA-Z]?(?:\s*[-–/]\s*\d{1,4}[a-zA-Z]?)?)\s*[,|·•]+\s*(\d{5}\s+[A-ZÄÖÜ][A-Za-zÄÖÜäöüß\- ]{2,32})/;
+  const m = flat.match(rx);
   if (m) {
     const street = m[1].replace(/\s+/g, " ").trim();
     const zipCity = m[2].replace(/\s+/g, " ").trim();
@@ -239,17 +315,18 @@ function extractEmailsFromHtml($: cheerio.CheerioAPI, plainText: string): string
     .map((_, el) => ($(el).attr("href") ?? "").slice(7).split("?")[0].trim())
     .get();
   const regexEmails =
-    plainText.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g) ?? [];
+    plainText.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,10}/g) ?? [];
   return Array.from(
     new Set(
       [...mailtoEmails, ...regexEmails]
         .map((e) => e.trim().toLowerCase())
         .filter(
           (e) =>
-            /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e) &&
+            /^[^\s@]+@[^\s@]+\.[a-z]{2,8}$/.test(e) &&
             !e.endsWith(".png") &&
             !e.endsWith(".jpg") &&
             !e.endsWith(".webp") &&
+            !e.endsWith(".svg") &&
             !e.includes("example."),
         ),
     ),
@@ -258,86 +335,27 @@ function extractEmailsFromHtml($: cheerio.CheerioAPI, plainText: string): string
 
 function extractPhonesFromHtml($: cheerio.CheerioAPI, plainText: string): string[] {
   const telLinks = $("a[href^='tel:'], a[href^='TEL:']")
-    .map((_, el) => ($(el).attr("href") ?? "").slice(4).trim())
+    .map((_, el) => decodeURIComponent(($(el).attr("href") ?? "").slice(4)).trim())
     .get();
   const regexPhones =
     plainText.match(
-      /(?:Tel(?:efon)?\.?|Fon)?\s*:?\s*((?:\+49|0)[1-9]\d{1,4}[\s/·.\-()]+\d[\d\s/\-().]{4,16}\d)/gi,
+      /(?:Tel(?:efon)?\.?|Fon)\s*:?\s*((?:\+49|0)[1-9]\d{1,4}[\s/·.\-()]+\d[\d\s/\-().]{4,16}\d)/gi,
     ) ?? [];
   const cleanedRegex = regexPhones.map((p) =>
     p.replace(/^(?:Tel(?:efon)?\.?|Fon)\s*:?\s*/i, "").trim(),
   );
   return Array.from(
     new Set(
-      [...telLinks, ...cleanedRegex].filter(
-        (p) => p.length >= 7 && p.length <= 28,
-      ),
+      [...telLinks, ...cleanedRegex]
+        .map((p) => p.replace(/^[:\s]+/, "").replace(/\s+/g, " ").trim())
+        .filter((p) => p.length >= 7 && p.length <= 28),
     ),
   ).slice(0, 4);
 }
 
-function extractVisibleTextClean($: cheerio.CheerioAPI): string {
-  // Remove invisible / script / decorative DOM blocks to minimize extraction artifacts
-  $(
-    "script, style, noscript, svg, template, [aria-hidden='true'], [hidden]",
-  ).remove();
-  return $("body")
-    .text()
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-async function fetchPageSpeedMobile(
-  targetUrl: string,
-): Promise<LeadScanData["pageSpeed"]> {
-  try {
-    const endpoint = new URL(
-      "https://www.googleapis.com/pagespeedonline/v5/runPagespeed",
-    );
-    endpoint.searchParams.set("url", targetUrl);
-    endpoint.searchParams.set("strategy", "mobile");
-    endpoint.searchParams.append("category", "performance");
-    endpoint.searchParams.append("category", "seo");
-    endpoint.searchParams.append("category", "accessibility");
-
-    const apiKey = process.env.GOOGLE_PAGESPEED_API_KEY?.trim();
-    if (apiKey) {
-      endpoint.searchParams.set("key", apiKey);
-    }
-
-    const res = await fetch(endpoint.toString(), {
-      method: "GET",
-      signal: AbortSignal.timeout(18_000),
-    });
-    if (!res.ok) return null;
-    const data = (await res.json()) as {
-      lighthouseResult?: {
-        categories?: {
-          performance?: { score?: number | null };
-          seo?: { score?: number | null };
-          accessibility?: { score?: number | null };
-        };
-        audits?: {
-          "largest-contentful-paint"?: { displayValue?: string };
-        };
-      };
-    };
-    const cats = data.lighthouseResult?.categories;
-    if (!cats) return null;
-    const toPct = (s: number | null | undefined) =>
-      typeof s === "number" ? Math.round(s * 100) : null;
-    return {
-      strategy: "mobile",
-      performanceScore: toPct(cats.performance?.score),
-      seoScore: toPct(cats.seo?.score),
-      accessibilityScore: toPct(cats.accessibility?.score),
-      lcpText:
-        data.lighthouseResult?.audits?.["largest-contentful-paint"]?.displayValue ??
-        null,
-    };
-  } catch {
-    return null;
-  }
+function isSameWebsiteHost(a: URL, b: URL): boolean {
+  const norm = (h: string) => h.toLowerCase().replace(/^www\./, "");
+  return norm(a.hostname) === norm(b.hostname);
 }
 
 export function deriveFindingsFromScan(scan: LeadScanData): {
@@ -355,7 +373,7 @@ export function deriveFindingsFromScan(scan: LeadScanData): {
       category: "technik",
       severity: "hoch",
       title: "Keine HTTPS-Verschlüsselung aktiv",
-      evidence: `Finale URL läuft über ${scan.finalUrl.slice(0, 60)} ohne HTTPS.`,
+      evidence: `Die Website läuft über ${scan.finalUrl.slice(0, 60)} ohne HTTPS.`,
       quote: scan.finalUrl,
       sourceUrl: scan.finalUrl,
       verification: "Beim direkten HTTPS-Abruf verifiziert.",
@@ -364,27 +382,26 @@ export function deriveFindingsFromScan(scan: LeadScanData): {
   }
 
   if (!scan.hasViewportMeta) {
-    urgencyPoints += 3;
+    urgencyPoints += 2;
     findings.push({
       category: "mobile",
-      severity: "hoch",
-      title: "Kein Mobile-Viewport-Meta-Tag vorhanden",
+      severity: "mittel",
+      title: "Fehlende Mobil-Anpassung der Darstellung",
       evidence:
-        'Im HTML-Head fehlt <meta name="viewport"> – die Seite skaliert auf Smartphones wie eine Desktop-Ansicht.',
+        "Auf Mobilgeräten wird die Desktop-Ansicht verkleinert statt für Smartphones optimiert.",
       sourceUrl: scan.finalUrl,
-      verification: "Im HTML-Head der geladenen Startseite geprüft.",
+      verification: "In der geladenen Startseite ohne Viewport-Definition geprüft.",
       verified: true,
     });
   }
 
-  // Detect real stale dated notices or literal template placeholders in visible text
   const allText = [
     scan.visibleSummary,
     ...(scan.crawledPages ?? []).map((p) => p.excerpt),
   ].join(" ");
 
   const staleNoticeMatch = allText.match(
-    /(?:Corona|COVID-19|Lockdown|Schutzmaßnahmen|Geschäftsjahr\s+201\d|Geschäftsjahr\s+202[0-3]|Aktuelles[^.]{0,60}20(?:1\d|2[0-3])|Frohe Weihnachten\s+20(?:1\d|2[0-3]))[^.]{0,90}/i,
+    /(?:Corona|COVID-19|Lockdown|Schutzmaßnahmen|Geschäftsjahr\s+201\d|Geschäftsjahr\s+202[0-3]|Aktuelles[^.]{0,60}20(?:1\d|2[0-3])|Frohe Weihnachten\s+20(?:1\d|2[0-3]))[^.\n]{0,90}/i,
   );
   if (staleNoticeMatch) {
     urgencyPoints += 3;
@@ -417,23 +434,6 @@ export function deriveFindingsFromScan(scan: LeadScanData): {
     });
   }
 
-  if (
-    scan.detectedCms === "Jimdo" ||
-    scan.detectedCms === "Wix" ||
-    scan.detectedCms === "IONOS / Baukasten" ||
-    scan.detectedCms === "Joomla"
-  ) {
-    urgencyPoints += 1;
-    findings.push({
-      category: "technik",
-      severity: "hinweis",
-      title: `Baukasten- oder älteres CMS erkannt (${scan.detectedCms})`,
-      evidence: `Technische Signatur deutet auf ${scan.detectedCms} hin.`,
-      sourceUrl: scan.finalUrl,
-      verified: true,
-    });
-  }
-
   if (!scan.hasContactFormOrCta) {
     urgencyPoints += 2;
     findings.push({
@@ -459,35 +459,6 @@ export function deriveFindingsFromScan(scan: LeadScanData): {
         scan.finalUrl,
       verified: true,
     });
-  }
-
-  if (scan.responseTimeMs > 2200) {
-    urgencyPoints += 1;
-    findings.push({
-      category: "technik",
-      severity: "mittel",
-      title: `Spürbare Server-Antwortzeit (${scan.responseTimeMs} ms)`,
-      evidence: `HTML-Abruf dauerte ${scan.responseTimeMs} ms (Status ${scan.statusCode}).`,
-      sourceUrl: scan.finalUrl,
-      verified: true,
-    });
-  }
-
-  if (
-    scan.pageSpeed?.performanceScore !== null &&
-    scan.pageSpeed?.performanceScore !== undefined
-  ) {
-    if (scan.pageSpeed.performanceScore < 60) {
-      urgencyPoints += 2;
-      findings.push({
-        category: "mobile",
-        severity: "hoch",
-        title: `Niedriger PageSpeed-Score Mobil (${scan.pageSpeed.performanceScore}/100)`,
-        evidence: `Google PageSpeed Insights Mobil: Performance ${scan.pageSpeed.performanceScore}/100${scan.pageSpeed.lcpText ? `, LCP ${scan.pageSpeed.lcpText}` : ""}.`,
-        sourceUrl: scan.finalUrl,
-        verified: true,
-      });
-    }
   }
 
   const lowerAll =
@@ -530,7 +501,7 @@ export async function scanWebsite(
   const { finalUrl, statusCode, responseTimeMs, html } =
     await safePublicFetch(rawUrl, reqTimeout);
 
-  const baseOrigin = new URL(finalUrl).origin;
+  const baseUrlObj = new URL(finalUrl);
   const $ = cheerio.load(html);
   const title = $("title").first().text().trim().slice(0, 180);
   const metaDescription =
@@ -547,22 +518,31 @@ export async function scanWebsite(
     .get();
 
   const pickLink = (rx: RegExp) =>
-    links.find((l) => rx.test(l.text) || rx.test(l.href.toLowerCase()));
+    links.find((l) => rx.test(l.text)) ??
+    links.find((l) => rx.test(l.href.toLowerCase()));
 
-  const imprintLink = pickLink(/impressum/);
+  const imprintLink =
+    pickLink(/\bimpressum\b/i) ??
+    pickLink(/impressum/i) ??
+    pickLink(/rechtliches/i);
   const privacyLink = pickLink(/datenschutz|privacy/);
-  const servicesLink = pickLink(/leistung|angebot|behandlung|service|produkte|gewerke/);
-  const aboutLink = pickLink(/unternehmen|über uns|ueber-uns|praxis|team|kanzlei/);
-  const careerLink = pickLink(/karriere|jobs|stellen/);
+  const aboutLink = pickLink(
+    /unternehmen|über uns|ueber-uns|praxis|team|kanzlei|wir über uns/,
+  );
+  const servicesLink = pickLink(
+    /leistung|angebot|behandlung|service|produkte|gewerke|kompetenz/,
+  );
+  const careerLink = pickLink(/karriere|jobs|stellen|ausbildung/);
 
   const hasImprintLink = Boolean(imprintLink);
   const hasPrivacyLink = Boolean(privacyLink);
 
   const bodyText = extractVisibleTextClean($);
-  const extractedEmails = extractEmailsFromHtml($, bodyText);
-  const extractedPhones = extractPhonesFromHtml($, bodyText);
-  let decisionMakerHint = extractDecisionMakerFromText(bodyText);
-  let extractedAddressHint = extractAddressFromText(bodyText);
+  const startEmails = extractEmailsFromHtml($, bodyText);
+  const startPhones = extractPhonesFromHtml($, bodyText);
+  const startDecisionMaker = extractDecisionMakerFromText(bodyText);
+  const startAddress = extractAddressFromText(bodyText);
+
   let hasHiringSignal =
     /\b(karriere|stellenangebote|wir suchen|mitarbeiter gesucht|offene stellen|ausbildungsplatz|m\/w\/d)\b/i.test(
       bodyText,
@@ -570,8 +550,8 @@ export async function scanWebsite(
 
   const hasContactFormOrCta =
     $("form").length > 0 ||
-    extractedEmails.length > 0 ||
-    extractedPhones.length > 0 ||
+    startEmails.length > 0 ||
+    startPhones.length > 0 ||
     links.some(
       (l) =>
         l.text.includes("kontakt") ||
@@ -589,18 +569,28 @@ export async function scanWebsite(
   ];
 
   let checkedPagesCount = 1;
+  let imprintDecisionMaker = "";
+  let imprintAddress = "";
+  const imprintEmails: string[] = [];
+  const imprintPhones: string[] = [];
 
   if (options.deepSubpages !== false) {
     const candidateSpecs: Array<{
       href: string | undefined;
       kind: CrawledPageExcerpt["kind"];
     }> = [
-      { href: imprintLink?.href, kind: "impressum" },
-      { href: servicesLink?.href ?? aboutLink?.href, kind: "leistungen" },
-      { href: careerLink?.href ?? aboutLink?.href, kind: "karriere" },
+      {
+        href: imprintLink?.href ?? "/impressum",
+        kind: "impressum",
+      },
+      { href: aboutLink?.href, kind: "unternehmen" },
+      { href: servicesLink?.href, kind: "leistungen" },
+      { href: careerLink?.href, kind: "karriere" },
     ];
 
-    const seenUrls = new Set<string>([finalUrl]);
+    const seenPaths = new Set<string>([
+      `${baseUrlObj.hostname.replace(/^www\./, "")}${baseUrlObj.pathname}`,
+    ]);
     const subTargets: Array<{ url: string; kind: CrawledPageExcerpt["kind"] }> =
       [];
 
@@ -615,55 +605,66 @@ export async function scanWebsite(
       }
       try {
         const resolved = new URL(spec.href, finalUrl);
-        const abs = resolved.toString();
-        if (resolved.origin === baseOrigin && !seenUrls.has(abs)) {
-          seenUrls.add(abs);
-          subTargets.push({ url: abs, kind: spec.kind });
+        if (!isSameWebsiteHost(resolved, baseUrlObj)) continue;
+        // Prefer HTTPS when homepage is HTTPS so http:// footers still work cleanly
+        if (baseUrlObj.protocol === "https:" && resolved.protocol === "http:") {
+          resolved.protocol = "https:";
+        }
+        const normKey = `${resolved.hostname.replace(/^www\./, "")}${resolved.pathname}`;
+        if (!seenPaths.has(normKey)) {
+          seenPaths.add(normKey);
+          subTargets.push({ url: resolved.toString(), kind: spec.kind });
         }
       } catch {
         // ignore invalid relative link
       }
-      if (subTargets.length >= 3) break;
+      if (subTargets.length >= 4) break;
     }
 
     const subResults = await Promise.allSettled(
       subTargets.map(async (t) => ({
         kind: t.kind,
-        res: await safePublicFetch(t.url, Math.min(reqTimeout, 4500)),
+        res: await safePublicFetch(t.url, Math.min(reqTimeout, 4800)),
       })),
     );
 
     for (const outcome of subResults) {
       if (outcome.status !== "fulfilled") continue;
       const { kind, res: subRes } = outcome.value;
+      if (subRes.statusCode >= 400) continue;
       checkedPagesCount += 1;
       const $sub = cheerio.load(subRes.html);
       const subTitle = $sub("title").first().text().trim().slice(0, 140);
-      const subText = extractVisibleTextClean($sub);
+      const subText = extractVisibleTextClean($sub, true);
 
       crawledPages.push({
         url: subRes.finalUrl,
         kind,
         title: subTitle,
-        excerpt: subText.slice(0, 2200),
+        excerpt: subText.slice(0, 2600),
       });
 
-      for (const em of extractEmailsFromHtml($sub, subText)) {
-        if (!extractedEmails.includes(em) && extractedEmails.length < 4) {
-          extractedEmails.push(em);
+      const subEmails = extractEmailsFromHtml($sub, subText);
+      const subPhones = extractPhonesFromHtml($sub, subText);
+      const subDm = extractDecisionMakerFromText(subText);
+      const subAddr = extractAddressFromText(subText);
+
+      if (kind === "impressum") {
+        if (subDm) imprintDecisionMaker = subDm;
+        if (subAddr) imprintAddress = subAddr;
+        imprintEmails.push(...subEmails);
+        imprintPhones.push(...subPhones);
+      } else {
+        if (!imprintDecisionMaker && subDm) imprintDecisionMaker = subDm;
+        if (!imprintAddress && subAddr) imprintAddress = subAddr;
+        for (const em of subEmails) {
+          if (!startEmails.includes(em)) startEmails.push(em);
+        }
+        for (const ph of subPhones) {
+          if (!startPhones.includes(ph)) startPhones.push(ph);
         }
       }
-      for (const ph of extractPhonesFromHtml($sub, subText)) {
-        if (!extractedPhones.includes(ph) && extractedPhones.length < 4) {
-          extractedPhones.push(ph);
-        }
-      }
-      if (!decisionMakerHint) {
-        decisionMakerHint = extractDecisionMakerFromText(subText);
-      }
-      if (!extractedAddressHint) {
-        extractedAddressHint = extractAddressFromText(subText);
-      }
+
       if (
         !hasHiringSignal &&
         /\b(karriere|stellenangebote|wir suchen|mitarbeiter gesucht|offene stellen|ausbildungsplatz|m\/w\/d)\b/i.test(
@@ -675,13 +676,18 @@ export async function scanWebsite(
     }
   }
 
+  const extractedEmails = Array.from(
+    new Set([...imprintEmails, ...startEmails]),
+  ).slice(0, 4);
+  const extractedPhones = Array.from(
+    new Set([...imprintPhones, ...startPhones]),
+  ).slice(0, 4);
+  const decisionMakerHint = imprintDecisionMaker || startDecisionMaker;
+  const extractedAddressHint = imprintAddress || startAddress;
+
   const copyrightYear = detectOldestCopyrightYear(bodyText);
   const visibleSummary = bodyText.slice(0, 1600);
   const detectedCms = detectCms(html, generator);
-
-  const pageSpeed = options.includePageSpeed
-    ? await fetchPageSpeedMobile(finalUrl)
-    : null;
 
   const scan: LeadScanData = {
     scannedAt: new Date().toISOString(),
@@ -707,7 +713,7 @@ export async function scanWebsite(
     extractedPhones,
     visibleSummary,
     crawledPages,
-    pageSpeed,
+    pageSpeed: null,
   };
 
   const derived = deriveFindingsFromScan(scan);
