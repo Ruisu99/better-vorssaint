@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   CheckSquare,
   Download,
@@ -10,10 +10,13 @@ import {
   Search,
   Square,
   Trash2,
+  Upload,
   X,
 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import {
   apiFetchJson,
+  CONTACT_CHANNEL_LABELS,
   formatBerlinDate,
   PRIORITY_LABELS,
   safeHref,
@@ -28,6 +31,8 @@ function escapeCsvCell(val: string): string {
 }
 
 export function PipelineView({ snapshot }: { snapshot: WorkspaceSnapshot }) {
+  const router = useRouter();
+  const csvInputRef = useRef<HTMLInputElement | null>(null);
   const [leads, setLeads] = useState<Lead[]>(snapshot.leads);
   const [query, setQuery] = useState("");
   const [trackFilter, setTrackFilter] = useState<"alle" | TargetTrack>("alle");
@@ -39,6 +44,8 @@ export function PipelineView({ snapshot }: { snapshot: WorkspaceSnapshot }) {
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
+  const [importingCsv, setImportingCsv] = useState(false);
+  const [importNotice, setImportNotice] = useState<string | null>(null);
   const [confirmClearAll, setConfirmClearAll] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -165,49 +172,81 @@ export function PipelineView({ snapshot }: { snapshot: WorkspaceSnapshot }) {
 
   function exportCsv() {
     const header = [
-      "Unternehmen",
-      "Track",
+      "Name",
+      "Adresse",
       "Branche",
-      "Ort",
-      "Postanschrift",
-      "Website",
-      "Entscheider",
       "E-Mail",
-      "Telefon",
-      "Bewertung",
+      "Entscheider",
+      "Gefunden am",
+      "Kontaktiert am",
+      "Kontaktweg",
+      "Ort",
+      "Score",
       "Status",
-      "Desktop geprüft",
-      "Mobil geprüft",
-      "Follow-up",
-      "Ansatz",
+      "Telefon",
+      "Visuell geprüft",
+      "Website",
     ];
     const rows = filtered.map((l) => [
       l.company_name,
-      l.target_track === "startup" ? "Startup/Produkt" : "KMU",
-      l.industry,
-      l.city,
       l.postal_address,
-      l.website_url,
-      l.decision_maker,
+      l.industry,
       l.contact_email,
-      l.contact_phone,
+      l.decision_maker,
+      formatBerlinDate(l.found_at || l.created_at),
+      formatBerlinDate(l.first_contact_at),
+      CONTACT_CHANNEL_LABELS[l.contact_channel],
+      l.city,
       PRIORITY_LABELS[l.priority],
       STATUS_LABELS[l.status],
-      l.visual_checked_desktop ? "Ja" : "Nein",
-      l.visual_checked_mobile ? "Ja" : "Nein",
-      formatBerlinDate(l.next_follow_up_at),
-      l.pitch_angle,
+      l.contact_phone,
+      l.visual_checked_desktop && l.visual_checked_mobile ? "Yes" : "No",
+      l.website_url,
     ]);
     const csv = [header, ...rows]
-      .map((row) => row.map((c) => escapeCsvCell(c)).join(";"))
+      .map((row) => row.map((c) => escapeCsvCell(c)).join(","))
       .join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "linkify-lead-pipeline.csv";
+    a.download = "linkify-notion-lead-pipeline.csv";
     a.click();
     URL.revokeObjectURL(url);
+  }
+
+  async function handleCsvUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImportingCsv(true);
+    setActionError(null);
+    setImportNotice(null);
+    try {
+      const csvText = await file.text();
+      const res = await apiFetchJson<{
+        imported: number;
+        skippedDuplicates: number;
+      }>("/api/leads/import", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ csvText }),
+      });
+      if (!res.ok) {
+        setActionError(res.error);
+        return;
+      }
+      setImportNotice(
+        `${res.data.imported} Leads aus Notion importiert (${res.data.skippedDuplicates} Duplikate übersprungen).`,
+      );
+      const listRes = await apiFetchJson<{ leads: Lead[] }>("/api/leads");
+      if (listRes.ok) {
+        setLeads(listRes.data.leads);
+      }
+      router.refresh();
+    } finally {
+      setImportingCsv(false);
+      if (csvInputRef.current) csvInputRef.current.value = "";
+    }
   }
 
   async function handleCreateLead(e: React.FormEvent) {
@@ -309,13 +348,29 @@ export function PipelineView({ snapshot }: { snapshot: WorkspaceSnapshot }) {
               </button>
             </div>
           )}
+          <input
+            ref={csvInputRef}
+            type="file"
+            accept=".csv,text/csv"
+            onChange={handleCsvUpload}
+            className="hidden"
+          />
+          <button
+            type="button"
+            disabled={importingCsv}
+            onClick={() => csvInputRef.current?.click()}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-[#E5E7EB] bg-white hover:border-[#0000F5]/40 text-[13px] font-medium text-[#1A1A2E] cursor-pointer"
+          >
+            <Upload className="w-3.5 h-3.5" />
+            <span>{importingCsv ? "Importiere..." : "Notion-CSV importieren"}</span>
+          </button>
           <button
             type="button"
             onClick={exportCsv}
             className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-[#E5E7EB] bg-white hover:border-[#0000F5]/40 text-[13px] font-medium text-[#1A1A2E] cursor-pointer"
           >
             <Download className="w-3.5 h-3.5" />
-            <span>CSV für Notion</span>
+            <span>Notion-CSV Export</span>
           </button>
           <button
             type="button"
@@ -328,6 +383,11 @@ export function PipelineView({ snapshot }: { snapshot: WorkspaceSnapshot }) {
         </div>
       </div>
 
+      {importNotice && (
+        <p className="text-[13px] text-[#1A1A2E] bg-[#F0F3FF] border border-[#0000F5]/20 rounded-xl px-4 py-2.5">
+          {importNotice}
+        </p>
+      )}
       {actionError && (
         <p className="text-[13px] text-red-700 bg-red-50 border border-red-200 rounded-xl px-4 py-2.5">
           {actionError}

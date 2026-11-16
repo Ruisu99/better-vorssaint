@@ -111,7 +111,26 @@ export interface LeadFinding {
   severity: "hoch" | "mittel" | "hinweis";
   title: string;
   evidence: string;
+  quote?: string;
+  sourceUrl?: string;
+  verification?: string;
+  businessImpact?: string;
   verified: boolean;
+}
+
+export interface BuyingSignal {
+  strength: "stark" | "moderat";
+  signal: string;
+  evidence: string;
+  quote?: string;
+  sourceUrl?: string;
+}
+
+export interface CrawledPageExcerpt {
+  url: string;
+  kind: "start" | "leistungen" | "unternehmen" | "karriere" | "impressum";
+  title: string;
+  excerpt: string;
 }
 
 export interface LeadScanData {
@@ -137,6 +156,7 @@ export interface LeadScanData {
   extractedEmails: string[];
   extractedPhones: string[];
   visibleSummary: string;
+  crawledPages?: CrawledPageExcerpt[];
   pageSpeed?: {
     strategy: "mobile" | "desktop";
     performanceScore: number | null;
@@ -169,8 +189,14 @@ export interface Lead {
   visual_notes: string;
   research_summary: string;
   findings: LeadFinding[];
+  buying_signals: BuyingSignal[];
+  score_reason: string;
+  relaunch_benefit: string;
+  follow_up_note: string;
   scan_data: LeadScanData | null;
   pitch_angle: string;
+  letter_printed_at: string | null;
+  found_at: string;
   is_sample: boolean;
   created_at: string;
   updated_at: string;

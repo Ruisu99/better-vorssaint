@@ -569,14 +569,19 @@ export function LeadDetailView({
                         <span>Mail-App</span>
                       </a>
                     )}
-                    <button
-                      type="button"
-                      onClick={() => setPrintMode(true)}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-[#E5E7EB] text-[12px] font-medium text-[#1A1A2E] cursor-pointer"
+                    <a
+                      href={`/api/letters?leadId=${encodeURIComponent(lead.id)}&format=docx`}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-[#E5E7EB] text-[12px] font-medium text-[#1A1A2E]"
+                    >
+                      <span>Pages (.docx)</span>
+                    </a>
+                    <a
+                      href={`/api/letters?leadId=${encodeURIComponent(lead.id)}&format=pdf`}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-[#E5E7EB] text-[12px] font-medium text-[#1A1A2E]"
                     >
                       <Printer className="w-3.5 h-3.5" />
-                      <span>Briefdruck</span>
-                    </button>
+                      <span>Brief-PDF</span>
+                    </a>
                   </div>
                 </div>
 
@@ -643,11 +648,11 @@ export function LeadDetailView({
             )}
           </section>
 
-          {/* Technical Findings & Scan Metrics */}
-          <section className="rounded-2xl bg-white border border-[#E5E7EB] p-6 space-y-4">
+          {/* Notion Dossier: Kurzprofil, Qualifikation, Befunde & Quellen, Follow-up-Notiz */}
+          <section className="rounded-2xl bg-white border border-[#E5E7EB] p-6 space-y-5">
             <div className="flex items-center justify-between">
               <h2 className="text-[16px] font-semibold text-[#1A1A2E]">
-                3. Technische Befunde & Ausgangslage
+                3. Kurzprofil, Qualifikation & Befunde
               </h2>
               {lead.website_url && (
                 <button
@@ -662,9 +667,47 @@ export function LeadDetailView({
             </div>
 
             {lead.research_summary && (
-              <p className="text-[13px] text-[#1A1A2E] bg-[#F8F9FC] rounded-xl p-3.5 leading-relaxed">
-                {lead.research_summary}
-              </p>
+              <div className="bg-[#F8F9FC] rounded-xl p-4 space-y-1.5">
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-[#6B7280]">
+                  Kurzprofil
+                </p>
+                <p className="text-[13px] text-[#1A1A2E] leading-relaxed">
+                  {lead.research_summary}
+                </p>
+              </div>
+            )}
+
+            {(lead.relaunch_benefit || lead.score_reason || lead.buying_signals.length > 0) && (
+              <div className="rounded-xl border border-[#E5E7EB] p-4 space-y-3 text-[13px]">
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-[#6B7280]">
+                  Qualifikation
+                </p>
+                {lead.buying_signals.length > 0 && (
+                  <div className="space-y-1.5">
+                    <p className="font-medium text-[#1A1A2E]">Kaufsignale:</p>
+                    {lead.buying_signals.map((bs, idx) => (
+                      <div key={idx} className="text-[12px] text-[#6B7280] pl-3 border-l-2 border-[#0000F5]/40">
+                        <strong className="text-[#1A1A2E]">
+                          [{bs.strength === "stark" ? "Stark" : "Moderat"}] {bs.signal}:
+                        </strong>{" "}
+                        {bs.evidence}
+                        {bs.quote ? ` („${bs.quote}“)` : ""}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {lead.relaunch_benefit && (
+                  <p className="text-[12px] text-[#1A1A2E]">
+                    <strong>Nutzen eines Relaunchs:</strong> {lead.relaunch_benefit}
+                  </p>
+                )}
+                {lead.score_reason && (
+                  <p className="text-[12px] text-[#6B7280]">
+                    <strong className="text-[#1A1A2E]">Score-Begründung:</strong>{" "}
+                    {lead.score_reason}
+                  </p>
+                )}
+              </div>
             )}
 
             {lead.scan_data && (
@@ -700,22 +743,63 @@ export function LeadDetailView({
               </div>
             )}
 
-            <div className="space-y-2">
-              {lead.findings.map((f, idx) => (
-                <div
-                  key={idx}
-                  className="rounded-xl border border-[#E5E7EB] px-4 py-3 text-[13px]"
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="font-medium text-[#1A1A2E]">{f.title}</span>
-                    <span className="text-[11px] text-[#6B7280]">
-                      {f.verified ? "Verifiziert" : "Demo"}
-                    </span>
+            <div className="space-y-2.5">
+              <p className="text-[12px] font-semibold text-[#1A1A2E]">
+                Befunde und Quellen ({lead.findings.length})
+              </p>
+              {lead.findings.map((f, idx) => {
+                const safeSrc = safeHref(f.sourceUrl);
+                return (
+                  <div
+                    key={idx}
+                    className="rounded-xl border border-[#E5E7EB] px-4 py-3 text-[13px] space-y-1"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-medium text-[#1A1A2E]">{f.title}</span>
+                      <span className="text-[11px] text-[#0000F5]">
+                        {f.verified ? "Verifiziert" : "Signal"}
+                      </span>
+                    </div>
+                    <p className="text-[#6B7280] text-[12px]">{f.evidence}</p>
+                    {f.quote && (
+                      <p className="text-[12px] text-[#1A1A2E] bg-[#F8F9FC] rounded-lg px-2.5 py-1.5">
+                        <strong>Exaktes Zitat:</strong> „{f.quote}“
+                      </p>
+                    )}
+                    {f.verification && (
+                      <p className="text-[11px] text-[#6B7280]">
+                        <strong>Verifikation:</strong> {f.verification}
+                      </p>
+                    )}
+                    {f.businessImpact && (
+                      <p className="text-[11px] text-[#6B7280]">
+                        <strong>Geschäftliche Bedeutung:</strong> {f.businessImpact}
+                      </p>
+                    )}
+                    {safeSrc && (
+                      <a
+                        href={safeSrc}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-[11px] text-[#0000F5] hover:underline"
+                      >
+                        <span>Quelle: {safeSrc}</span>
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                    )}
                   </div>
-                  <p className="text-[#6B7280] mt-0.5">{f.evidence}</p>
-                </div>
-              ))}
+                );
+              })}
             </div>
+
+            {lead.follow_up_note && (
+              <div className="rounded-xl bg-[#F0F3FF] border border-[#0000F5]/20 p-4 space-y-1 text-[12px]">
+                <p className="font-semibold text-[#1A1A2E]">Follow-up-Notiz</p>
+                <p className="text-[#1A1A2E] leading-relaxed">
+                  {lead.follow_up_note}
+                </p>
+              </div>
+            )}
           </section>
         </div>
 

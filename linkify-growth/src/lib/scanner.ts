@@ -1,7 +1,13 @@
 import http from "node:http";
 import https from "node:https";
 import * as cheerio from "cheerio";
-import type { LeadFinding, LeadPriority, LeadScanData, TargetTrack } from "./types";
+import type {
+  CrawledPageExcerpt,
+  LeadFinding,
+  LeadPriority,
+  LeadScanData,
+  TargetTrack,
+} from "./types";
 import { resolveAndPinPublicUrl, type PinnedPublicTarget } from "./url-safety";
 
 const MAX_REDIRECTS = 3;
@@ -25,16 +31,15 @@ function pinnedHttpGet(
         : isHttps
           ? 443
           : 80;
-    const path = `${target.url.pathname || "/"}${target.url.search || ""}`;
+    const reqPath = `${target.url.pathname || "/"}${target.url.search || ""}`;
 
     const req = mod.request(
       {
         host: target.pinnedIp,
         port,
-        path,
+        path: reqPath,
         method: "GET",
         timeout: timeoutMs,
-        // Pin DNS resolution callback to the exact already-validated IP
         lookup: (_hostname, _opts, cb) => {
           cb(null, target.pinnedIp, target.family);
         },
@@ -198,13 +203,33 @@ function detectOldestCopyrightYear(text: string): number | null {
 
 function extractDecisionMakerFromText(text: string): string {
   const patterns = [
-    /(?:Geschäftsführer(?:in)?|Inhaber(?:in)?|Vertreten durch)\s*:?\s*([A-ZÄÖÜ][a-zäöüß-]{1,20}(?:\s+(?:Dr\.|Prof\.|von|van)?\s*[A-ZÄÖÜ][a-zäöüß-]{1,25}){1,2})/,
+    /(?:Geschäftsführer(?:in)?|Inhaber(?:in)?|Praxisinhaber(?:in)?|Vertreten durch|Verantwortlich(?:er)?(?:\s+i\.S\.d\.)?)\s*:?\s*((?:Dr\.?\s*(?:med\.?\s*(?:dent\.?\s*)?)?|Dipl\.-\w+\s+|Prof\.?\s+)?[A-ZÄÖÜ][a-zäöüß-]{1,22}(?:\s+(?:von|van|de)?\s*[A-ZÄÖÜ][a-zäöüß-]{1,25}){1,2})/,
   ];
   for (const rx of patterns) {
     const m = text.match(rx);
     if (m?.[1]) {
-      return m[1].replace(/\s+/g, " ").trim().slice(0, 80);
+      const candidate = m[1].replace(/\s+/g, " ").trim();
+      if (
+        candidate.length >= 5 &&
+        candidate.length <= 75 &&
+        !/gmbh|ug|ag|impressum|datenschutz|kontakt|straße|str\./i.test(candidate)
+      ) {
+        return candidate;
+      }
     }
+  }
+  return "";
+}
+
+function extractAddressFromText(text: string): string {
+  // Match German street + house number followed by 5-digit ZIP + city
+  const rx =
+    /([A-ZÄÖÜ][A-Za-zÄÖÜäöüß.\-\s]{2,42}(?:straße|strasse|str\.|weg|allee|ring|platz|gasse|chaussee|damm|ufer|berg|garten)\s+\d{1,4}[a-zA-Z]?(?:\s*[-–/]\s*\d{1,4}[a-zA-Z]?)?)\s*[,\n|·•]?\s*(\d{5}\s+[A-ZÄÖÜ][A-Za-zÄÖÜäöüß\-\s]{2,32})/;
+  const m = text.match(rx);
+  if (m) {
+    const street = m[1].replace(/\s+/g, " ").trim();
+    const zipCity = m[2].replace(/\s+/g, " ").trim();
+    return `${street}, ${zipCity}`.slice(0, 140);
   }
   return "";
 }
@@ -224,21 +249,42 @@ function extractEmailsFromHtml($: cheerio.CheerioAPI, plainText: string): string
             /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e) &&
             !e.endsWith(".png") &&
             !e.endsWith(".jpg") &&
+            !e.endsWith(".webp") &&
             !e.includes("example."),
         ),
     ),
   ).slice(0, 4);
 }
 
-function extractPhonesFromHtml($: cheerio.CheerioAPI): string[] {
+function extractPhonesFromHtml($: cheerio.CheerioAPI, plainText: string): string[] {
+  const telLinks = $("a[href^='tel:'], a[href^='TEL:']")
+    .map((_, el) => ($(el).attr("href") ?? "").slice(4).trim())
+    .get();
+  const regexPhones =
+    plainText.match(
+      /(?:Tel(?:efon)?\.?|Fon)?\s*:?\s*((?:\+49|0)[1-9]\d{1,4}[\s/·.\-()]+\d[\d\s/\-().]{4,16}\d)/gi,
+    ) ?? [];
+  const cleanedRegex = regexPhones.map((p) =>
+    p.replace(/^(?:Tel(?:efon)?\.?|Fon)\s*:?\s*/i, "").trim(),
+  );
   return Array.from(
     new Set(
-      $("a[href^='tel:'], a[href^='TEL:']")
-        .map((_, el) => ($(el).attr("href") ?? "").slice(4).trim())
-        .get()
-        .filter((p) => p.length >= 6 && p.length <= 28),
+      [...telLinks, ...cleanedRegex].filter(
+        (p) => p.length >= 7 && p.length <= 28,
+      ),
     ),
   ).slice(0, 4);
+}
+
+function extractVisibleTextClean($: cheerio.CheerioAPI): string {
+  // Remove invisible / script / decorative DOM blocks to minimize extraction artifacts
+  $(
+    "script, style, noscript, svg, template, [aria-hidden='true'], [hidden]",
+  ).remove();
+  return $("body")
+    .text()
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 async function fetchPageSpeedMobile(
@@ -310,6 +356,9 @@ export function deriveFindingsFromScan(scan: LeadScanData): {
       severity: "hoch",
       title: "Keine HTTPS-Verschlüsselung aktiv",
       evidence: `Finale URL läuft über ${scan.finalUrl.slice(0, 60)} ohne HTTPS.`,
+      quote: scan.finalUrl,
+      sourceUrl: scan.finalUrl,
+      verification: "Beim direkten HTTPS-Abruf verifiziert.",
       verified: true,
     });
   }
@@ -319,9 +368,51 @@ export function deriveFindingsFromScan(scan: LeadScanData): {
     findings.push({
       category: "mobile",
       severity: "hoch",
-      title: "Kein Mobile-Viewport-Meta-Tag gefunden",
+      title: "Kein Mobile-Viewport-Meta-Tag vorhanden",
       evidence:
-        'Im HTML-Head fehlt <meta name="viewport"> – deutet stark auf fehlende Mobil-Optimierung hin.',
+        'Im HTML-Head fehlt <meta name="viewport"> – die Seite skaliert auf Smartphones wie eine Desktop-Ansicht.',
+      sourceUrl: scan.finalUrl,
+      verification: "Im HTML-Head der geladenen Startseite geprüft.",
+      verified: true,
+    });
+  }
+
+  // Detect real stale dated notices or literal template placeholders in visible text
+  const allText = [
+    scan.visibleSummary,
+    ...(scan.crawledPages ?? []).map((p) => p.excerpt),
+  ].join(" ");
+
+  const staleNoticeMatch = allText.match(
+    /(?:Corona|COVID-19|Lockdown|Schutzmaßnahmen|Geschäftsjahr\s+201\d|Geschäftsjahr\s+202[0-3]|Aktuelles[^.]{0,60}20(?:1\d|2[0-3])|Frohe Weihnachten\s+20(?:1\d|2[0-3]))[^.]{0,90}/i,
+  );
+  if (staleNoticeMatch) {
+    urgencyPoints += 3;
+    findings.push({
+      category: "vertrauen",
+      severity: "hoch",
+      title: "Veraltete geschäftliche Meldung auf der Website sichtbar",
+      evidence: `Sichtbarer Text nennt einen deutlich zurückliegenden Stand: "${staleNoticeMatch[0].trim()}"`,
+      quote: staleNoticeMatch[0].trim().slice(0, 140),
+      sourceUrl: scan.finalUrl,
+      verification: "Als normaler statischer Fließtext auf der Seite sichtbar.",
+      verified: true,
+    });
+  }
+
+  const placeholderMatch = allText.match(
+    /(?:Lorem ipsum dolor sit amet|\{\{[^}]{2,40}\}\}|Dieser Browser wird von uns nicht unterstützt|Website befindet sich im Aufbau|Hier entsteht unsere neue Website)/i,
+  );
+  if (placeholderMatch) {
+    urgencyPoints += 3;
+    findings.push({
+      category: "ux",
+      severity: "hoch",
+      title: "Sichtbarer Platzhalter- oder Systemfehlertext auf der Website",
+      evidence: `Direkt im sichtbaren Inhalt erscheint "${placeholderMatch[0].trim()}".`,
+      quote: placeholderMatch[0].trim(),
+      sourceUrl: scan.finalUrl,
+      verification: "Im fertig geladenen Seitentext sichtbar.",
       verified: true,
     });
   }
@@ -332,58 +423,13 @@ export function deriveFindingsFromScan(scan: LeadScanData): {
     scan.detectedCms === "IONOS / Baukasten" ||
     scan.detectedCms === "Joomla"
   ) {
-    urgencyPoints += 2;
+    urgencyPoints += 1;
     findings.push({
       category: "technik",
-      severity: "mittel",
-      title: `Eingeschränktes oder älteres System erkannt (${scan.detectedCms})`,
+      severity: "hinweis",
+      title: `Baukasten- oder älteres CMS erkannt (${scan.detectedCms})`,
       evidence: `Technische Signatur deutet auf ${scan.detectedCms} hin.`,
-      verified: true,
-    });
-  }
-
-  const currentYear = new Date().getFullYear();
-  if (scan.copyrightYear !== null && scan.copyrightYear <= currentYear - 2) {
-    urgencyPoints += 2;
-    findings.push({
-      category: "vertrauen",
-      severity: "mittel",
-      title: `Veralteter Copyright-Hinweis (${scan.copyrightYear})`,
-      evidence: `Im Seitentext steht zuletzt das Jahr ${scan.copyrightYear}.`,
-      verified: true,
-    });
-  }
-
-  if (!scan.metaDescription) {
-    urgencyPoints += 1;
-    findings.push({
-      category: "ux",
-      severity: "hinweis",
-      title: "Keine Meta-Description für Suchergebnisse hinterlegt",
-      evidence: 'Das <meta name="description">-Tag fehlt oder ist leer.',
-      verified: true,
-    });
-  }
-
-  if (!scan.h1) {
-    urgencyPoints += 1;
-    findings.push({
-      category: "ux",
-      severity: "hinweis",
-      title: "Keine klare H1-Hauptüberschrift erkannt",
-      evidence:
-        "Auf der Startseite wurde keine eindeutige <h1>-Überschrift gefunden.",
-      verified: true,
-    });
-  }
-
-  if (!scan.hasImprintLink || !scan.hasPrivacyLink) {
-    urgencyPoints += 1;
-    findings.push({
-      category: "vertrauen",
-      severity: "mittel",
-      title: "Rechtliche Pflichtlinks auf Startseite unklar",
-      evidence: `Impressum-Link: ${scan.hasImprintLink ? "gefunden" : "nicht erkannt"}, Datenschutz-Link: ${scan.hasPrivacyLink ? "gefunden" : "nicht erkannt"}.`,
+      sourceUrl: scan.finalUrl,
       verified: true,
     });
   }
@@ -393,33 +439,36 @@ export function deriveFindingsFromScan(scan: LeadScanData): {
     findings.push({
       category: "ux",
       severity: "mittel",
-      title:
-        "Kein direkter Kontakt-Trigger (Formular / mailto / tel) erkannt",
+      title: "Kein direkter Kontakt-Trigger auf der Startseite erkennbar",
       evidence:
         "Auf der Startseite wurden weder Kontaktformular noch direkte Kontaktlinks erkannt.",
+      sourceUrl: scan.finalUrl,
       verified: true,
     });
   }
 
   if (scan.hasHiringSignal) {
-    urgencyPoints += 1;
     findings.push({
       category: "chance",
       severity: "hinweis",
-      title: "Aktiver Recruiting-/Karriere-Hinweis erkannt",
+      title: "Aktive Stellenangebote / Personalgewinnung erkannt",
       evidence:
-        "Auf der Website gibt es Hinweise auf Stellen/Karriere – starker Anlass für modernen Außenauftritt und Bewerberführung.",
+        "Auf der Website gibt es konkrete Hinweise auf offene Stellen oder Karriere.",
+      sourceUrl:
+        scan.crawledPages?.find((p) => p.kind === "karriere")?.url ??
+        scan.finalUrl,
       verified: true,
     });
   }
 
-  if (scan.responseTimeMs > 1800) {
+  if (scan.responseTimeMs > 2200) {
     urgencyPoints += 1;
     findings.push({
       category: "technik",
       severity: "mittel",
       title: `Spürbare Server-Antwortzeit (${scan.responseTimeMs} ms)`,
       evidence: `HTML-Abruf dauerte ${scan.responseTimeMs} ms (Status ${scan.statusCode}).`,
+      sourceUrl: scan.finalUrl,
       verified: true,
     });
   }
@@ -435,28 +484,10 @@ export function deriveFindingsFromScan(scan: LeadScanData): {
         severity: "hoch",
         title: `Niedriger PageSpeed-Score Mobil (${scan.pageSpeed.performanceScore}/100)`,
         evidence: `Google PageSpeed Insights Mobil: Performance ${scan.pageSpeed.performanceScore}/100${scan.pageSpeed.lcpText ? `, LCP ${scan.pageSpeed.lcpText}` : ""}.`,
-        verified: true,
-      });
-    } else {
-      findings.push({
-        category: "mobile",
-        severity: "hinweis",
-        title: `PageSpeed Mobil gemessen (${scan.pageSpeed.performanceScore}/100)`,
-        evidence: `Performance ${scan.pageSpeed.performanceScore}/100, SEO ${scan.pageSpeed.seoScore ?? "-"}/100.`,
+        sourceUrl: scan.finalUrl,
         verified: true,
       });
     }
-  }
-
-  if (findings.length === 0) {
-    findings.push({
-      category: "chance",
-      severity: "hinweis",
-      title:
-        "Solide technische Basis – Positionierung & Conversion manuell prüfen",
-      evidence: `HTTPS aktiv, Viewport vorhanden, Antwortzeit ${scan.responseTimeMs} ms (${scan.detectedCms}).`,
-      verified: true,
-    });
   }
 
   const lowerAll =
@@ -476,9 +507,7 @@ export function deriveFindingsFromScan(scan: LeadScanData): {
   const suggestedPitchAngle =
     suggestedTrack === "startup"
       ? "Individuelle Produkt- und Fullstack-Unterstützung (UX, Next.js/React, APIs, Kundenportal oder MVP-Weiterentwicklung)."
-      : urgencyPoints >= 3
-        ? "Vollständiger Website-Relaunch mit moderner mobiler Nutzerführung, sauberem CMS und direkter Anfrage-/Bewerbungsstrecke."
-        : "Gezielte Neukonzeption für klarere Positionierung, Local SEO und einfachere Pflege – nach persönlichem Desktop- & Mobil-Check.";
+      : "Vollständiger Relaunch mit klarer Leistungsführung, moderner mobiler Nutzung und direktem Anfrage- sowie Bewerbungsweg.";
 
   return { findings, suggestedPriority, suggestedTrack, suggestedPitchAngle };
 }
@@ -517,42 +546,27 @@ export async function scanWebsite(
     }))
     .get();
 
-  const imprintLink = links.find(
-    (l) =>
-      l.text.includes("impressum") || l.href.toLowerCase().includes("impressum"),
-  );
-  const privacyLink = links.find(
-    (l) =>
-      l.text.includes("datenschutz") ||
-      l.href.toLowerCase().includes("datenschutz") ||
-      l.href.toLowerCase().includes("privacy"),
-  );
-  const contactOrCareerLink = links.find(
-    (l) =>
-      l.text.includes("karriere") ||
-      l.text.includes("jobs") ||
-      l.text.includes("stellen") ||
-      l.text.includes("kontakt"),
-  );
+  const pickLink = (rx: RegExp) =>
+    links.find((l) => rx.test(l.text) || rx.test(l.href.toLowerCase()));
+
+  const imprintLink = pickLink(/impressum/);
+  const privacyLink = pickLink(/datenschutz|privacy/);
+  const servicesLink = pickLink(/leistung|angebot|behandlung|service|produkte|gewerke/);
+  const aboutLink = pickLink(/unternehmen|über uns|ueber-uns|praxis|team|kanzlei/);
+  const careerLink = pickLink(/karriere|jobs|stellen/);
 
   const hasImprintLink = Boolean(imprintLink);
   const hasPrivacyLink = Boolean(privacyLink);
 
-  $("script, style, noscript, svg").remove();
-  const bodyText = $("body").text().replace(/\s+/g, " ").trim();
+  const bodyText = extractVisibleTextClean($);
   const extractedEmails = extractEmailsFromHtml($, bodyText);
-  const extractedPhones = extractPhonesFromHtml($);
+  const extractedPhones = extractPhonesFromHtml($, bodyText);
   let decisionMakerHint = extractDecisionMakerFromText(bodyText);
+  let extractedAddressHint = extractAddressFromText(bodyText);
   let hasHiringSignal =
-    /\b(karriere|stellenangebote|wir suchen|mitarbeiter gesucht|offene stellen)\b/i.test(
+    /\b(karriere|stellenangebote|wir suchen|mitarbeiter gesucht|offene stellen|ausbildungsplatz|m\/w\/d)\b/i.test(
       bodyText,
-    ) ||
-    links.some(
-      (l) =>
-        l.text.includes("karriere") ||
-        l.text.includes("jobs") ||
-        l.text.includes("stellen"),
-    );
+    ) || Boolean(careerLink);
 
   const hasContactFormOrCta =
     $("form").length > 0 ||
@@ -565,42 +579,81 @@ export async function scanWebsite(
         l.text.includes("termin"),
     );
 
+  const crawledPages: CrawledPageExcerpt[] = [
+    {
+      url: finalUrl,
+      kind: "start",
+      title,
+      excerpt: bodyText.slice(0, 2600),
+    },
+  ];
+
   let checkedPagesCount = 1;
 
-  // Deterministic 0-EUR multi-page enrichment (same-origin Impressum / Karriere)
   if (options.deepSubpages !== false) {
-    const candidateSubpaths = [imprintLink?.href, contactOrCareerLink?.href]
-      .filter((h): h is string => Boolean(h && !h.startsWith("#") && !h.startsWith("mailto:") && !h.startsWith("tel:")))
-      .map((h) => {
-        try {
-          const resolved = new URL(h, finalUrl);
-          return resolved.origin === baseOrigin && resolved.toString() !== finalUrl
-            ? resolved.toString()
-            : null;
-        } catch {
-          return null;
-        }
-      })
-      .filter((u): u is string => Boolean(u));
+    const candidateSpecs: Array<{
+      href: string | undefined;
+      kind: CrawledPageExcerpt["kind"];
+    }> = [
+      { href: imprintLink?.href, kind: "impressum" },
+      { href: servicesLink?.href ?? aboutLink?.href, kind: "leistungen" },
+      { href: careerLink?.href ?? aboutLink?.href, kind: "karriere" },
+    ];
 
-    const uniqueSubpages = Array.from(new Set(candidateSubpaths)).slice(0, 2);
+    const seenUrls = new Set<string>([finalUrl]);
+    const subTargets: Array<{ url: string; kind: CrawledPageExcerpt["kind"] }> =
+      [];
+
+    for (const spec of candidateSpecs) {
+      if (!spec.href) continue;
+      if (
+        spec.href.startsWith("#") ||
+        spec.href.startsWith("mailto:") ||
+        spec.href.startsWith("tel:")
+      ) {
+        continue;
+      }
+      try {
+        const resolved = new URL(spec.href, finalUrl);
+        const abs = resolved.toString();
+        if (resolved.origin === baseOrigin && !seenUrls.has(abs)) {
+          seenUrls.add(abs);
+          subTargets.push({ url: abs, kind: spec.kind });
+        }
+      } catch {
+        // ignore invalid relative link
+      }
+      if (subTargets.length >= 3) break;
+    }
+
     const subResults = await Promise.allSettled(
-      uniqueSubpages.map((subUrl) => safePublicFetch(subUrl, Math.min(reqTimeout, 4500))),
+      subTargets.map(async (t) => ({
+        kind: t.kind,
+        res: await safePublicFetch(t.url, Math.min(reqTimeout, 4500)),
+      })),
     );
+
     for (const outcome of subResults) {
       if (outcome.status !== "fulfilled") continue;
-      const subRes = outcome.value;
+      const { kind, res: subRes } = outcome.value;
       checkedPagesCount += 1;
       const $sub = cheerio.load(subRes.html);
-      $sub("script, style, noscript, svg").remove();
-      const subText = $sub("body").text().replace(/\s+/g, " ").trim();
+      const subTitle = $sub("title").first().text().trim().slice(0, 140);
+      const subText = extractVisibleTextClean($sub);
+
+      crawledPages.push({
+        url: subRes.finalUrl,
+        kind,
+        title: subTitle,
+        excerpt: subText.slice(0, 2200),
+      });
 
       for (const em of extractEmailsFromHtml($sub, subText)) {
         if (!extractedEmails.includes(em) && extractedEmails.length < 4) {
           extractedEmails.push(em);
         }
       }
-      for (const ph of extractPhonesFromHtml($sub)) {
+      for (const ph of extractPhonesFromHtml($sub, subText)) {
         if (!extractedPhones.includes(ph) && extractedPhones.length < 4) {
           extractedPhones.push(ph);
         }
@@ -608,9 +661,12 @@ export async function scanWebsite(
       if (!decisionMakerHint) {
         decisionMakerHint = extractDecisionMakerFromText(subText);
       }
+      if (!extractedAddressHint) {
+        extractedAddressHint = extractAddressFromText(subText);
+      }
       if (
         !hasHiringSignal &&
-        /\b(karriere|stellenangebote|wir suchen|mitarbeiter gesucht|offene stellen)\b/i.test(
+        /\b(karriere|stellenangebote|wir suchen|mitarbeiter gesucht|offene stellen|ausbildungsplatz|m\/w\/d)\b/i.test(
           subText,
         )
       ) {
@@ -620,7 +676,7 @@ export async function scanWebsite(
   }
 
   const copyrightYear = detectOldestCopyrightYear(bodyText);
-  const visibleSummary = bodyText.slice(0, 1400);
+  const visibleSummary = bodyText.slice(0, 1600);
   const detectedCms = detectCms(html, generator);
 
   const pageSpeed = options.includePageSpeed
@@ -646,9 +702,11 @@ export async function scanWebsite(
     hasHiringSignal,
     checkedPagesCount,
     decisionMakerHint,
+    extractedAddressHint,
     extractedEmails,
     extractedPhones,
     visibleSummary,
+    crawledPages,
     pageSpeed,
   };
 

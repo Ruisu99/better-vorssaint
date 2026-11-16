@@ -1,7 +1,10 @@
 import type {
   BrandProfile,
+  BuyingSignal,
   ContentFormat,
   Lead,
+  LeadFinding,
+  LeadPriority,
   OutreachChannel,
   TargetTrack,
 } from "./types";
@@ -20,22 +23,14 @@ export function buildLinkifySystemPrompt(brand: BrandProfile): string {
 
   const excluded = brand.excluded_services.map((e) => `- ${e}`).join("\n");
 
-  return `Du bist der interne Akquise-, Analyse- und Kommunikations-Assistent für "${brand.brand_name}" (Inhaber: ${brand.owner_name}, Standort: ${brand.city}, Website: ${brand.website_url}).
+  return `Du bist der strenge Qualifizierungs- und Text-Assistent für "${brand.brand_name}" (Inhaber: ${brand.owner_name}, Standort: ${brand.city}, Website: ${brand.website_url}).
 
 POSITIONIERUNG:
 ${brand.positioning_statement}
 
-KOMMUNIKATIONSREGELN (STRIKT EINHALTEN):
-${brand.tone_rules}
-- Schreibe konsequent in der "Ich"-Form aus Sicht von ${brand.owner_name} (${brand.brand_name}), NICHT als künstlich aufgeblasenes "wir sind eine Full-Service-Agentur".
-- Erst ein freundlicher, echter Bezug zur Branche/Ausgangslage, dann ein sachlicher Befund.
-- Nicht belehrend, nicht überheblich, nicht kleinteilig ("wir fixen einen Button"), sondern klar auf vollständige Neukonzeption/Relaunch oder maßgeschneiderte Web-App ausgerichtet.
-- KEINE Emojis, KEINE übertriebenen Marketing-Versprechen, KEINE leeren Buzzwords.
-- Platzhalter wie [UNTERNEHMEN], [ANSPRECHPARTNER] oder [WEBSITE_URL] exakt so beibehalten – sie werden erst nach deiner Antwort lokal eingesetzt.
-
-STRIKTES ANTI-HALLUZINATIONS-GEBOT:
-- Erfinde NIEMALS Kennzahlen, Conversion-Steigerungen, Besucherzahlen, Testimonials oder nicht belegte Kundenreferenzen.
-- Nutze ausschließlich die übergebenen strukturierten Scan-Signale und folgende verifizierte Referenzen:
+STRENGES ANTI-HALLUZINATIONS-GEBOT:
+- Erfinde NIEMALS Kennzahlen, Zitate, Mitarbeiterzahlen, Testimonials oder nicht belegte Kundenreferenzen.
+- Nutze ausschließlich die übergebenen abgerufenen Seiteninhalte und diese verifizierten Referenzen:
 ${refsList}
 
 KERNLEISTUNGEN:
@@ -46,46 +41,367 @@ ${excluded}`;
 }
 
 /**
- * Summarizes only technical/structural signals without dumping raw scraped HTML paragraphs (privacy-minimized).
+ * Builds the strict 5-condition Notion Lead-Radar prompt that qualifies/rejects
+ * AND produces Kurzprofil, Befunde+Zitate, Kaufsignale, E-Mail-Pitch & DIN-5008 Brieffassung in ONE call.
  */
+export function buildStrictNotionQualificationPrompt(params: {
+  brand: BrandProfile;
+  lead: Lead;
+}): string {
+  const { lead } = params;
+  const pages = lead.scan_data?.crawledPages ?? [];
+  const pageDump =
+    pages.length > 0
+      ? pages
+          .map(
+            (p) =>
+              `--- SEITE [${p.kind.toUpperCase()}] URL: ${p.url}\nTitel: ${p.title}\nSichtbarer Text:\n${p.excerpt.slice(0, 1600)}`,
+          )
+          .join("\n\n")
+      : `--- STARTSEITE URL: ${lead.website_url}\n${lead.scan_data?.visibleSummary ?? lead.research_summary}`;
+
+  const techSignals = lead.scan_data
+    ? `HTTPS: ${lead.scan_data.httpsEnabled ? "Ja" : "Nein"} | Viewport-Tag: ${lead.scan_data.hasViewportMeta ? "Ja" : "Nein"} | System: ${lead.scan_data.detectedCms} | Antwortzeit: ${lead.scan_data.responseTimeMs} ms | Kontaktformular/CTA: ${lead.scan_data.hasContactFormOrCta ? "Ja" : "Nein"} | Karriere-Signal: ${lead.scan_data.hasHiringSignal ? "Ja" : "Nein"}`
+    : "Keine technischen Scan-Daten";
+
+  return `Prüfe diesen Kandidaten streng nach der Linkify-Qualifikationshürde (Qualität geht vor Menge!):
+
+KANDIDAT:
+Unternehmen: ${lead.company_name}
+Branche: ${lead.industry || "unbekannt"}
+Ort: ${lead.city || "unbekannt"}
+Postanschrift: ${lead.postal_address || "keine erkannt"}
+Entscheider: ${lead.decision_maker || "unbekannt"}
+Geschäftliche E-Mail: ${lead.contact_email || "keine erkannt"}
+Website: ${lead.website_url}
+Technische Basis: ${techSignals}
+
+ABGERUFENE SEITENINHALTE:
+${pageDump}
+
+QUALIFIKATIONSHÜRDE (ALLE 5 BEDINGUNGEN PRÜFEN):
+1. Ist die Website im Gesamteindruck klar und substanziell relaunch-bedürftig? (Wenn sie bereits aktuell, professionell, klar strukturiert und mobil schlüssig wirkt -> qualified: false!)
+2. Liegen mindestens 2 voneinander unabhängige, geschäftlich relevante harte Website-Signale vor?
+   HARTE SIGNALE: seit >=2 Jahren stehengebliebene geschäftliche Hinweise (z. B. Corona 2020-2022, alte News/Termine), sichtbare Platzhalter/Testtexte/kaputte Bilder, veraltete/widersprüchliche Kontaktdaten/Leistungen, defekter Anfrage-/Bewerbungsweg, klar fehlende mobile Nutzbarkeit/Viewport oder veraltete Struktur.
+   NICHT ZULÄSSIG als hartes Signal: einzelne Tippfehler, ".php"-URLs, altes Copyright-Jahr im Footer allein, allgemeines Kontaktformular, fehlende Online-Buchung allein, isolierte Zähler/DOM-Artefakte wie "0", "0%", "0123456789".
+3. Liegt mindestens 1 starkes (mehrere Standorte, Expansion, aktive Werbung auf schwache Seite, hochpreisige Leistungen + etablierter Betrieb) ODER 2 moderate Kaufsignale (aktuelle Stellenangebote, starke lokale Position, erklärungsbedürftige Leistungen) öffentlich belegt vor?
+4. Hat ein vollständiger Relaunch einen klaren wirtschaftlichen Nutzen im mittleren vierstelligen Bereich (kein Konzern/Filialkette ab ~100 MA, kein Kleinstbetrieb ohne Budget)?
+5. Liegt für jeden Befund ein exaktes wörtliches Zitat aus dem obigen Text und die konkrete Quell-URL vor?
+
+SCORE-REGEL:
+- "heiss": >=2 starke harte Signale + >=1 starkes oder 2 moderate Kaufsignale + klarer Nutzen + namentlicher Entscheider UND vollständige Postanschrift vorhanden -> contactChannel: "brief"
+- "warm": >=2 harte Signale + wirtschaftliche Passung, aber Entscheider, Adresse oder Kaufsignal schwächer -> contactChannel: "email" (wenn E-Mail vorhanden, sonst "brief")
+- "kalt": qualified: false setzen!
+
+FORMELLE TEXT-REGELN FÜR E-MAIL UND BRIEF (STRIKT!):
+- Anrede: Bei bekanntem Nachnamen "Sehr geehrte Frau [Nachname]," oder "Sehr geehrter Herr [Nachname],", sonst "Sehr geehrte Damen und Herren,". Nach dem Komma geht der erste Satz klein weiter (außer Nomen/Name). Kein "Guten Tag"!
+- Betreff: Konkret und sachlich, z. B. "Neuer Internetauftritt für [Unternehmen]" oder "Neue Website für [Praxisname]". Nicht "Ihre Website" oder "Kurze Frage".
+- Ton: KEIN Lob ("starke Kombination", "tolles Unternehmen"), KEIN Nacherzählen der Firmengeschichte/Gründungsjahr, KEINE Belehrung, KEINE Gedankenstriche ("—" oder " – ") zur Satztrennung, KEINE Erwähnung von Anlagen oder Screenshots!
+- E-Mail-Pitch (max. 140 Wörter ohne Anrede/Signatur, genau 3 Absätze):
+  Absatz 1 beginnt exakt mit: "ich bin selbstständiger Webdesigner aus Erfurt und habe mir Ihre Website angesehen." Danach stärkster harter Befund mit wörtlichem Zitat + 1 Satz, was er für Kunden/Patienten/Bewerber bedeutet (+ optional 2. Befund in 1 Satz).
+  Absatz 2: Linkify als kompletter Neuaufbau von Gestaltung bis Technik mit Luis als direktem Ansprechpartner + www.Linkify.tech im Fließtext + 1 Satz Nutzen für dieses Unternehmen.
+  Absatz 3: Angebot kostenloses 5-Minuten-Video + "Eine kurze Antwort auf diese Mail genügt."
+- Brieffassung (max. 150 Wörter ohne Anrede/Grußformel, genau 3 Absätze):
+  Gleicher direkter Aufbau und Ton wie die E-Mail; Absatz 1 beginnt mit "ich bin selbstständiger Webdesigner aus Erfurt und habe mir Ihre Website angesehen.", im 3. Absatz info@linkify.tech und +49 155 63477504 als Antwortweg nennen.
+
+Gib deine Antwort exakt als valides JSON ohne Markdown-Codeblock zurück:
+{
+  "qualified": true | false,
+  "rejectionReason": "Nur ausfüllen wenn qualified=false",
+  "score": "heiss" | "warm",
+  "contactChannel": "brief" | "email",
+  "kurzprofil": "3-4 präzise Sätze zu Unternehmen, Standort, Angebot und konkretem Kaufsignal.",
+  "relaunchBenefit": "Ein Satz aus Sicht des Unternehmens zum geschäftlichen Nutzen eines Relaunchs.",
+  "scoreReason": "Ein Satz Begründung für Heiß oder Warm.",
+  "hardSignals": [
+    {
+      "title": "Kurztitel des Befunds",
+      "evidence": "Sachliche Beobachtung",
+      "quote": "Exaktes wörtliches Zitat aus dem Text oben",
+      "sourceUrl": "Exakte URL aus den abgerufenen Seiten",
+      "verification": "Warum es sichtbarer Endzustand und kein Artefakt ist",
+      "businessImpact": "Bedeutung für Kunden, Patienten oder Bewerber",
+      "category": "technik" | "mobile" | "vertrauen" | "ux",
+      "severity": "hoch" | "mittel"
+    }
+  ],
+  "buyingSignals": [
+    {
+      "strength": "stark" | "moderat",
+      "signal": "Bezeichnung des Kaufsignals",
+      "evidence": "Konkreter Beleg",
+      "quote": "Kurzes wörtliches Zitat falls vorhanden",
+      "sourceUrl": "Exakte Quell-URL"
+    }
+  ],
+  "followUpNote": "Sinnvollste Ansprechperson, natürlicher Einstiegssatz nach 8-10 Tagen und stärkstes geschäftliches Argument in einem Satz.",
+  "emailSubject": "Neuer Internetauftritt für ...",
+  "emailBody": "Sehr geehrte(r) ...,\n\nich bin selbstständiger Webdesigner aus Erfurt...\n\n...\n\n...",
+  "letterSubject": "Neuer Internetauftritt für ...",
+  "letterBody": "Sehr geehrte(r) ...,\n\nich bin selbstständiger Webdesigner aus Erfurt...\n\n...\n\n..."
+}`;
+}
+
+export function buildFormalSalutation(decisionMaker: string): string {
+  const dm = decisionMaker.trim();
+  if (!dm || dm === "[ANSPRECHPARTNER]") {
+    return "Sehr geehrte Damen und Herren,";
+  }
+
+  // Handle multiple persons separated by ; or , or "und" -> fall back to single if unclear
+  const firstPerson = dm.split(/[;]/)[0].trim();
+  const parts = firstPerson.split(/\s+/).filter(Boolean);
+  const lastName = parts[parts.length - 1]?.replace(/,$/, "") ?? "";
+  if (!lastName || lastName.length < 2) {
+    return "Sehr geehrte Damen und Herren,";
+  }
+
+  const lower = firstPerson.toLowerCase();
+  if (/^frau\b/.test(lower) || /\b(anna|anne|bianca|cornelia|katrin|michaela|peggy|silke|barby|sandra|sabine|julia|laura|katharina|petra|susanne|claudia|andrea|martina|stefanie|christina|monika)\b/i.test(lower)) {
+    const titlePrefix = /\bdr\./i.test(firstPerson) ? "Dr. " : "";
+    return `Sehr geehrte Frau ${titlePrefix}${lastName},`;
+  }
+  if (/^herr\b/.test(lower) || /\b(thomas|stefan|ulrich|stephan|rolf-martin|carsten|andreas|sven|tobias|frank|ingo|wolfram|heiko|alexander|jürgen|danny|bernd|ferenc|kuno|jan|hans-joachim|martin|michael|markus|christian|matthias|sebastian|daniel|peter|klaus|jörg|uwe|dirk|ralf|holger|torsten|jens)\b/i.test(lower)) {
+    const titlePrefix = /\bdr\./i.test(firstPerson) ? "Dr. " : "";
+    return `Sehr geehrter Herr ${titlePrefix}${lastName},`;
+  }
+
+  return "Sehr geehrte Damen und Herren,";
+}
+
+export function normalizeFormalText(text: string): string {
+  return text
+    .replace(/\r\n/g, "\n")
+    .replace(/\s+[—–]\s+/g, ", ")
+    .replace(/^Guten Tag[^,\n]*,/im, "")
+    .trim();
+}
+
+export function ensureEmailSignature(
+  body: string,
+  brand: BrandProfile,
+): string {
+  const cleaned = normalizeFormalText(body)
+    .replace(/Mit freundlichen Grüßen[\s\S]*$/i, "")
+    .trim();
+
+  const phone = brand.phone_mobile || "+49 155 63477504";
+  const email = brand.contact_email || "info@linkify.tech";
+  const web = brand.website_url
+    .replace(/^https?:\/\//i, "")
+    .replace(/\/$/, "");
+
+  const signature = `Mit freundlichen Grüßen
+
+${brand.owner_name}
+Linkify · Webentwicklung & Webdesign
+Web: ${web.startsWith("www.") ? web : `www.${web}`}
+E-Mail: ${email}
+Telefon: ${phone}`;
+
+  return `${cleaned}\n\n${signature}`;
+}
+
+export function ensureLetterClosing(
+  body: string,
+  brand: BrandProfile,
+): string {
+  const cleaned = normalizeFormalText(body)
+    .replace(/Mit freundlichen Grüßen[\s\S]*$/i, "")
+    .trim();
+
+  return `${cleaned}\n\nMit freundlichen Grüßen\n\n${brand.owner_name}`;
+}
+
+export interface ParsedNotionQualification {
+  qualified: boolean;
+  rejectionReason: string;
+  score: LeadPriority;
+  contactChannel: "brief" | "email";
+  kurzprofil: string;
+  relaunchBenefit: string;
+  scoreReason: string;
+  findings: LeadFinding[];
+  buyingSignals: BuyingSignal[];
+  followUpNote: string;
+  emailSubject: string;
+  emailBody: string;
+  letterSubject: string;
+  letterBody: string;
+}
+
+export function parseAndValidateNotionOutput(params: {
+  rawJsonText: string;
+  lead: Lead;
+  brand: BrandProfile;
+}): ParsedNotionQualification | null {
+  const { rawJsonText, lead, brand } = params;
+  const cleaned = rawJsonText
+    .replace(/^```json\s*/i, "")
+    .replace(/^```\s*/i, "")
+    .replace(/```\s*$/i, "")
+    .trim();
+
+  let data: Record<string, unknown>;
+  try {
+    const start = cleaned.indexOf("{");
+    const end = cleaned.lastIndexOf("}");
+    const slice =
+      start !== -1 && end > start ? cleaned.slice(start, end + 1) : cleaned;
+    data = JSON.parse(slice) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+
+  const qualified = Boolean(data.qualified);
+  const rejectionReason = String(data.rejectionReason ?? "").trim();
+
+  const rawFindings = Array.isArray(data.hardSignals) ? data.hardSignals : [];
+  const findings: LeadFinding[] = rawFindings
+    .slice(0, 6)
+    .map((item) => {
+      const rec = (item ?? {}) as Record<string, unknown>;
+      const quote = String(rec.quote ?? "").trim().slice(0, 260);
+      const sourceUrl = String(rec.sourceUrl ?? lead.website_url).trim();
+      return {
+        category: (["technik", "mobile", "vertrauen", "ux"].includes(
+          String(rec.category),
+        )
+          ? String(rec.category)
+          : "ux") as LeadFinding["category"],
+        severity: (String(rec.severity) === "hoch"
+          ? "hoch"
+          : "mittel") as LeadFinding["severity"],
+        title: String(rec.title ?? "").trim().slice(0, 160),
+        evidence: String(rec.evidence ?? "").trim().slice(0, 400),
+        quote,
+        sourceUrl,
+        verification: String(rec.verification ?? "").trim().slice(0, 300),
+        businessImpact: String(rec.businessImpact ?? "").trim().slice(0, 320),
+        verified: Boolean(quote && sourceUrl),
+      };
+    })
+    .filter((f) => f.title && (f.quote || f.evidence));
+
+  const rawBuying = Array.isArray(data.buyingSignals) ? data.buyingSignals : [];
+  const buyingSignals: BuyingSignal[] = rawBuying
+    .slice(0, 5)
+    .map((item) => {
+      const rec = (item ?? {}) as Record<string, unknown>;
+      return {
+        strength: (String(rec.strength) === "stark"
+          ? "stark"
+          : "moderat") as BuyingSignal["strength"],
+        signal: String(rec.signal ?? "").trim().slice(0, 140),
+        evidence: String(rec.evidence ?? "").trim().slice(0, 360),
+        quote: String(rec.quote ?? "").trim().slice(0, 220),
+        sourceUrl: String(rec.sourceUrl ?? lead.website_url).trim(),
+      };
+    })
+    .filter((b) => b.signal && b.evidence);
+
+  // Enforce strict 5-condition hurdle: must have >=2 independent hard signals & >=1 strong or 2 moderate buying signals
+  const hasEnoughBuyingSignals =
+    buyingSignals.some((b) => b.strength === "stark") ||
+    buyingSignals.filter((b) => b.strength === "moderat").length >= 2;
+
+  if (!qualified || findings.length < 2 || !hasEnoughBuyingSignals) {
+    return {
+      qualified: false,
+      rejectionReason:
+        rejectionReason ||
+        "Qualifikationshürde nicht erfüllt (mind. 2 unabhängige harte Website-Signale + belegtes Kaufsignal erforderlich).",
+      score: "kalt",
+      contactChannel: "email",
+      kurzprofil: "",
+      relaunchBenefit: "",
+      scoreReason: "",
+      findings,
+      buyingSignals,
+      followUpNote: "",
+      emailSubject: "",
+      emailBody: "",
+      letterSubject: "",
+      letterBody: "",
+    };
+  }
+
+  const hasNamedDecisionMaker = lead.decision_maker.trim().length >= 4;
+  const hasFullPostal = lead.postal_address.trim().length >= 8;
+
+  const requestedScore = String(data.score ?? "warm").toLowerCase();
+  const score: LeadPriority =
+    requestedScore === "heiss" && hasNamedDecisionMaker && hasFullPostal
+      ? "heiss"
+      : "warm";
+
+  const contactChannel: "brief" | "email" =
+    score === "heiss"
+      ? "brief"
+      : lead.contact_email.trim()
+        ? "email"
+        : hasFullPostal
+          ? "brief"
+          : "email";
+
+  const salutation = buildFormalSalutation(lead.decision_maker);
+
+  let emailBody = String(data.emailBody ?? "").trim();
+  if (!/^sehr geehrte/i.test(emailBody)) {
+    emailBody = `${salutation}\n\n${emailBody}`;
+  }
+  emailBody = ensureEmailSignature(emailBody, brand);
+
+  let letterBody = String(data.letterBody ?? "").trim();
+  if (!/^sehr geehrte/i.test(letterBody)) {
+    letterBody = `${salutation}\n\n${letterBody}`;
+  }
+  letterBody = ensureLetterClosing(letterBody, brand);
+
+  const defaultSubject = `Neuer Internetauftritt für ${lead.company_name}`;
+  const emailSubject =
+    String(data.emailSubject ?? "").trim().slice(0, 140) || defaultSubject;
+  const letterSubject =
+    String(data.letterSubject ?? "").trim().slice(0, 140) || defaultSubject;
+
+  return {
+    qualified: true,
+    rejectionReason: "",
+    score,
+    contactChannel,
+    kurzprofil: String(data.kurzprofil ?? "").trim().slice(0, 1200),
+    relaunchBenefit: String(data.relaunchBenefit ?? "").trim().slice(0, 500),
+    scoreReason: String(data.scoreReason ?? "").trim().slice(0, 450),
+    findings,
+    buyingSignals,
+    followUpNote: String(data.followUpNote ?? "").trim().slice(0, 600),
+    emailSubject,
+    emailBody,
+    letterSubject,
+    letterBody,
+  };
+}
+
 function summarizeLeadFacts(lead: Lead): string {
   const findingsText =
     lead.findings.length > 0
       ? lead.findings
           .map(
             (f) =>
-              `- [${f.severity.toUpperCase()}] ${f.title} (Signal: ${f.evidence})`,
+              `- [${f.severity.toUpperCase()}] ${f.title}${f.quote ? ` (Zitat: "${f.quote}")` : ""} (Quelle: ${f.sourceUrl || lead.website_url})`,
           )
           .join("\n")
       : "- Noch keine automatisierten technischen Befunde gespeichert.";
 
-  const scanBlock = lead.scan_data
-    ? `Technische Website-Signale (${lead.scan_data.scannedAt.slice(0, 10)}):
-  HTTPS aktiv: ${lead.scan_data.httpsEnabled ? "Ja" : "Nein"}
-  HTTP Status: ${lead.scan_data.statusCode}, Antwortzeit: ${lead.scan_data.responseTimeMs} ms
-  CMS/Stack-Hinweis: ${lead.scan_data.detectedCms}
-  Mobile Viewport Tag: ${lead.scan_data.hasViewportMeta ? "Vorhanden" : "Fehlt"}
-  Seitentitel-Thema: "${lead.scan_data.title.slice(0, 90)}"
-  H1-Fokus: "${lead.scan_data.h1.slice(0, 90)}"
-  Copyright-Jahr: ${lead.scan_data.copyrightYear ?? "nicht erkannt"}
-  Impressum/Datenschutz: ${lead.scan_data.hasImprintLink ? "Impressum OK" : "Impressum unklar"} / ${lead.scan_data.hasPrivacyLink ? "Datenschutz OK" : "Datenschutz unklar"}
-  Recruiting-/Stellen-Signal: ${lead.scan_data.hasHiringSignal ? "Ja" : "Nein"}
-  PageSpeed Mobil: ${lead.scan_data.pageSpeed?.performanceScore ?? "nicht gemessen"}`
-    : "Kein Live-Website-Scan vorhanden.";
-
   return `UNTERNEHMEN: ${lead.company_name}
 Branche: ${lead.industry || "unbekannt"}
-Track: ${lead.target_track === "startup" ? "Startup / Produktteam" : "Lokales Unternehmen / KMU"}
-Region/Ort: ${lead.city || "DACH"}
+Region/Ort: ${lead.city || "Deutschland"}
 Website: ${lead.website_url || "keine hinterlegt"}
 Ansprechpartner: ${lead.decision_maker || "[ANSPRECHPARTNER]"}
-Visuelle Prüfung durch Inhaber: Desktop=${lead.visual_checked_desktop ? "Geprüft" : "Offen"}, Mobil=${lead.visual_checked_mobile ? "Geprüft" : "Offen"}
-Eigene visuelle Notizen: ${lead.visual_notes || "keine"}
+Kurzprofil: ${lead.research_summary || "keines"}
 
 BEFUNDE:
-${findingsText}
-
-${scanBlock}`;
+${findingsText}`;
 }
 
 export function buildQualificationPrompt(lead: Lead): string {
@@ -94,9 +410,9 @@ Gib deine Antwort exakt als valides JSON ohne Markdown-Codeblock zurück:
 {
   "priority": "heiss" | "warm" | "kalt",
   "targetTrack": "kmu" | "startup",
-  "researchSummary": "2-3 präzise Sätze zur Ausgangslage des Unternehmens, rein auf Basis der vorliegenden Signale.",
-  "pitchAngle": "1-2 konkrete Sätze, welches Linkify-Angebot (Relaunch, UX-Konzeption oder Web-App/Automatisierung) hier den höchsten Nutzen stiftet.",
-  "recommendedChannel": "video_audit" | "email" | "brief",
+  "researchSummary": "3 präzise Sätze zur Ausgangslage des Unternehmens, rein auf Basis der vorliegenden Signale.",
+  "pitchAngle": "1-2 konkrete Sätze, welches Linkify-Angebot hier den höchsten Nutzen stiftet.",
+  "recommendedChannel": "brief" | "email",
   "nextVisualCheckHints": ["Konkreter Punkt 1 für die visuelle Prüfung Desktop/Mobil", "Punkt 2"]
 }
 
@@ -111,44 +427,62 @@ export function buildOutreachPrompt(params: {
   extraContext?: string;
 }): string {
   const { lead, channel, extraContext, brand } = params;
+  const salutation = buildFormalSalutation(lead.decision_maker);
   const channelInstructions: Record<OutreachChannel, string> = {
-    email: `Erstelle eine persönliche Erstansprache per E-Mail an ${lead.company_name}.
+    email: `Erstelle eine formelle, direkte E-Mail nach den Linkify-Pitch-Regeln für ${lead.company_name}.
+Anrede: ${salutation}
+KEIN Lob, KEINE Firmengeschichte, KEINE Gedankenstriche zur Satztrennung, KEINE Anlagen-Hinweise.
 Format:
-BETREFF: <kurzer, unaufgeregter Betreff ohne Clickbait>
+BETREFF: Neuer Internetauftritt für ${lead.company_name}
 ---
-<E-Mail-Text, max. 140-180 Wörter, Sie-Anrede außer Startup-Kontext legt Du nahe, freundlicher Bezug zu ${lead.company_name}, 1-2 sachliche Beobachtungen mit Ausrichtung auf einen sauberen Relaunch/Neuaufbau, Angebot für ein kurzes 2-Minuten-Video-Audit oder unverbindliches Erstgespräch, Signatur von ${brand.owner_name} (${brand.brand_name}, ${brand.website_url})>`,
-    brief: `Erstelle einen druckfertigen persönlichen Anschreiben-Entwurf für einen postalischen Brief (DIN 5008 kompatibler Brieftext) an ${lead.company_name}.
+${salutation}
+
+ich bin selbstständiger Webdesigner aus Erfurt und habe mir Ihre Website angesehen. <stärkster harter Befund mit Zitat + Bedeutung>
+
+Mit Linkify baue ich Websites komplett neu, von der Gestaltung bis zur Technik, und bin dabei selbst Ihr Ansprechpartner unter www.Linkify.tech. <1 Satz Nutzen für dieses Unternehmen>
+
+<Angebot kostenloses 5-Minuten-Video + Eine kurze Antwort auf diese Mail genügt.>`,
+    brief: `Erstelle eine druckfertige formelle Brieffassung (max. 150 Wörter, genau 3 Absätze, KEIN Lob, KEINE Gedankenstriche, KEINE Anlagen-Hinweise) für ${lead.company_name}.
 Format:
-BETREFF: <klarer sachlicher Betreff>
+BETREFF: Neuer Internetauftritt für ${lead.company_name}
 ---
-<Brieftext max. 210 Wörter, freundlich, konkret, ohne Floskeln, Fokus auf ganzheitliche Website-Neukonzeption und direkten persönlichen Ansprechpartner in ${brand.city}, Signatur ${brand.owner_name}>`,
-    video_audit: `Erstelle ein strukturiertes 90-Sekunden-Video-Audit-Skript (Loom / Bildschirmaufnahme) für ${brand.owner_name} zu ${lead.company_name}.
+${salutation}
+
+ich bin selbstständiger Webdesigner aus Erfurt und habe mir Ihre Website angesehen. <stärkster harter Befund mit Zitat + Bedeutung>
+
+Mit Linkify baue ich Websites komplett neu, von der Gestaltung bis zur Technik, und bin dabei selbst Ihr Ansprechpartner unter www.Linkify.tech. <1 Satz Nutzen>
+
+<Angebot kostenloses 5-Minuten-Video + info@linkify.tech und ${brand.phone_mobile || "+49 155 63477504"} als Antwortweg nennen>`,
+    video_audit: `Erstelle ein strukturiertes 5-Minuten-Video-Audit-Skript für ${brand.owner_name} zu ${lead.company_name}.
 Format:
 BETREFF: Video-Audit-Leitfaden für ${lead.company_name}
 ---
-1. Einstieg (15s): Persönliche Begrüßung und kurzer Bezug zu ${lead.company_name}
-2. Live-Beobachtung Desktop & Mobil (45s): Verifizierte Befunde + offene Prüf-Fragen für das Durchklicken
-3. Konkretes Zielbild (20s): Wie ein sauberer Relaunch / Produkt-Upgrade bei Linkify aussieht (inkl. passender echter Referenz)
-4. Ruhiger Abschluss (10s): Unverbindliche Einladung zum kurzen Austausch`,
-    follow_up: `Erstelle ein höfliches, kurzes Follow-up (max. 90 Wörter) nach ausbleibender Rückmeldung auf den Erstkontakt. Kein Druck, kurzer Nutzen-Impuls.
+1. Einstieg (30s): Kurze Begrüßung und konkreter Anlass
+2. Beobachtung auf der aktuellen Website (2 Min.): Verifizierte harte Befunde am Live-Beispiel
+3. Zielbild (2 Min.): Wie eine neue Struktur auf www.Linkify.tech-Niveau aussieht
+4. Ruhiger Abschluss (30s): Nächster Schritt ohne Druck`,
+    follow_up: `Erstelle ein höfliches, kurzes Follow-up (max. 90 Wörter) nach 8-10 Tagen auf das vorherige Schreiben.
 Format:
-BETREFF: Kurze Rückfrage zu ${lead.company_name}
+BETREFF: Neuer Internetauftritt für ${lead.company_name}
 ---
-<Follow-up Text>`,
-    reply_draft: `Der Interessent (${lead.company_name}) hat geantwortet oder einen Einwand geschickt. Entwirf eine souveräne, sachliche Antwort in der Ich-Form, die auf die Rückfrage eingeht, erst das Ziel/Problem versteht und passende Erstgesprächs-Fragen einbindet.
+${salutation}
+
+<Kurzer natürlicher Bezug auf das vorherige Schreiben und stärkstes geschäftliches Argument>`,
+    reply_draft: `Der Interessent (${lead.company_name}) hat geantwortet. Entwirf eine sachliche, formelle Antwort.
 Format:
-BETREFF: Re: Ihr Projekt bei ${lead.company_name}
+BETREFF: Re: Neuer Internetauftritt für ${lead.company_name}
 ---
+${salutation}
+
 <Antwortentwurf>
 
-EINGANGSNACHRICHT / KONTEXT DES KUNDEN:
-${extraContext || "Interessent fragt nach Ablauf und ungefährem Aufwand."}`,
-    angebot_outline: `Erstelle eine strukturierte, unverbindliche Scope- und Angebots-Gliederung für das Erstgespräch oder Angebots-Dokument (keine verbindlichen Festpreise erfinden!).
-Nutze Linkifys Standardablauf: Erstgespräch -> Scope & Angebot -> Kick-off & Materialübergabe -> Struktur/Design/Prototyp -> Umsetzung -> Review -> Abnahme & Go-live -> Dokumentierte Übergabe/Betreuung.
+EINGANGSNACHRICHT:
+${extraContext || "Interessent fragt nach Ablauf und Aufwand."}`,
+    angebot_outline: `Erstelle eine unverbindliche Scope-Gliederung für ${lead.company_name}.
 Format:
-BETREFF: Projekt-Gliederung & Scope-Vorschlag: ${lead.company_name}
+BETREFF: Projekt-Gliederung: ${lead.company_name}
 ---
-<Strukturierter Scope-Entwurf inkl. Abgrenzung, Mitwirkungspflichten des Kunden und offenen Klärungspunkten>`,
+<Strukturierter Scope-Entwurf>`,
   };
 
   return `${channelInstructions[channel]}
@@ -167,31 +501,25 @@ export function buildContentPrompt(params: {
 }): string {
   const formatGuide: Record<ContentFormat, string> = {
     linkedin:
-      "LinkedIn-Beitrag (ca. 140–220 Wörter): Ruhiger, persönlicher Erfahrungsbericht in Ich-Form. Konkreter Einstieg aus der Praxis, 2–3 nachvollziehbare Erkenntnisse, klare Kernaussage am Ende. Keine Hashtag-Flut (max. 3 sachliche Hashtags), keine Emojis.",
+      "LinkedIn-Beitrag (ca. 140–220 Wörter): Ruhiger, persönlicher Erfahrungsbericht in Ich-Form. Keine Emojis.",
     website_insight:
-      "Website-Insight / Fachbeitrag (ca. 250–380 Wörter): Klar gegliederter Praxisartikel für linkify.tech mit H2-Zwischenüberschriften, starker Nutzenorientierung für Entscheider und ruhigem CTA zum Erstgespräch.",
+      "Website-Insight / Fachbeitrag (ca. 250–380 Wörter): Klar gegliedert für linkify.tech.",
     case_study:
-      "Referenz-Story (ca. 180–260 Wörter): Fokus auf Problem -> methodischer Ansatz -> konkret umgesetzte Lösung. Ausschließlich verifizierte Fakten der gewählten Referenz verwenden, nichts hinzuerfinden.",
+      "Referenz-Story (ca. 180–260 Wörter): Ausschließlich verifizierte Fakten.",
     outreach_hook:
-      "Gesprächs- & Akquise-Aufhänger (3 kurze Varianten à 2–3 Sätze): Direkt einsetzbar in E-Mails oder Video-Audits für die gewählte Zielgruppe.",
+      "Gesprächs- & Akquise-Aufhänger (3 kurze Varianten à 2–3 Sätze).",
   };
 
-  return `Erstelle einen Content-Entwurf im Format "${params.format}" für die Zielgruppe "${params.targetTrack === "startup" ? "Startups & Produktteams" : "Lokale Unternehmen & KMU"}".
-
-FORMAT-VORGABE:
-${formatGuide[params.format]}
-
-VERIFIZIERTE BASIS / REFERENZ:
-${params.sourceBasis}
-
-THEMA / EIGENE BEOBACHTUNG:
-${params.userTopic}
+  return `Erstelle einen Content-Entwurf im Format "${params.format}" für "${params.targetTrack === "startup" ? "Startups & Produktteams" : "Lokale Unternehmen & KMU"}".
+FORMAT: ${formatGuide[params.format]}
+BASIS: ${params.sourceBasis}
+THEMA: ${params.userTopic}
 
 Gib das Ergebnis exakt als valides JSON ohne Markdown-Codeblock zurück:
 {
-  "title": "Prägnante Überschrift / Titel",
-  "body": "Der vollständige, direkt nutzbare Text",
-  "verificationNotes": ["Liste konkreter Punkte, die vor Veröffentlichung manuell geprüft werden sollten (z. B. Kundenfreigabe, Link, konkrete Details)"]
+  "title": "Prägnante Überschrift",
+  "body": "Der vollständige Text",
+  "verificationNotes": ["Prüfpunkte vor Veröffentlichung"]
 }`;
 }
 
@@ -202,58 +530,76 @@ export function buildFallbackOutreach(params: {
   extraContext?: string;
 }): { subject: string; body: string } {
   const { brand, lead, channel, extraContext } = params;
-  const greeting =
-    lead.decision_maker && lead.decision_maker !== "[ANSPRECHPARTNER]"
-      ? `Guten Tag ${lead.decision_maker},`
-      : `Guten Tag,`;
-  const firstFinding =
-    lead.findings[0]?.title ??
-    "einige Punkte rund um mobile Nutzerführung und klare Leistungsstruktur";
-  const visualHint = lead.visual_notes
-    ? ` Bei meiner persönlichen Durchsicht fiel mir zudem auf: ${lead.visual_notes}`
-    : "";
+  const salutation = buildFormalSalutation(lead.decision_maker);
+  const firstFinding = lead.findings[0];
+  const findingSentence = firstFinding?.quote
+    ? `Auf Ihrer Website steht sichtbar „${firstFinding.quote}“ (${firstFinding.title}).`
+    : firstFinding?.title
+      ? `Bei der Durchsicht ist mir aufgefallen: ${firstFinding.title}.`
+      : "Auf Ihrer Website sind wichtige Leistungs- und Kontaktinformationen für Interessenten und Bewerber aktuell nicht klar geführt.";
 
-  if (channel === "video_audit") {
-    return {
-      subject: `Video-Audit-Leitfaden: ${lead.company_name}`,
-      body: `1. Einstieg (15s)\n${greeting} ich bin ${brand.owner_name} von ${brand.brand_name} in ${brand.city}. Ich habe mir Ihren aktuellen Webauftritt kurz angesehen und ein paar konkrete Gedanken festgehalten.\n\n2. Konkrete Beobachtungen (45s)\n- Ausgangspunkt: ${firstFinding}.${visualHint}\n- Fokus beim Durchklicken: Mobil-Darstellung, Kontaktwege und Verständlichkeit der Leistungen.\n\n3. Zielbild (20s)\nStatt einzelne Stellen zu flicken, hilft hier eine klare Neukonzeption, wie ich sie z. B. bei der Förderkraft GmbH in Webflow umgesetzt habe – ruhig, schnell und leicht pflegbar.\n\n4. Abschluss (10s)\nWenn das für Sie interessant ist, sprechen wir gerne 15 Minuten unverbindlich dazu. (${brand.website_url})`,
-    };
-  }
+  const phone = brand.phone_mobile || "+49 155 63477504";
+  const email = brand.contact_email || "info@linkify.tech";
 
   if (channel === "brief") {
+    const body = `${salutation}
+
+ich bin selbstständiger Webdesigner aus Erfurt und habe mir Ihre Website angesehen. ${findingSentence} Für Kunden und Bewerber entsteht dadurch unnötige Reibung im ersten Eindruck.
+
+Mit Linkify baue ich Websites komplett neu, von der Gestaltung bis zur Technik, und bin dabei selbst Ihr Ansprechpartner unter www.Linkify.tech. Für ${lead.company_name} würde ein klar strukturierter Neuaufbau Ihre Leistungen und den direkten Kontaktweg sauber bündeln.
+
+Gern erstelle ich Ihnen dazu kostenlos ein Video von etwa fünf Minuten, das konkrete Ansätze für einen neuen Auftritt zeigt. Für eine kurze Rückmeldung erreichen Sie mich unter ${email} oder ${phone}.`;
+
     return {
-      subject: `Ihr digitaler Auftritt bei ${lead.company_name}`,
-      body: `${greeting}\n\nich arbeite als freiberuflicher Fullstack-Entwickler und Webdesigner unter Linkify hier aus ${brand.city} direkt mit Unternehmen aus der Region zusammen – ohne Agentur-Overhead.\n\nBeim Blick auf Ihren aktuellen Auftritt von ${lead.company_name} fiel mir positiv auf, wie klar Ihr Leistungsangebot im Kern aufgestellt ist. Gleichzeitig zeigt die technische Prüfung: ${firstFinding}.${visualHint}\n\nIch bin überzeugt, dass ein sauber neu aufgesetzter Webauftritt deutlich besser zur Qualität Ihrer Arbeit passt und Anfragen wie Bewerbungen spürbar vereinfacht.\n\nGerne nehme ich ein kurzes, unverbindliches 2-Minuten-Video-Audit für Sie auf oder wir tauschen uns in einem kurzen Erstgespräch aus.\n\nFreundliche Grüße\n${brand.owner_name}\n${brand.brand_name} · ${brand.website_url} · ${brand.contact_email}`,
+      subject: `Neuer Internetauftritt für ${lead.company_name}`,
+      body: ensureLetterClosing(body, brand),
     };
   }
 
   if (channel === "follow_up") {
+    const body = `${salutation}
+
+ich hatte Ihnen vor einigen Tagen zu einem möglichen neuen Internetauftritt für ${lead.company_name} geschrieben. Falls das Thema aktuell passt, schicke ich Ihnen gern unverbindlich das kurze Fünf-Minuten-Video mit konkreten Vorschlägen.`;
     return {
-      subject: `Kurze Rückfrage zu ${lead.company_name}`,
-      body: `${greeting}\n\nich wollte kurz nachhaken, ob mein Hinweis zu Ihrem Webauftritt (${firstFinding}) bei Ihnen angekommen ist.\n\nFalls das Thema Website-Relaunch aktuell nicht auf Ihrer Prioritätenliste steht, ist das völlig in Ordnung – geben Sie mir gerne kurz Bescheid. Falls Sie Interesse an einer kurzen, unverbindlichen Einschätzung haben, sende ich Ihnen gerne ein 2-Minuten-Video dazu.\n\nViele Grüße\n${brand.owner_name}\n${brand.brand_name} · ${brand.website_url}`,
+      subject: `Neuer Internetauftritt für ${lead.company_name}`,
+      body: ensureEmailSignature(body, brand),
+    };
+  }
+
+  if (channel === "video_audit") {
+    return {
+      subject: `Video-Audit-Leitfaden für ${lead.company_name}`,
+      body: `1. Einstieg (30s)\n${salutation} kurzer Bezug auf die aktuelle Website von ${lead.company_name}.\n\n2. Konkrete Beobachtung (2 Min.)\n${findingSentence}\n\n3. Zielbild (2 Min.)\nKlare Leistungsstruktur, direkte Bewerbungs- und Anfrageführung über www.Linkify.tech.\n\n4. Abschluss (30s)\nEinladung zur kurzen Rückmeldung per E-Mail (${email}) oder Telefon (${phone}).`,
     };
   }
 
   if (channel === "reply_draft") {
+    const body = `${salutation}
+
+vielen Dank für Ihre Rückmeldung.${extraContext ? ` Zu Ihrer Frage: ${extraContext.slice(0, 120)}.` : ""} In einem kurzen Gespräch von etwa 15 Minuten klären wir zuerst Zielsetzung, Umfang und Prioritäten, bevor ich Ihnen ein konkretes Angebot erstelle.`;
     return {
-      subject: `Re: Zusammenarbeit ${lead.company_name}`,
-      body: `${greeting}\n\nvielen Dank für Ihre Rückmeldung.${extraContext ? ` Zu Ihrer Frage ("${extraContext.slice(0, 120)}"):` : ""}\n\nMir ist wichtig, dass wir zuerst genau verstehen, was das Projekt geschäftlich erreichen soll und wo aktuell der größte Engpass liegt, bevor wir über Technik oder konkrete Pakete sprechen.\n\nDafür reichen 15–20 Minuten im kurzen Erstgespräch, um unter anderem zu klären:\n- Was aktuell besteht und welche Ziele im Vordergrund stehen\n- Welche Seiten, Funktionen oder Schnittstellen wirklich nötig sind\n- Wie Texte, Bilder und spätere Pflege am besten gelöst werden\n\nWann passt es Ihnen diese oder nächste Woche für ein kurzes Telefonat oder Video-Gespräch?\n\nViele Grüße\n${brand.owner_name}\n${brand.brand_name} · ${brand.website_url}`,
+      subject: `Re: Neuer Internetauftritt für ${lead.company_name}`,
+      body: ensureEmailSignature(body, brand),
     };
   }
 
   if (channel === "angebot_outline") {
-    const questions = brand.discovery_questions
-      .slice(0, 5)
-      .map((q, i) => `${i + 1}. ${q}`)
-      .join("\n");
     return {
-      subject: `Unverbindliche Scope-Gliederung: ${lead.company_name}`,
-      body: `Projektvorschlag (Entwurf – vor Versand manuell prüfen)\nKunde: ${lead.company_name} (${lead.target_track === "startup" ? "Produktteam / Startup" : "Unternehmenswebsite / KMU"})\n\n1. Ausgangslage & Zielsetzung\n${lead.research_summary || lead.pitch_angle}\n\n2. Vorgeschlagener Ablauf bei ${brand.brand_name}\n- Erstgespräch & Zielklärung\n- Verbindlicher Scope & Angebot\n- Kick-off & Materialübergabe\n- Struktur, UX & Prototyp (z. B. Figma)\n- Umsetzung & technische Qualitätssicherung\n- Review, Abnahme & dokumentierte Übergabe\n\n3. Offene Klärungspunkte vor Kalkulation\n${questions}\n\nHinweis: Preise, Meilensteine und Betreuungsumfang erst nach Klärung der offenen Fragen verbindlich festlegen.`,
+      subject: `Projekt-Gliederung: ${lead.company_name}`,
+      body: `Projektvorschlag für ${lead.company_name}\n\n1. Zielsetzung\n${lead.relaunch_benefit || lead.research_summary}\n\n2. Ablauf\nErstgespräch, verbindlicher Scope, Gestaltung und Umsetzung, Abnahme und dokumentierte Übergabe.`,
     };
   }
 
+  const body = `${salutation}
+
+ich bin selbstständiger Webdesigner aus Erfurt und habe mir Ihre Website angesehen. ${findingSentence} Wer sich informieren oder bewerben möchte, findet dadurch nicht sofort den passenden Einstieg.
+
+Mit Linkify baue ich Websites komplett neu, von der Gestaltung bis zur Technik, und bin dabei selbst Ihr Ansprechpartner unter www.Linkify.tech. Eine neue Seite für ${lead.company_name} würde Ihre Leistungen und Kontaktwege übersichtlich aufbauen.
+
+Gern zeige ich Ihnen in einem kostenlosen Video von etwa fünf Minuten, wie ein neuer Auftritt konkret aussehen könnte. Eine kurze Antwort auf diese Mail genügt.`;
+
   return {
-    subject: `Kurzer Gedanke zum Webauftritt von ${lead.company_name}`,
-    body: `${greeting}\n\nich bin ${brand.owner_name}, freiberuflicher Webdesigner und Fullstack-Entwickler aus ${brand.city} (${brand.brand_name}).\n\nBei der Recherche nach passenden Unternehmen aus dem Bereich ${lead.industry || "der Region"} bin ich auf ${lead.company_name} gestoßen. Gleichzeitig ist mir bei der technischen Durchsicht aufgefallen: ${firstFinding}.${visualHint}\n\nStatt einzelne Stellen nachzubessern, lohnt sich in solchen Fällen meist ein ruhiger, sauber strukturierter Relaunch – damit der digitale Auftritt direkt zur Qualität Ihres Betriebs passt.\n\nWenn Sie möchten, nehme ich Ihnen dazu gerne kostenlos und unverbindlich ein 2-Minuten-Video-Audit auf.\n\nViele Grüße\n${brand.owner_name}\n${brand.brand_name} · ${brand.website_url}`,
+    subject: `Neuer Internetauftritt für ${lead.company_name}`,
+    body: ensureEmailSignature(body, brand),
   };
 }

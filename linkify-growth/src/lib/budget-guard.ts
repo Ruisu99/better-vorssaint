@@ -3,9 +3,9 @@
  * These ceilings CANNOT be raised or disabled via client settings or API payloads.
  */
 export const HARD_MAX_MONTHLY_EUR = 15;
-export const HARD_MAX_DAILY_CALLS = 40;
-export const HARD_MAX_TOKENS_PER_CALL = 1800;
-export const HARD_MAX_BATCH_LEADS = 5;
+export const HARD_MAX_DAILY_CALLS = 160;
+export const HARD_MAX_TOKENS_PER_CALL = 2200;
+export const HARD_MAX_BATCH_LEADS = 50;
 export const HARD_EUR_PER_USD_RATE = 0.92;
 export const HARD_MAX_MODEL_PROMPT_USD_PER_1M = 3.0;
 export const HARD_MAX_MODEL_COMPLETION_USD_PER_1M = 15.0;

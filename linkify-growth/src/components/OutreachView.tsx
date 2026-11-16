@@ -19,10 +19,13 @@ export function OutreachView({
   snapshot: WorkspaceSnapshot;
 }) {
   const [items, setItems] = useState(snapshot.recentOutreach);
+  const [listFilter, setListFilter] = useState<"email" | "brief" | "alle">(
+    "email",
+  );
   const [selectedLeadId, setSelectedLeadId] = useState<string>(
     snapshot.leads[0]?.id ?? "",
   );
-  const [channel, setChannel] = useState<OutreachChannel>("reply_draft");
+  const [channel, setChannel] = useState<OutreachChannel>("email");
   const [contextInput, setContextInput] = useState("");
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -292,12 +295,38 @@ export function OutreachView({
 
       {/* Recent Outreach Drafts */}
       <section className="rounded-2xl bg-white border border-[#E5E7EB] p-6 space-y-4">
-        <h2 className="text-[17px] font-semibold text-[#1A1A2E]">
-          Letzte Entwürfe & Nachrichten ({items.length})
-        </h2>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <h2 className="text-[17px] font-semibold text-[#1A1A2E]">
+            Erstellte Pitches & Entwürfe ({items.filter((i) => listFilter === "alle" || i.channel === listFilter).length})
+          </h2>
+          <div className="flex flex-wrap gap-1.5">
+            {(
+              [
+                ["email", "E-Mail-Pitches"],
+                ["brief", "Brieffassungen"],
+                ["alle", "Alle Kanäle"],
+              ] as const
+            ).map(([k, label]) => (
+              <button
+                key={k}
+                type="button"
+                onClick={() => setListFilter(k)}
+                className={`px-3.5 py-1.5 rounded-full text-[12px] font-medium cursor-pointer ${
+                  listFilter === k
+                    ? "bg-[#0000F5] text-white"
+                    : "bg-[#F8F9FC] text-[#6B7280]"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
 
         <div className="divide-y divide-[#E5E7EB]">
-          {items.map((item) => {
+          {items
+            .filter((i) => listFilter === "alle" || i.channel === listFilter)
+            .map((item) => {
             const lead = snapshot.leads.find((l) => l.id === item.lead_id);
             const mailtoUrl =
               lead?.contact_email && item.body
@@ -340,10 +369,10 @@ export function OutreachView({
                     {mailtoUrl && (
                       <a
                         href={mailtoUrl}
-                        className="inline-flex items-center gap-1 px-3 py-1 rounded-full border border-[#E5E7EB] text-[12px] text-[#1A1A2E]"
+                        className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-[#0000F5] text-white text-[12px]"
                       >
                         <Mail className="w-3.5 h-3.5" />
-                        <span>Mail</span>
+                        <span>Mail-App</span>
                       </a>
                     )}
                   </div>
@@ -353,17 +382,18 @@ export function OutreachView({
                     Betreff: {item.subject}
                   </p>
                 )}
-                <p className="text-[13px] text-[#6B7280] whitespace-pre-wrap line-clamp-4">
+                <p className="text-[13px] text-[#1A1A2E] whitespace-pre-wrap bg-[#F8F9FC] rounded-xl p-3.5 leading-relaxed">
                   {item.body}
                 </p>
               </div>
             );
           })}
 
-          {items.length === 0 && (
+          {items.filter((i) => listFilter === "alle" || i.channel === listFilter)
+            .length === 0 && (
             <p className="py-6 text-[14px] text-[#6B7280]">
-              Noch keine Entwürfe erzeugt. Wähle oben einen Lead aus oder starte
-              direkt aus der Lead-Detailseite.
+              Noch keine Entwürfe in dieser Ansicht. Starte einen
+              Akquise-Auftrag im Cockpit oder wähle oben einen Lead aus.
             </p>
           )}
         </div>

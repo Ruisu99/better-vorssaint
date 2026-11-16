@@ -103,7 +103,7 @@ function mapLeadRow(row: Record<string, unknown>): Lead {
     owner_sub: String(row.owner_sub),
     company_name: String(row.company_name),
     industry: String(row.industry ?? ""),
-    target_track: (row.target_track === "startup" ? "startup" : "kmu"),
+    target_track: row.target_track === "startup" ? "startup" : "kmu",
     city: String(row.city ?? ""),
     postal_address: String(row.postal_address ?? ""),
     website_url: String(row.website_url ?? ""),
@@ -121,8 +121,14 @@ function mapLeadRow(row: Record<string, unknown>): Lead {
     visual_notes: String(row.visual_notes ?? ""),
     research_summary: String(row.research_summary ?? ""),
     findings: asJson(row.findings, []),
+    buying_signals: asJson(row.buying_signals, []),
+    score_reason: String(row.score_reason ?? ""),
+    relaunch_benefit: String(row.relaunch_benefit ?? ""),
+    follow_up_note: String(row.follow_up_note ?? ""),
     scan_data: asJson(row.scan_data, null),
     pitch_angle: String(row.pitch_angle ?? ""),
+    letter_printed_at: asNullableIso(row.letter_printed_at),
+    found_at: asIso(row.found_at ?? row.created_at),
     is_sample: Boolean(row.is_sample),
     created_at: asIso(row.created_at),
     updated_at: asIso(row.updated_at),
@@ -291,18 +297,36 @@ export async function getLeadById(
   return rows.length > 0 ? mapLeadRow(rows[0]) : null;
 }
 
-export async function upsertLead(
-  lead: Omit<Lead, "created_at" | "updated_at">,
-): Promise<Lead> {
+export type UpsertLeadInput = Omit<
+  Lead,
+  | "created_at"
+  | "updated_at"
+  | "buying_signals"
+  | "score_reason"
+  | "relaunch_benefit"
+  | "follow_up_note"
+  | "letter_printed_at"
+  | "found_at"
+> & {
+  buying_signals?: Lead["buying_signals"];
+  score_reason?: string;
+  relaunch_benefit?: string;
+  follow_up_note?: string;
+  letter_printed_at?: string | null;
+  found_at?: string;
+};
+
+export async function upsertLead(lead: UpsertLeadInput): Promise<Lead> {
   const rows = await sql<Record<string, unknown>>(
     `insert into leads (
       id, owner_sub, company_name, industry, target_track, city, postal_address,
       website_url, decision_maker, contact_email, contact_phone, source,
       priority, status, contact_channel, first_contact_at, next_follow_up_at,
       visual_checked_desktop, visual_checked_mobile, visual_notes,
-      research_summary, findings, scan_data, pitch_angle, is_sample, updated_at
+      research_summary, findings, buying_signals, score_reason, relaunch_benefit,
+      follow_up_note, scan_data, pitch_angle, letter_printed_at, found_at, is_sample, updated_at
     ) values (
-      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22::jsonb,$23::jsonb,$24,$25,now()
+      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22::jsonb,$23::jsonb,$24,$25,$26,$27::jsonb,$28,$29,coalesce($30::timestamptz, now()),$31,now()
     )
     on conflict (id) do update set
       company_name = excluded.company_name,
@@ -325,8 +349,13 @@ export async function upsertLead(
       visual_notes = excluded.visual_notes,
       research_summary = excluded.research_summary,
       findings = excluded.findings,
+      buying_signals = excluded.buying_signals,
+      score_reason = excluded.score_reason,
+      relaunch_benefit = excluded.relaunch_benefit,
+      follow_up_note = excluded.follow_up_note,
       scan_data = excluded.scan_data,
       pitch_angle = excluded.pitch_angle,
+      letter_printed_at = excluded.letter_printed_at,
       is_sample = excluded.is_sample,
       updated_at = now()
     where leads.owner_sub = excluded.owner_sub
@@ -354,12 +383,58 @@ export async function upsertLead(
       lead.visual_notes,
       lead.research_summary,
       JSON.stringify(lead.findings ?? []),
+      JSON.stringify(lead.buying_signals ?? []),
+      lead.score_reason ?? "",
+      lead.relaunch_benefit ?? "",
+      lead.follow_up_note ?? "",
       lead.scan_data ? JSON.stringify(lead.scan_data) : null,
       lead.pitch_angle,
+      lead.letter_printed_at ?? null,
+      lead.found_at ?? null,
       lead.is_sample,
     ],
   );
   return mapLeadRow(rows[0]);
+}
+
+export async function markLeadsPrinted(
+  ownerSub: string,
+  leadIds: string[],
+  markContacted = true,
+): Promise<number> {
+  if (leadIds.length === 0) return 0;
+  const followUp = new Date(Date.now() + 9 * 86_400_000).toISOString();
+  const rows = await sql<{ id: string }>(
+    `update leads
+     set letter_printed_at = coalesce(letter_printed_at, now()),
+         status = case when $3 and status in ('neu', 'analysiert') then 'kontaktiert' else status end,
+         first_contact_at = case when $3 then coalesce(first_contact_at, now()) else first_contact_at end,
+         next_follow_up_at = case when $3 then coalesce(next_follow_up_at, $4::timestamptz) else next_follow_up_at end,
+         updated_at = now()
+     where owner_sub = $1 and id = any($2::text[])
+     returning id`,
+    [ownerSub, leadIds, markContacted, followUp],
+  );
+  await sql(
+    `update outreach_items
+     set status = case when $3 then 'gesendet' else 'freigegeben' end,
+         updated_at = now()
+     where owner_sub = $1 and lead_id = any($2::text[]) and channel = 'brief'`,
+    [ownerSub, leadIds, markContacted],
+  );
+  return rows.length;
+}
+
+export async function listAllOutreachForOwner(
+  ownerSub: string,
+): Promise<OutreachItem[]> {
+  const rows = await sql<Record<string, unknown>>(
+    `select * from outreach_items
+     where owner_sub = $1
+     order by created_at desc`,
+    [ownerSub],
+  );
+  return rows.map(mapOutreachRow);
 }
 
 export async function deleteLead(ownerSub: string, leadId: string): Promise<boolean> {

@@ -4,70 +4,72 @@ import Link from "next/link";
 import { useRef, useState } from "react";
 import {
   ArrowRight,
-  Bot,
   CheckCircle2,
-  Eye,
-  Globe,
   Loader2,
+  Mail,
+  Printer,
+  Rocket,
   ShieldCheck,
-  SlidersHorizontal,
-  Sparkles,
   Square,
+  XCircle,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import {
-  apiFetchJson,
-  formatBerlinDate,
-  PRIORITY_LABELS,
-  STATUS_LABELS,
-} from "@/lib/client-utils";
+import { apiFetchJson, PRIORITY_LABELS } from "@/lib/client-utils";
 import type { WorkspaceSnapshot } from "@/lib/initial-state";
 import type {
   Lead,
-  LeadPriority,
   OutreachItem,
   RadarCandidate,
   TargetTrack,
 } from "@/lib/types";
 
-const PRESET_TOPICS: Array<{ label: string; query: string; track: TargetTrack }> = [
-  { label: "Handwerk", query: "Handwerk", track: "kmu" },
-  { label: "Praxen & Gesundheit", query: "Gesundheit", track: "kmu" },
-  { label: "Kanzleien", query: "Kanzlei", track: "kmu" },
-  { label: "Autohäuser & Bau", query: "Bauunternehmen", track: "kmu" },
-  { label: "B2B SaaS / Startups", query: "B2B SaaS Plattform", track: "startup" },
-];
+const INDUSTRY_CHOICES = [
+  { id: "handwerk", label: "Handwerk" },
+  { id: "gesundheit", label: "Zahnarzt- & Arztpraxen" },
+  { id: "bau", label: "Bauunternehmen" },
+  { id: "auto", label: "Autohäuser" },
+  { id: "kanzlei", label: "Steuer- & Rechtskanzleien" },
+  { id: "moebel", label: "Möbelhandel" },
+  { id: "industrie", label: "Maschinenbau & Industrie" },
+] as const;
+
+const COUNT_OPTIONS = [3, 5, 10, 20, 30, 50] as const;
 
 export function CockpitView({ snapshot }: { snapshot: WorkspaceSnapshot }) {
   const router = useRouter();
   const [leads, setLeads] = useState<Lead[]>(snapshot.leads);
 
-  // 1-Click Step-by-Step Auto-Pilot state (fast atomic calls, never times out)
-  const [autoTrack, setAutoTrack] = useState<TargetTrack>("kmu");
-  const [autoCity, setAutoCity] = useState(snapshot.brand.city || "Erfurt");
-  const [autoQuery, setAutoQuery] = useState("Handwerk");
-  const [autoCount, setAutoCount] = useState(3);
-  const [autoOutreach, setAutoOutreach] = useState(true);
-  const [autoRunning, setAutoRunning] = useState(false);
-  const [autoStatusText, setAutoStatusText] = useState<string | null>(null);
-  const [autoError, setAutoError] = useState<string | null>(null);
-  const [autoCostEur, setAutoCostEur] = useState(0);
-  const [autoModeLabel, setAutoModeLabel] = useState<string | null>(null);
-  const [autoCreated, setAutoCreated] = useState<
-    Array<{
-      lead: Lead;
-      outreachItems: OutreachItem[];
-      aiModelUsed: string;
-    }>
+  // Order configuration ("Auf Befehl")
+  const [regionPreset, setRegionPreset] = useState<
+    "thueringen" | "deutschland" | "custom"
+  >("thueringen");
+  const [customCity, setCustomCity] = useState(snapshot.brand.city || "Erfurt");
+  const [customKeyword, setCustomKeyword] = useState("");
+  const [selectedIndustries, setSelectedIndustries] = useState<string[]>([
+    "handwerk",
+    "gesundheit",
+    "bau",
+    "auto",
+    "kanzlei",
+    "industrie",
+  ]);
+  const [track, setTrack] = useState<TargetTrack>("kmu");
+  const [targetCount, setTargetCount] = useState<number>(5);
+  const [onlyDeDomains, setOnlyDeDomains] = useState(true);
+  const [strictHurdle, setStrictHurdle] = useState(true);
+
+  // Live Funnel Run State
+  const [running, setRunning] = useState(false);
+  const [statusLine, setStatusLine] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [runCostEur, setRunCostEur] = useState(0);
+  const [discoveredTotal, setDiscoveredTotal] = useState(0);
+  const [triagedTotal, setTriagedTotal] = useState(0);
+  const [qualifiedLeads, setQualifiedLeads] = useState<Lead[]>([]);
+  const [rejectedList, setRejectedList] = useState<
+    Array<{ companyName: string; reason: string }>
   >([]);
   const cancelRef = useRef(false);
-
-  // Quick URL scan state
-  const [quickUrl, setQuickUrl] = useState("");
-  const [runAi, setRunAi] = useState(snapshot.openRouterConnected);
-  const [scanning, setScanning] = useState(false);
-  const [scanError, setScanError] = useState<string | null>(null);
-  const [scanNotice, setScanNotice] = useState<string | null>(null);
 
   const [monthEurLive, setMonthEurLive] = useState(
     snapshot.usageSummary.monthCostUsd *
@@ -75,11 +77,10 @@ export function CockpitView({ snapshot }: { snapshot: WorkspaceSnapshot }) {
   );
   const budgetEur = snapshot.brand.budget_config.monthlyBudgetEur;
 
-  const activeLeads = leads.filter((l) => l.status !== "kein_interesse");
-  const kmuCount = activeLeads.filter((l) => l.target_track === "kmu").length;
-  const startupCount = activeLeads.filter(
-    (l) => l.target_track === "startup",
-  ).length;
+  const unprintedBriefLeads = leads.filter(
+    (l) => !l.letter_printed_at && l.status !== "kein_interesse",
+  );
+  const hotCount = leads.filter((l) => l.priority === "heiss").length;
   const contactedCount = leads.filter(
     (l) =>
       l.status === "kontaktiert" ||
@@ -88,250 +89,212 @@ export function CockpitView({ snapshot }: { snapshot: WorkspaceSnapshot }) {
       l.status === "angebot" ||
       l.status === "gewonnen",
   ).length;
-  const callsOrOffers = leads.filter(
-    (l) =>
-      l.status === "im_gespraech" ||
-      l.status === "angebot" ||
-      l.status === "gewonnen",
-  ).length;
-  const visuallyCheckedCount = leads.filter(
-    (l) => l.visual_checked_desktop && l.visual_checked_mobile,
-  ).length;
 
-  const pendingVisualChecks = leads.filter(
-    (l) =>
-      l.website_url &&
-      (!l.visual_checked_desktop || !l.visual_checked_mobile) &&
-      l.status !== "kein_interesse",
-  );
+  function toggleIndustry(id: string) {
+    setSelectedIndustries((prev) => {
+      if (prev.includes(id)) {
+        return prev.length > 1 ? prev.filter((x) => x !== id) : prev;
+      }
+      return [...prev, id];
+    });
+  }
 
-  // Prioritize due follow-ups & hot leads, then fall back to newest leads so Cockpit is always actionable
-  const nowMs = Date.now();
-  const priorityLeads = [...leads]
-    .filter((l) => l.status !== "kein_interesse" && l.status !== "gewonnen")
-    .sort((a, b) => {
-      const aDue =
-        a.status === "follow_up_faellig" ||
-        (a.next_follow_up_at &&
-          new Date(a.next_follow_up_at).getTime() <= nowMs)
-          ? 0
-          : 1;
-      const bDue =
-        b.status === "follow_up_faellig" ||
-        (b.next_follow_up_at &&
-          new Date(b.next_follow_up_at).getTime() <= nowMs)
-          ? 0
-          : 1;
-      if (aDue !== bDue) return aDue - bDue;
-      const pWeight = (p: LeadPriority) =>
-        p === "heiss" ? 0 : p === "warm" ? 1 : 2;
-      if (pWeight(a.priority) !== pWeight(b.priority))
-        return pWeight(a.priority) - pWeight(b.priority);
-      return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
-    })
-    .slice(0, 6);
-
-  async function handleAutopilot(e: React.FormEvent) {
+  async function handleStartOrder(e: React.FormEvent) {
     e.preventDefault();
     cancelRef.current = false;
-    setAutoRunning(true);
-    setAutoError(null);
-    setAutoCreated([]);
-    setAutoCostEur(0);
-    setAutoModeLabel(null);
+    setRunning(true);
+    setErrorMsg(null);
+    setQualifiedLeads([]);
+    setRejectedList([]);
+    setDiscoveredTotal(0);
+    setTriagedTotal(0);
+    setRunCostEur(0);
 
-    const effectiveCity = autoCity.trim() || snapshot.brand.city || "Erfurt";
-    const effectiveQuery =
-      autoQuery.trim() ||
-      (autoTrack === "startup" ? "B2B SaaS Plattform" : "Handwerk");
-
-    // Step 1: Fast Discovery
-    setAutoStatusText(
-      `Schritt 1/3: Suche passende Unternehmen für "${effectiveQuery}" in ${effectiveCity}...`,
+    const seenDomains = new Set<string>(
+      leads
+        .map((l) =>
+          l.website_url
+            .replace(/^https?:\/\/(www\.)?/i, "")
+            .replace(/\/.*$/, "")
+            .toLowerCase(),
+        )
+        .filter(Boolean),
     );
-    const step1 = await apiFetchJson<{
-      candidates: RadarCandidate[];
-      searchModeLabel: string;
-      estimatedCostEur: number;
-    }>("/api/autopilot", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        step: "discover",
-        track: autoTrack,
-        city: effectiveCity,
-        query: effectiveQuery,
-        count: autoCount,
-      }),
-    });
 
-    if (!step1.ok) {
-      setAutoError(step1.error);
-      setAutoStatusText(null);
-      setAutoRunning(false);
-      return;
-    }
+    let qualifiedCount = 0;
+    let totalCheckedCandidates = 0;
+    const maxCandidatesToInspect = Math.max(targetCount * 3, 18);
+    const maxRounds = Math.min(Math.max(Math.ceil(targetCount / 2) + 4, 6), 30);
 
-    let runningCost = step1.data.estimatedCostEur || 0;
-    setAutoCostEur(runningCost);
-    setAutoModeLabel(step1.data.searchModeLabel);
+    for (let round = 0; round < maxRounds; round++) {
+      if (cancelRef.current || qualifiedCount >= targetCount) break;
+      if (totalCheckedCandidates >= maxCandidatesToInspect) break;
 
-    if (cancelRef.current) {
-      setAutoStatusText("Autopilot gestoppt.");
-      setAutoRunning(false);
-      return;
-    }
-
-    // Step 2: Parallel fast website triage (0 EUR)
-    const foundCount = step1.data.candidates.length;
-    setAutoStatusText(
-      `Schritt 2/3: Prüfe ${foundCount} Websites parallel auf Technik & Relaunch-Bedarf (0 €)...`,
-    );
-    const step2 = await apiFetchJson<{
-      scannedCount: number;
-      reachable: Array<{
-        candidate: RadarCandidate;
-        score: number;
-        priority: LeadPriority;
-        cms: string;
-        topFinding: string;
-      }>;
-    }>("/api/autopilot", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        step: "scan_batch",
-        candidates: step1.data.candidates.slice(0, 8),
-      }),
-    });
-
-    if (!step2.ok) {
-      setAutoError(step2.error);
-      setAutoStatusText(null);
-      setAutoRunning(false);
-      return;
-    }
-
-    const targets = step2.data.reachable.slice(0, autoCount);
-    let lastBlocked: string | undefined;
-
-    // Step 3: Process one lead per fast API call (qualify + outreach in parallel)
-    for (let i = 0; i < targets.length; i++) {
-      if (cancelRef.current) break;
-      const current = targets[i];
-      setAutoStatusText(
-        `Schritt 3/3: Analysiere & erstelle Akquise für "${current.candidate.companyName}" (${i + 1}/${targets.length})...`,
+      setStatusLine(
+        `Runde ${round + 1}: Suche neue .de-Unternehmen (${qualifiedCount}/${targetCount} qualifiziert)...`,
       );
 
-      const step3 = await apiFetchJson<{
-        lead: Lead;
-        outreachItems: OutreachItem[];
-        aiModelUsed: string;
-        limitBlockedReason?: string;
+      const disc = await apiFetchJson<{
+        city: string;
+        industry: string;
+        candidates: RadarCandidate[];
+        searchModeLabel: string;
         estimatedCostEur: number;
       }>("/api/autopilot", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          step: "process_one",
-          candidate: current.candidate,
-          track: autoTrack,
-          generateOutreach: autoOutreach,
+          step: "discover_round",
+          regionPreset,
+          city: customCity.trim(),
+          keyword: customKeyword.trim() || undefined,
+          industries: selectedIndustries,
+          track,
+          onlyDeDomains,
+          roundIndex: round,
+          excludeDomains: Array.from(seenDomains).slice(0, 120),
         }),
       });
 
-      if (!step3.ok) {
-        setAutoError(
-          `Fehler bei ${current.candidate.companyName}: ${step3.error}`,
-        );
+      if (!disc.ok) {
+        setErrorMsg(disc.error);
+        break;
+      }
+
+      const roundCost = disc.data.estimatedCostEur || 0;
+      setRunCostEur((p) => p + roundCost);
+      setMonthEurLive((p) => p + roundCost);
+
+      const freshBatch = (disc.data.candidates ?? []).filter((c) => {
+        const dom = c.websiteUrl
+          .replace(/^https?:\/\/(www\.)?/i, "")
+          .replace(/\/.*$/, "")
+          .toLowerCase();
+        if (!dom || seenDomains.has(dom)) return false;
+        seenDomains.add(dom);
+        return true;
+      });
+
+      if (freshBatch.length === 0) {
         continue;
       }
 
-      runningCost += step3.data.estimatedCostEur || 0;
-      setAutoCostEur(runningCost);
-      setMonthEurLive((prev) => prev + (step3.data.estimatedCostEur || 0));
-      if (step3.data.limitBlockedReason) {
-        lastBlocked = step3.data.limitBlockedReason;
+      setDiscoveredTotal((p) => p + freshBatch.length);
+
+      // Step 2: Triage in chunks of up to 8 URLs (0 EUR AI tokens)
+      for (let i = 0; i < freshBatch.length; i += 8) {
+        if (cancelRef.current || qualifiedCount >= targetCount) break;
+
+        const slice = freshBatch.slice(i, i + 8);
+        setStatusLine(
+          `Prüfe ${slice.length} Websites im Schnellcheck (${disc.data.city} · 0 € KI)...`,
+        );
+
+        const triage = await apiFetchJson<{
+          plausible: Array<{
+            candidate: RadarCandidate;
+            score: number;
+            topFinding: string;
+          }>;
+          skipped: Array<{ companyName: string; reason: string }>;
+        }>("/api/autopilot", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            step: "triage_batch",
+            candidates: slice,
+            onlyDeDomains,
+          }),
+        });
+
+        if (!triage.ok) continue;
+
+        setTriagedTotal((p) => p + slice.length);
+        if (triage.data.skipped?.length) {
+          setRejectedList((prev) => [
+            ...triage.data.skipped.slice(0, 5),
+            ...prev,
+          ].slice(0, 30));
+        }
+
+        // Step 3: Qualify each plausible candidate against the 5-condition Notion hurdle
+        for (const item of triage.data.plausible ?? []) {
+          if (cancelRef.current || qualifiedCount >= targetCount) break;
+          if (totalCheckedCandidates >= maxCandidatesToInspect) break;
+          totalCheckedCandidates += 1;
+
+          setStatusLine(
+            `Prüfe Qualifikationshürde & erstelle Brief + E-Mail für „${item.candidate.companyName}“ (${qualifiedCount}/${targetCount})...`,
+          );
+
+          const qual = await apiFetchJson<{
+            qualified: boolean;
+            companyName?: string;
+            rejectionReason?: string;
+            lead?: Lead;
+            briefItem?: OutreachItem;
+            emailItem?: OutreachItem;
+            limitBlockedReason?: string;
+            estimatedCostEur: number;
+          }>("/api/autopilot", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              step: "qualify_one",
+              candidate: item.candidate,
+              track,
+              strictMode: strictHurdle,
+            }),
+          });
+
+          if (!qual.ok) {
+            setRejectedList((prev) => [
+              { companyName: item.candidate.companyName, reason: qual.error },
+              ...prev,
+            ].slice(0, 30));
+            continue;
+          }
+
+          const qCost = qual.data.estimatedCostEur || 0;
+          setRunCostEur((p) => p + qCost);
+          setMonthEurLive((p) => p + qCost);
+
+          if (qual.data.limitBlockedReason) {
+            setErrorMsg(`Budget-Schutz aktiv: ${qual.data.limitBlockedReason}`);
+            cancelRef.current = true;
+            break;
+          }
+
+          if (qual.data.qualified && qual.data.lead) {
+            qualifiedCount += 1;
+            const newLead = qual.data.lead;
+            setQualifiedLeads((prev) => [newLead, ...prev]);
+            setLeads((prev) => [
+              newLead,
+              ...prev.filter((x) => x.id !== newLead.id),
+            ]);
+          } else {
+            setRejectedList((prev) => [
+              {
+                companyName:
+                  qual.data.companyName || item.candidate.companyName,
+                reason:
+                  qual.data.rejectionReason ||
+                  "Qualifikationshürde nicht erfüllt",
+              },
+              ...prev,
+            ].slice(0, 30));
+          }
+        }
       }
-
-      setAutoCreated((prev) => [
-        ...prev,
-        {
-          lead: step3.data.lead,
-          outreachItems: step3.data.outreachItems ?? [],
-          aiModelUsed: step3.data.aiModelUsed,
-        },
-      ]);
-      setLeads((prev) => [
-        step3.data.lead,
-        ...prev.filter((l) => l.id !== step3.data.lead.id),
-      ]);
     }
 
-    setAutoStatusText(
-      lastBlocked
-        ? `Fertig (Budget-Stopp aktiv: ${lastBlocked}).`
-        : cancelRef.current
-          ? "Autopilot angehalten – bereits erstellte Leads wurden gespeichert."
-          : `Fertig: ${targets.length} Leads geprüft und inkl. Entwürfen gespeichert.`,
+    setStatusLine(
+      cancelRef.current
+        ? `Gestoppt. ${qualifiedCount} qualifizierte Leads gespeichert.`
+        : `Auftrag abgeschlossen: ${qualifiedCount} von ${targetCount} gewünschten Leads qualifiziert (inkl. Brief & E-Mail).`,
     );
-    setAutoRunning(false);
-    router.refresh();
-  }
-
-  async function handleQuickScan(e: React.FormEvent) {
-    e.preventDefault();
-    if (!quickUrl.trim()) return;
-    setScanning(true);
-    setScanError(null);
-    setScanNotice(null);
-
-    const res = await apiFetchJson<{
-      lead: Lead;
-      aiMeta?: {
-        providerMode: string;
-        modelUsed: string;
-        limitBlockedReason?: string;
-        estimatedCostUsd: number;
-      } | null;
-    }>("/api/scan", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        url: quickUrl.trim(),
-        includePageSpeed: false,
-        runAiQualification: runAi,
-        saveToPipeline: true,
-      }),
-    });
-
-    setScanning(false);
-    if (!res.ok) {
-      setScanError(res.error);
-      return;
-    }
-
-    setLeads((prev) => [
-      res.data.lead,
-      ...prev.filter((item) => item.id !== res.data.lead.id),
-    ]);
-    if (res.data.aiMeta?.estimatedCostUsd) {
-      setMonthEurLive(
-        (prev) =>
-          prev +
-          res.data.aiMeta!.estimatedCostUsd *
-            snapshot.brand.budget_config.eurPerUsdRate,
-      );
-    }
-    setQuickUrl("");
-    const aiHint = res.data.aiMeta?.limitBlockedReason
-      ? ` (${res.data.aiMeta.limitBlockedReason})`
-      : res.data.aiMeta?.providerMode === "openrouter"
-        ? ` (KI-Analyse via ${res.data.aiMeta.modelUsed})`
-        : " (Technischer Scan – 0,00 € KI-Kosten)";
-    setScanNotice(
-      `"${res.data.lead.company_name}" geprüft und gespeichert${aiHint}.`,
-    );
+    setRunning(false);
     router.refresh();
   }
 
@@ -341,348 +304,57 @@ export function CockpitView({ snapshot }: { snapshot: WorkspaceSnapshot }) {
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
         <div>
           <p className="text-[13px] font-medium text-[#0000F5]">
-            {snapshot.brand.brand_name} Akquise-System · {snapshot.brand.city}
+            Linkify Lead-Radar & Brief-Automatisierung
           </p>
           <h1 className="mt-1 text-[28px] sm:text-[32px] font-semibold tracking-tight text-[#1A1A2E]">
-            Guten Tag, {snapshot.brand.owner_name.split(" ")[0]}.
+            Akquise-Auftrag starten
           </h1>
           <p className="mt-1 text-[15px] text-[#6B7280] max-w-2xl">
-            Finde automatisch passende Unternehmen oder Startups, prüfe ihre
-            Websites live und bereite persönliche Akquise-Entwürfe mit harter
-            15-€-Kostenkontrolle vor.
+            Suche auf Befehl nach deutschen Unternehmen mit{" "}
+            <code className="text-[#1A1A2E]">.de</code>-Domain, filtere starke
+            Websites hart heraus und erzeuge sofort druckfertige DIN-5008-Briefe
+            und formelle E-Mails.
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2.5">
-          <Link
-            href="/radar"
-            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full border border-[#E5E7EB] bg-white hover:border-[#0000F5] text-[#1A1A2E] text-[14px] font-medium transition-colors"
-          >
-            <span>Zum Kunden-Radar</span>
-            <ArrowRight className="w-4 h-4 text-[#0000F5]" />
-          </Link>
-        </div>
+        <Link
+          href="/briefe"
+          className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-[#0000F5] hover:bg-[#0000C8] text-white text-[14px] font-medium shrink-0"
+        >
+          <Printer className="w-4 h-4" />
+          <span>Briefstudio ({unprintedBriefLeads.length} druckbereit)</span>
+        </Link>
       </div>
 
-      {/* 1-Click Autonomous Acquisition Engine */}
-      <section className="rounded-2xl bg-white border border-[#0000F5]/25 p-5 sm:p-6 space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex items-start gap-3">
-            <div className="w-9 h-9 rounded-xl bg-[#0000F5] text-white flex items-center justify-center shrink-0">
-              <Bot className="w-4 h-4" />
-            </div>
-            <div>
-              <h2 className="text-[17px] font-semibold text-[#1A1A2E]">
-                1-Klick KI-Akquise-Autopilot
-              </h2>
-              <p className="text-[13px] text-[#6B7280]">
-                Sucht in schnellen Einzelschritten reale Unternehmen, scannt
-                Websites parallel, qualifiziert mit{" "}
-                <strong>{snapshot.brand.openrouter_config.researchModel}</strong>{" "}
-                und erstellt fertige E-Mail- & Video-Audit-Entwürfe.
-              </p>
-            </div>
-          </div>
-          <span className="text-[12px] font-medium px-3 py-1 rounded-full bg-[#F0F3FF] text-[#0000F5] shrink-0">
-            ca. 0,005–0,03 € pro Lauf
-          </span>
-        </div>
-
-        {/* Clickable quick-fill presets */}
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-[11px] font-medium text-[#6B7280] mr-1">
-            Schnellwahl:
-          </span>
-          {PRESET_TOPICS.map((p) => {
-            const active =
-              autoQuery.toLowerCase() === p.query.toLowerCase() &&
-              autoTrack === p.track;
-            return (
-              <button
-                key={p.label}
-                type="button"
-                onClick={() => {
-                  setAutoTrack(p.track);
-                  setAutoQuery(p.query);
-                }}
-                className={`px-3 py-1 rounded-full text-[12px] font-medium transition-colors cursor-pointer ${
-                  active
-                    ? "bg-[#0000F5] text-white"
-                    : "bg-[#F8F9FC] text-[#6B7280] hover:text-[#1A1A2E] border border-[#E5E7EB]"
-                }`}
-              >
-                {p.label}
-              </button>
-            );
-          })}
-        </div>
-
-        <form
-          onSubmit={handleAutopilot}
-          className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 items-end"
-        >
-          <div>
-            <label className="block text-[11px] font-medium text-[#6B7280] mb-1">
-              Zielgruppe
-            </label>
-            <select
-              value={autoTrack}
-              onChange={(e) => {
-                const next = e.target.value as TargetTrack;
-                setAutoTrack(next);
-                if (next === "startup" && autoQuery === "Handwerk") {
-                  setAutoQuery("B2B SaaS Plattform");
-                } else if (next === "kmu" && autoQuery === "B2B SaaS Plattform") {
-                  setAutoQuery("Handwerk");
-                }
-              }}
-              className="w-full px-3 py-2.5 rounded-xl border border-[#E5E7EB] bg-white text-[13px]"
-            >
-              <option value="kmu">Lokale KMU & Praxen</option>
-              <option value="startup">Startups & Produktteams</option>
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-[11px] font-medium text-[#6B7280] mb-1">
-              Branche / Suchfokus
-            </label>
-            <input
-              type="text"
-              value={autoQuery}
-              onChange={(e) => setAutoQuery(e.target.value)}
-              placeholder="z. B. Zahnarzt, Dachdecker, SaaS"
-              className="w-full px-3 py-2.5 rounded-xl border border-[#E5E7EB] text-[13px]"
-            />
-          </div>
-
-          <div>
-            <label className="block text-[11px] font-medium text-[#6B7280] mb-1">
-              Stadt / Region
-            </label>
-            <input
-              type="text"
-              value={autoCity}
-              onChange={(e) => setAutoCity(e.target.value)}
-              placeholder="z. B. Leipzig, Erfurt"
-              className="w-full px-3 py-2.5 rounded-xl border border-[#E5E7EB] text-[13px]"
-            />
-          </div>
-
-          <div>
-            <label className="block text-[11px] font-medium text-[#6B7280] mb-1">
-              Leads pro Lauf (1–5)
-            </label>
-            <select
-              value={autoCount}
-              onChange={(e) => setAutoCount(Number(e.target.value))}
-              className="w-full px-3 py-2.5 rounded-xl border border-[#E5E7EB] bg-white text-[13px]"
-            >
-              <option value={1}>1 Lead</option>
-              <option value={2}>2 Leads</option>
-              <option value={3}>3 Leads</option>
-              <option value={5}>5 Leads (Max)</option>
-            </select>
-          </div>
-
-          {autoRunning ? (
-            <button
-              type="button"
-              onClick={() => {
-                cancelRef.current = true;
-              }}
-              className="w-full inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-full bg-red-600 hover:bg-red-700 text-white text-[13px] font-medium cursor-pointer"
-            >
-              <Square className="w-3.5 h-3.5 fill-current" />
-              <span>Stoppen</span>
-            </button>
-          ) : (
-            <button
-              type="submit"
-              className="w-full px-5 py-2.5 rounded-full bg-[#0000F5] hover:bg-[#0000C8] text-white text-[13px] font-medium cursor-pointer"
-            >
-              Autopilot starten
-            </button>
-          )}
-        </form>
-
-        <div className="flex flex-wrap items-center justify-between gap-3 text-[12px] text-[#6B7280]">
-          <label className="inline-flex items-center gap-2 text-[#1A1A2E] cursor-pointer">
-            <input
-              type="checkbox"
-              checked={autoOutreach}
-              onChange={(e) => setAutoOutreach(e.target.checked)}
-              className="accent-[#0000F5]"
-            />
-            <span>
-              Direkt fertige Erstansprache (E-Mail + Video-Audit-Skript) für
-              jeden Lead anlegen
-            </span>
-          </label>
-          <span className="inline-flex items-center gap-1">
-            <ShieldCheck className="w-3.5 h-3.5 text-[#0000F5]" />
-            Firmen- & Kontaktdaten werden vor KI-Aufruf maskiert
-          </span>
-        </div>
-
-        {autoStatusText && (
-          <div className="rounded-xl bg-[#F8F9FC] border border-[#E5E7EB] px-4 py-2.5 flex items-center justify-between gap-3 text-[13px]">
-            <span className="inline-flex items-center gap-2 text-[#1A1A2E]">
-              {autoRunning && (
-                <Loader2 className="w-4 h-4 text-[#0000F5] animate-spin shrink-0" />
-              )}
-              <span>{autoStatusText}</span>
-            </span>
-            {autoModeLabel && (
-              <span className="text-[11px] text-[#6B7280] shrink-0">
-                {autoModeLabel}
-              </span>
-            )}
-          </div>
-        )}
-
-        {autoError && (
-          <p className="text-[13px] text-red-700 bg-red-50 border border-red-200 rounded-xl px-4 py-2.5">
-            {autoError}
-          </p>
-        )}
-
-        {autoCreated.length > 0 && (
-          <div className="rounded-xl bg-[#F0F3FF] border border-[#0000F5]/20 p-4 space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-2 text-[13px]">
-              <span className="font-semibold text-[#1A1A2E]">
-                {autoCreated.length} neue Leads geprüft & gespeichert
-              </span>
-              <span className="text-[#0000F5] font-medium">
-                Bisherige Lauf-Kosten: {autoCostEur.toFixed(4)} €
-              </span>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
-              {autoCreated.map(({ lead, outreachItems, aiModelUsed }) => (
-                <Link
-                  key={lead.id}
-                  href={`/pipeline/${lead.id}`}
-                  className="rounded-xl bg-white border border-[#E5E7EB] p-3.5 hover:border-[#0000F5] transition-colors space-y-1.5"
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-[13px] font-semibold text-[#1A1A2E] truncate">
-                      {lead.company_name}
-                    </span>
-                    <span className="text-[11px] px-2 py-0.5 rounded-full bg-[#F0F3FF] text-[#0000F5] shrink-0">
-                      {PRIORITY_LABELS[lead.priority]}
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-[#6B7280] truncate">
-                    {lead.scan_data?.detectedCms ?? lead.industry} ·{" "}
-                    {outreachItems.length} Entwürfe ({aiModelUsed})
-                  </p>
-                  <p className="text-[11px] text-[#1A1A2E] line-clamp-2">
-                    {lead.findings[0]?.title ?? lead.research_summary}
-                  </p>
-                </Link>
-              ))}
-            </div>
-          </div>
-        )}
-      </section>
-
-      {/* Quick Website Scan Bar */}
-      <section className="rounded-2xl bg-white border border-[#E5E7EB] p-5 sm:p-6">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-          <div>
-            <h2 className="text-[16px] font-semibold text-[#1A1A2E]">
-              Konkrete Website sofort prüfen & als Lead anlegen
-            </h2>
-            <p className="text-[13px] text-[#6B7280] mt-0.5">
-              Der technische Check (HTTPS, Mobile Viewport, CMS, Impressum,
-              Karriere-Signal) kostet 0,00 € KI-Tokens.
-            </p>
-          </div>
-          <label className="inline-flex items-center gap-2 text-[13px] text-[#1A1A2E] cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={runAi}
-              onChange={(e) => setRunAi(e.target.checked)}
-              className="rounded border-[#E5E7EB] accent-[#0000F5]"
-            />
-            <Sparkles className="w-3.5 h-3.5 text-[#0000F5]" />
-            <span>
-              Mit KI qualifizieren (
-              {snapshot.brand.openrouter_config.researchModel})
-            </span>
-          </label>
-        </div>
-
-        <form
-          onSubmit={handleQuickScan}
-          className="mt-4 flex flex-col sm:flex-row gap-3"
-        >
-          <div className="relative flex-1">
-            <Globe className="w-4 h-4 text-[#6B7280] absolute left-3.5 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              value={quickUrl}
-              onChange={(e) => setQuickUrl(e.target.value)}
-              placeholder="z. B. https://zielunternehmen.de"
-              className="w-full pl-10 pr-4 py-2.5 rounded-full border border-[#E5E7EB] text-[14px] text-[#1A1A2E] placeholder:text-[#6B7280] focus:outline-none focus:border-[#0000F5]"
-            />
-          </div>
-          <button
-            type="submit"
-            disabled={scanning || !quickUrl.trim()}
-            className="px-6 py-2.5 rounded-full bg-[#1A1A2E] hover:bg-[#0000F5] disabled:opacity-50 text-white text-[14px] font-medium transition-colors cursor-pointer shrink-0"
-          >
-            {scanning ? "Prüfe Website..." : "Website analysieren"}
-          </button>
-        </form>
-
-        {scanError && (
-          <p className="mt-3 text-[13px] text-red-700 bg-red-50 border border-red-200 rounded-lg px-3.5 py-2">
-            {scanError}
-          </p>
-        )}
-        {scanNotice && (
-          <p className="mt-3 text-[13px] text-[#1A1A2E] bg-[#F0F3FF] border border-[#0000F5]/20 rounded-lg px-3.5 py-2">
-            {scanNotice}
-          </p>
-        )}
-      </section>
-
-      {/* Open Overview Metrics */}
+      {/* Key Stats Bar */}
       <section className="grid grid-cols-2 lg:grid-cols-4 gap-4 border-y border-[#E5E7EB] py-5">
         <div>
           <p className="text-[12px] font-medium text-[#6B7280]">
-            Aktive Leads (KMU / Startup)
+            Druckbereite Briefe
+          </p>
+          <p className="mt-1 text-[24px] font-semibold text-[#0000F5]">
+            {unprintedBriefLeads.length}
+          </p>
+        </div>
+        <div>
+          <p className="text-[12px] font-medium text-[#6B7280]">
+            Qualifizierte Leads (Heiß)
           </p>
           <p className="mt-1 text-[24px] font-semibold text-[#1A1A2E]">
-            {activeLeads.length}{" "}
+            {leads.length}{" "}
             <span className="text-[13px] font-normal text-[#6B7280]">
-              ({kmuCount} / {startupCount})
+              ({hotCount} Heiß)
             </span>
           </p>
         </div>
-
         <div>
           <p className="text-[12px] font-medium text-[#6B7280]">
-            Visuell geprüft (Ziel {snapshot.brand.weekly_targets.leadsChecked})
+            Gedruckt / Kontaktiert
           </p>
           <p className="mt-1 text-[24px] font-semibold text-[#1A1A2E]">
-            {visuallyCheckedCount}
+            {contactedCount}
           </p>
         </div>
-
-        <div>
-          <p className="text-[12px] font-medium text-[#6B7280]">
-            Kontaktiert / Im Gespräch
-          </p>
-          <p className="mt-1 text-[24px] font-semibold text-[#1A1A2E]">
-            {contactedCount}{" "}
-            <span className="text-[13px] font-normal text-[#0000F5]">
-              ({callsOrOffers} Gespräche)
-            </span>
-          </p>
-        </div>
-
         <div>
           <p className="text-[12px] font-medium text-[#6B7280]">
             KI-Kosten diesen Monat
@@ -696,222 +368,380 @@ export function CockpitView({ snapshot }: { snapshot: WorkspaceSnapshot }) {
         </div>
       </section>
 
-      {/* Priority Queue + Cost Summary */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 space-y-6">
-          <section className="rounded-2xl bg-white border border-[#E5E7EB] p-6">
-            <div className="flex items-center justify-between">
+      {/* Main Command Form */}
+      <form
+        onSubmit={handleStartOrder}
+        className="rounded-2xl bg-white border border-[#E5E7EB] p-6 space-y-6"
+      >
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-start gap-3">
+            <div className="w-9 h-9 rounded-xl bg-[#0000F5] text-white flex items-center justify-center shrink-0">
+              <Rocket className="w-4 h-4" />
+            </div>
+            <div>
               <h2 className="text-[17px] font-semibold text-[#1A1A2E]">
-                Aktive Leads & nächste Akquise-Schritte
+                Neuer Such- & Qualifizierungs-Auftrag
               </h2>
-              <Link
-                href="/pipeline"
-                className="text-[13px] font-medium text-[#0000F5] hover:underline"
-              >
-                Pipeline verwalten ({leads.length})
-              </Link>
+              <p className="text-[13px] text-[#6B7280]">
+                Bereits kontaktierte Firmen aus deinem Notion-Export (38
+                Domains) sowie laufende Pipeline-Leads werden automatisch
+                ausgeschlossen.
+              </p>
             </div>
-
-            <div className="mt-4 divide-y divide-[#E5E7EB]">
-              {priorityLeads.map((lead) => (
-                <Link
-                  key={lead.id}
-                  href={`/pipeline/${lead.id}`}
-                  className="py-3.5 flex items-center justify-between gap-4 hover:bg-[#F8F9FC] -mx-3 px-3 rounded-xl transition-colors"
-                >
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-medium text-[14px] text-[#1A1A2E] truncate">
-                        {lead.company_name}
-                      </span>
-                      <span
-                        className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${
-                          lead.priority === "heiss"
-                            ? "bg-[#F0F3FF] text-[#0000F5]"
-                            : "bg-[#F3F4F6] text-[#6B7280]"
-                        }`}
-                      >
-                        {PRIORITY_LABELS[lead.priority]}
-                      </span>
-                      <span className="text-[11px] px-2 py-0.5 rounded-full bg-[#F8F9FC] border border-[#E5E7EB] text-[#6B7280]">
-                        {STATUS_LABELS[lead.status]}
-                      </span>
-                      {lead.city && (
-                        <span className="text-[11px] text-[#6B7280]">
-                          {lead.city}
-                        </span>
-                      )}
-                    </div>
-                    <p className="mt-1 text-[13px] text-[#6B7280] truncate">
-                      {lead.pitch_angle ||
-                        lead.research_summary ||
-                        lead.industry}
-                    </p>
-                  </div>
-                  <div className="text-right shrink-0">
-                    <span className="block text-[12px] text-[#6B7280]">
-                      {lead.next_follow_up_at
-                        ? `Follow-up: ${formatBerlinDate(lead.next_follow_up_at)}`
-                        : "Bereit für Entwurf"}
-                    </span>
-                    <span className="mt-0.5 inline-flex items-center gap-1 text-[12px] font-medium text-[#0000F5]">
-                      Öffnen <ArrowRight className="w-3 h-3" />
-                    </span>
-                  </div>
-                </Link>
-              ))}
-
-              {priorityLeads.length === 0 && (
-                <p className="py-6 text-[14px] text-[#6B7280]">
-                  Noch keine Leads in der Pipeline. Starte oben den 1-Klick
-                  KI-Akquise-Autopilot oder nutze das{" "}
-                  <Link href="/radar" className="text-[#0000F5] underline">
-                    Kunden-Radar
-                  </Link>
-                  .
-                </p>
-              )}
-            </div>
-          </section>
-
-          <section className="rounded-2xl bg-white border border-[#E5E7EB] p-6">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <h2 className="text-[17px] font-semibold text-[#1A1A2E] flex items-center gap-2">
-                  <Eye className="w-4 h-4 text-[#0000F5]" />
-                  <span>Wartet auf deine visuelle Prüfung (Desktop & Mobil)</span>
-                </h2>
-                <p className="mt-1 text-[13px] text-[#6B7280]">
-                  Technische Scans liefern messbare Signale – das endgültige
-                  Qualitätsurteil vor Versand oder Briefdruck liegt bei dir.
-                </p>
-              </div>
-            </div>
-
-            <div className="mt-4 space-y-2.5">
-              {pendingVisualChecks.slice(0, 4).map((lead) => (
-                <Link
-                  key={lead.id}
-                  href={`/pipeline/${lead.id}`}
-                  className="flex items-center justify-between gap-3 rounded-xl border border-[#E5E7EB] px-4 py-3 hover:border-[#0000F5]/40 transition-colors"
-                >
-                  <div className="min-w-0">
-                    <p className="text-[14px] font-medium text-[#1A1A2E] truncate">
-                      {lead.company_name}
-                    </p>
-                    <p className="text-[12px] text-[#6B7280] truncate">
-                      {lead.website_url}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0 text-[12px]">
-                    <span
-                      className={`px-2 py-0.5 rounded-full ${
-                        lead.visual_checked_desktop
-                          ? "bg-emerald-50 text-emerald-700"
-                          : "bg-[#F3F4F6] text-[#6B7280]"
-                      }`}
-                    >
-                      Desktop {lead.visual_checked_desktop ? "OK" : "offen"}
-                    </span>
-                    <span
-                      className={`px-2 py-0.5 rounded-full ${
-                        lead.visual_checked_mobile
-                          ? "bg-emerald-50 text-emerald-700"
-                          : "bg-[#F3F4F6] text-[#6B7280]"
-                      }`}
-                    >
-                      Mobil {lead.visual_checked_mobile ? "OK" : "offen"}
-                    </span>
-                  </div>
-                </Link>
-              ))}
-              {pendingVisualChecks.length === 0 && (
-                <div className="flex items-center gap-2 text-[13px] text-emerald-700 py-2">
-                  <CheckCircle2 className="w-4 h-4" />
-                  <span>
-                    Keine offenen visuellen Prüfungen in der Warteschlange.
-                  </span>
-                </div>
-              )}
-            </div>
-          </section>
+          </div>
+          <span className="text-[12px] font-medium px-3 py-1 rounded-full bg-[#F0F3FF] text-[#0000F5] shrink-0">
+            Modell: {snapshot.brand.openrouter_config.researchModel}
+          </span>
         </div>
 
-        <aside className="space-y-6">
-          <section className="rounded-2xl bg-white border border-[#E5E7EB] p-6 space-y-4">
-            <div className="flex items-center justify-between">
-              <h2 className="text-[16px] font-semibold text-[#1A1A2E]">
-                KI- & Kostenkontrolle
-              </h2>
-              <Link
-                href="/settings"
-                className="text-[12px] font-medium text-[#0000F5] hover:underline inline-flex items-center gap-1"
-              >
-                <SlidersHorizontal className="w-3.5 h-3.5" />
-                Regler
-              </Link>
-            </div>
+        {/* Region, Count, Track */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div>
+            <label className="block text-[12px] font-medium text-[#6B7280] mb-1.5">
+              Suchgebiet
+            </label>
+            <select
+              value={regionPreset}
+              onChange={(e) =>
+                setRegionPreset(
+                  e.target.value as "thueringen" | "deutschland" | "custom",
+                )
+              }
+              className="w-full px-3.5 py-2.5 rounded-xl border border-[#E5E7EB] bg-white text-[14px]"
+            >
+              <option value="thueringen">Ganz Thüringen (18 Städte)</option>
+              <option value="deutschland">Ganz Deutschland (38 Städte)</option>
+              <option value="custom">Bestimmte Stadt / Region</option>
+            </select>
+          </div>
 
-            <div className="space-y-2.5 text-[13px]">
-              <div className="flex justify-between">
-                <span className="text-[#6B7280]">OpenRouter Status</span>
-                <span className="font-medium text-[#1A1A2E]">
-                  {snapshot.openRouterConnected
-                    ? "Aktiv verbunden"
-                    : "Lokale Vorlagen (0 €)"}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-[#6B7280]">Tageslimit</span>
-                <span className="font-medium text-[#1A1A2E]">
-                  {snapshot.usageSummary.todayCalls} /{" "}
-                  {snapshot.brand.budget_config.dailyMaxCalls} Anfragen
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-[#6B7280]">Harter Kosten-Stopp</span>
-                <span className="font-medium text-[#0000F5]">
-                  Serverseitig aktiv
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-[#6B7280]">Analyse-Modell</span>
-                <span className="font-medium text-[#1A1A2E] truncate max-w-[140px]">
-                  {snapshot.brand.openrouter_config.researchModel}
-                </span>
-              </div>
-              <div className="flex justify-between items-center pt-2 border-t border-[#E5E7EB]">
-                <span className="text-[#6B7280] inline-flex items-center gap-1">
-                  <ShieldCheck className="w-3.5 h-3.5 text-[#0000F5]" />
-                  Privacy-Maskierung
-                </span>
-                <span className="font-medium text-[#0000F5]">Immer aktiv</span>
-              </div>
+          {regionPreset === "custom" ? (
+            <div>
+              <label className="block text-[12px] font-medium text-[#6B7280] mb-1.5">
+                Stadt / Region
+              </label>
+              <input
+                type="text"
+                value={customCity}
+                onChange={(e) => setCustomCity(e.target.value)}
+                placeholder="z. B. Leipzig, Erfurt, Jena"
+                className="w-full px-3.5 py-2.5 rounded-xl border border-[#E5E7EB] text-[14px]"
+              />
             </div>
-          </section>
+          ) : (
+            <div>
+              <label className="block text-[12px] font-medium text-[#6B7280] mb-1.5">
+                Spezifischer Suchfokus (optional)
+              </label>
+              <input
+                type="text"
+                value={customKeyword}
+                onChange={(e) => setCustomKeyword(e.target.value)}
+                placeholder="leer = rotierende Zielbranchen"
+                className="w-full px-3.5 py-2.5 rounded-xl border border-[#E5E7EB] text-[14px]"
+              />
+            </div>
+          )}
 
-          <section className="rounded-2xl bg-white border border-[#E5E7EB] p-6 space-y-3">
-            <h2 className="text-[16px] font-semibold text-[#1A1A2E]">
-              Schnellzugriff
-            </h2>
-            <div className="pt-1 flex flex-col gap-2">
-              <Link
-                href="/outreach"
-                className="inline-flex items-center justify-between px-4 py-2.5 rounded-xl border border-[#E5E7EB] hover:border-[#0000F5]/40 text-[13px] font-medium text-[#1A1A2E]"
-              >
-                <span>Akquise & Kundenantworten</span>
-                <ArrowRight className="w-3.5 h-3.5 text-[#0000F5]" />
-              </Link>
-              <Link
-                href="/content"
-                className="inline-flex items-center justify-between px-4 py-2.5 rounded-xl border border-[#E5E7EB] hover:border-[#0000F5]/40 text-[13px] font-medium text-[#1A1A2E]"
-              >
-                <span>Content- & Wochen-Paket</span>
-                <ArrowRight className="w-3.5 h-3.5 text-[#0000F5]" />
-              </Link>
+          <div>
+            <label className="block text-[12px] font-medium text-[#6B7280] mb-1.5">
+              Zielgruppe
+            </label>
+            <select
+              value={track}
+              onChange={(e) => setTrack(e.target.value as TargetTrack)}
+              className="w-full px-3.5 py-2.5 rounded-xl border border-[#E5E7EB] bg-white text-[14px]"
+            >
+              <option value="kmu">KMU, Praxen, Handwerk & Bau (5–50 MA)</option>
+              <option value="startup">Startups & Software-Teams</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-[12px] font-medium text-[#6B7280] mb-1.5">
+              Anzahl qualifizierter Leads
+            </label>
+            <select
+              value={targetCount}
+              onChange={(e) => setTargetCount(Number(e.target.value))}
+              className="w-full px-3.5 py-2.5 rounded-xl border border-[#E5E7EB] bg-white text-[14px] font-medium"
+            >
+              {COUNT_OPTIONS.map((n) => (
+                <option key={n} value={n}>
+                  {n} qualifizierte Unternehmen
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {/* Industry Multi-Select */}
+        {track === "kmu" && !customKeyword.trim() && (
+          <div className="space-y-2">
+            <p className="text-[12px] font-medium text-[#6B7280]">
+              Aktive Zielbranchen (rotieren automatisch pro Suchrunde):
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {INDUSTRY_CHOICES.map((ind) => {
+                const active = selectedIndustries.includes(ind.id);
+                return (
+                  <button
+                    key={ind.id}
+                    type="button"
+                    onClick={() => toggleIndustry(ind.id)}
+                    className={`px-3.5 py-1.5 rounded-full text-[12px] font-medium transition-colors cursor-pointer ${
+                      active
+                        ? "bg-[#F0F3FF] text-[#0000F5] border border-[#0000F5]/30"
+                        : "bg-[#F8F9FC] text-[#6B7280] border border-[#E5E7EB]"
+                    }`}
+                  >
+                    {ind.label}
+                  </button>
+                );
+              })}
             </div>
-          </section>
-        </aside>
+          </div>
+        )}
+
+        {/* Quality & Domain Switches */}
+        <div className="flex flex-wrap items-center justify-between gap-4 pt-2 border-t border-[#E5E7EB]">
+          <div className="flex flex-wrap gap-5">
+            <label className="inline-flex items-center gap-2 text-[13px] text-[#1A1A2E] cursor-pointer">
+              <input
+                type="checkbox"
+                checked={onlyDeDomains}
+                onChange={(e) => setOnlyDeDomains(e.target.checked)}
+                className="accent-[#0000F5]"
+              />
+              <span>Nur Unternehmen mit .de-Domain</span>
+            </label>
+
+            <label className="inline-flex items-center gap-2 text-[13px] text-[#1A1A2E] cursor-pointer">
+              <input
+                type="checkbox"
+                checked={strictHurdle}
+                onChange={(e) => setStrictHurdle(e.target.checked)}
+                className="accent-[#0000F5]"
+              />
+              <span>
+                Strenge 5-Punkte-Qualifikationshürde (starke Websites
+                ausschließen)
+              </span>
+            </label>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <span className="text-[12px] text-[#6B7280] inline-flex items-center gap-1">
+              <ShieldCheck className="w-3.5 h-3.5 text-[#0000F5]" />
+              ca. {(targetCount * 0.002).toFixed(2)}–{(targetCount * 0.006).toFixed(2)} €
+            </span>
+
+            {running ? (
+              <button
+                type="button"
+                onClick={() => {
+                  cancelRef.current = true;
+                }}
+                className="inline-flex items-center gap-2 px-6 py-2.5 rounded-full bg-red-600 hover:bg-red-700 text-white text-[14px] font-medium cursor-pointer"
+              >
+                <Square className="w-3.5 h-3.5 fill-current" />
+                <span>Stoppen</span>
+              </button>
+            ) : (
+              <button
+                type="submit"
+                className="inline-flex items-center gap-2 px-6 py-2.5 rounded-full bg-[#0000F5] hover:bg-[#0000C8] text-white text-[14px] font-medium cursor-pointer"
+              >
+                <span>{targetCount} Leads + Briefe erzeugen</span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+        </div>
+      </form>
+
+      {/* Live Funnel Status */}
+      {(running || statusLine || errorMsg) && (
+        <section className="rounded-2xl bg-white border border-[#E5E7EB] p-6 space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5 text-[14px] font-medium text-[#1A1A2E]">
+              {running ? (
+                <Loader2 className="w-4 h-4 text-[#0000F5] animate-spin" />
+              ) : (
+                <CheckCircle2 className="w-4 h-4 text-emerald-700" />
+              )}
+              <span>{statusLine}</span>
+            </div>
+            <span className="text-[12px] font-medium text-[#0000F5]">
+              Laufkosten: {runCostEur.toFixed(4)} €
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-[#F8F9FC] rounded-xl p-4 text-[13px]">
+            <div>
+              <span className="text-[#6B7280] block text-[11px]">
+                Kandidaten gefunden
+              </span>
+              <span className="font-semibold text-[#1A1A2E]">
+                {discoveredTotal}
+              </span>
+            </div>
+            <div>
+              <span className="text-[#6B7280] block text-[11px]">
+                Websites vorgeprüft (0 €)
+              </span>
+              <span className="font-semibold text-[#1A1A2E]">
+                {triagedTotal}
+              </span>
+            </div>
+            <div>
+              <span className="text-[#6B7280] block text-[11px]">
+                Qualifiziert (Brief + E-Mail)
+              </span>
+              <span className="font-semibold text-[#0000F5]">
+                {qualifiedLeads.length} / {targetCount}
+              </span>
+            </div>
+            <div>
+              <span className="text-[#6B7280] block text-[11px]">
+                Ausgeschlossen / Verworfen
+              </span>
+              <span className="font-semibold text-[#6B7280]">
+                {rejectedList.length}
+              </span>
+            </div>
+          </div>
+
+          {errorMsg && (
+            <p className="text-[13px] text-red-700 bg-red-50 border border-red-200 rounded-xl px-4 py-2.5">
+              {errorMsg}
+            </p>
+          )}
+
+          {qualifiedLeads.length > 0 && (
+            <div className="space-y-3 pt-2">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <h3 className="text-[15px] font-semibold text-[#1A1A2E]">
+                  Neu qualifizierte Leads ({qualifiedLeads.length})
+                </h3>
+                <Link
+                  href="/briefe"
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-[#0000F5] text-white text-[13px] font-medium"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  <span>Jetzt im Briefstudio drucken / herunterladen</span>
+                </Link>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {qualifiedLeads.map((l) => (
+                  <Link
+                    key={l.id}
+                    href={`/pipeline/${l.id}`}
+                    className="rounded-xl border border-[#E5E7EB] p-4 hover:border-[#0000F5] transition-colors space-y-1.5"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-semibold text-[14px] text-[#1A1A2E] truncate">
+                        {l.company_name}
+                      </span>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <span
+                          className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${
+                            l.priority === "heiss"
+                              ? "bg-[#F0F3FF] text-[#0000F5]"
+                              : "bg-amber-50 text-amber-800"
+                          }`}
+                        >
+                          {PRIORITY_LABELS[l.priority]}
+                        </span>
+                        <span className="text-[11px] px-2 py-0.5 rounded-full bg-[#F3F4F6] text-[#1A1A2E]">
+                          {l.contact_channel === "brief" ? "Brief" : "E-Mail"}
+                        </span>
+                      </div>
+                    </div>
+                    <p className="text-[12px] text-[#6B7280] truncate">
+                      {l.city} · {l.decision_maker || "Entscheider offen"} ·{" "}
+                      {l.findings.length} harte Signale
+                    </p>
+                    <p className="text-[12px] text-[#1A1A2E] line-clamp-2">
+                      {l.findings[0]?.title}
+                      {l.findings[0]?.quote ? ` („${l.findings[0].quote}“)` : ""}
+                    </p>
+                  </Link>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {rejectedList.length > 0 && (
+            <details className="pt-2 text-[12px] text-[#6B7280]">
+              <summary className="cursor-pointer font-medium text-[#1A1A2E]">
+                Ausgeschlossene Kandidaten ansehen ({rejectedList.length})
+              </summary>
+              <div className="mt-2 space-y-1 max-h-44 overflow-y-auto">
+                {rejectedList.map((r, i) => (
+                  <div key={i} className="flex items-start gap-2">
+                    <XCircle className="w-3.5 h-3.5 text-[#6B7280] mt-0.5 shrink-0" />
+                    <span>
+                      <strong className="text-[#1A1A2E]">
+                        {r.companyName}:
+                      </strong>{" "}
+                      {r.reason}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </details>
+          )}
+        </section>
+      )}
+
+      {/* Quick Action Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <Link
+          href="/briefe"
+          className="rounded-2xl bg-white border border-[#E5E7EB] hover:border-[#0000F5]/40 p-5 flex items-center justify-between gap-3 transition-colors"
+        >
+          <div>
+            <p className="text-[15px] font-semibold text-[#1A1A2E]">
+              Brief- & Druckstudio
+            </p>
+            <p className="text-[13px] text-[#6B7280] mt-0.5">
+              DIN-5008-Briefe als Sammel-PDF drucken oder als Pages-DOCX laden.
+            </p>
+          </div>
+          <Printer className="w-5 h-5 text-[#0000F5] shrink-0" />
+        </Link>
+
+        <Link
+          href="/outreach"
+          className="rounded-2xl bg-white border border-[#E5E7EB] hover:border-[#0000F5]/40 p-5 flex items-center justify-between gap-3 transition-colors"
+        >
+          <div>
+            <p className="text-[15px] font-semibold text-[#1A1A2E]">
+              E-Mail-Pitches
+            </p>
+            <p className="text-[13px] text-[#6B7280] mt-0.5">
+              Alle formellen E-Mail-Entwürfe & 8–10-Tage-Follow-ups im Blick.
+            </p>
+          </div>
+          <Mail className="w-5 h-5 text-[#0000F5] shrink-0" />
+        </Link>
+
+        <Link
+          href="/pipeline"
+          className="rounded-2xl bg-white border border-[#E5E7EB] hover:border-[#0000F5]/40 p-5 flex items-center justify-between gap-3 transition-colors"
+        >
+          <div>
+            <p className="text-[15px] font-semibold text-[#1A1A2E]">
+              Lead-Pipeline & Notion
+            </p>
+            <p className="text-[13px] text-[#6B7280] mt-0.5">
+              Befunde, Zitate, Quellen, CSV-Import und Notion-Export verwalten.
+            </p>
+          </div>
+          <ArrowRight className="w-5 h-5 text-[#0000F5] shrink-0" />
+        </Link>
       </div>
     </div>
   );

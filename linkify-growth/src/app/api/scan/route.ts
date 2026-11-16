@@ -92,7 +92,7 @@ export async function POST(request: Request) {
           industry: forceTrack === "startup" ? "Digitales Produkt / SaaS" : "",
           target_track: forceTrack ?? scanResult.suggestedTrack,
           city: "",
-          postal_address: "",
+          postal_address: scanResult.scan.extractedAddressHint ?? "",
           website_url: scanResult.scan.finalUrl,
           decision_maker: scanResult.scan.decisionMakerHint ?? "",
           contact_email: scanResult.scan.extractedEmails[0] ?? "",
@@ -108,12 +108,18 @@ export async function POST(request: Request) {
           visual_notes: "",
           research_summary: `${scanResult.scan.detectedCms} erkannt (${scanResult.scan.responseTimeMs} ms, ${scanResult.scan.checkedPagesCount ?? 1} Seiten geprüft). ${scanResult.findings[0]?.title ?? ""}`,
           findings: scanResult.findings,
+          buying_signals: [],
+          score_reason: "",
+          relaunch_benefit: "",
+          follow_up_note: "",
           scan_data: scanResult.scan,
           pitch_angle: scanResult.suggestedPitchAngle,
+          letter_printed_at: null,
+          found_at: new Date().toISOString(),
           is_sample: false,
         };
 
-        const savedLead = saveToPipeline
+        const savedLead: Lead = saveToPipeline
           ? await upsertLead(leadPayload)
           : {
               ...leadPayload,
@@ -191,7 +197,10 @@ export async function POST(request: Request) {
     industry: existingLead?.industry || cleanStr(body.industry, 100),
     target_track: scanResult.suggestedTrack,
     city: existingLead?.city || cleanStr(body.city, 80),
-    postal_address: existingLead?.postal_address || "",
+    postal_address:
+      existingLead?.postal_address ||
+      scanResult.scan.extractedAddressHint ||
+      "",
     website_url: scanResult.scan.finalUrl,
     decision_maker:
       existingLead?.decision_maker ||
@@ -215,8 +224,14 @@ export async function POST(request: Request) {
     visual_notes: existingLead?.visual_notes ?? "",
     research_summary: `${scanResult.scan.detectedCms} erkannt (${scanResult.scan.responseTimeMs} ms, HTTPS: ${scanResult.scan.httpsEnabled ? "Ja" : "Nein"}, ${scanResult.scan.checkedPagesCount ?? 1} Seiten geprüft). ${scanResult.findings[0]?.title ?? ""}`,
     findings: scanResult.findings,
+    buying_signals: existingLead?.buying_signals ?? [],
+    score_reason: existingLead?.score_reason ?? "",
+    relaunch_benefit: existingLead?.relaunch_benefit ?? "",
+    follow_up_note: existingLead?.follow_up_note ?? "",
     scan_data: scanResult.scan,
     pitch_angle: scanResult.suggestedPitchAngle,
+    letter_printed_at: existingLead?.letter_printed_at ?? null,
+    found_at: existingLead?.found_at ?? new Date().toISOString(),
     is_sample: existingLead?.is_sample ?? false,
     created_at: existingLead?.created_at ?? new Date().toISOString(),
     updated_at: new Date().toISOString(),

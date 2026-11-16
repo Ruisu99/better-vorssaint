@@ -4,12 +4,13 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   FileText,
-  LayoutDashboard,
   Mail,
+  Printer,
   Radar,
+  Rocket,
+  ShieldCheck,
   SlidersHorizontal,
   Users,
-  ShieldCheck,
 } from "lucide-react";
 import type { BrandProfile, ViewerInfo } from "@/lib/types";
 import { LinkifyLogo } from "./LinkifyLogo";
@@ -29,12 +30,13 @@ interface AppShellProps {
 }
 
 const NAV_ITEMS = [
-  { href: "/", label: "Cockpit", icon: LayoutDashboard },
-  { href: "/radar", label: "Kunden-Radar", icon: Radar },
+  { href: "/", label: "Akquise-Auftrag", icon: Rocket },
+  { href: "/briefe", label: "Brief- & Druckstudio", icon: Printer },
   { href: "/pipeline", label: "Lead-Pipeline", icon: Users },
-  { href: "/outreach", label: "Akquise & Antworten", icon: Mail },
+  { href: "/outreach", label: "E-Mail-Pitches", icon: Mail },
+  { href: "/radar", label: "Manueller Radar", icon: Radar },
   { href: "/content", label: "Content-Studio", icon: FileText },
-  { href: "/settings", label: "KI & Kosten", icon: SlidersHorizontal },
+  { href: "/settings", label: "Vorlage & Kosten", icon: SlidersHorizontal },
 ];
 
 export function AppShell({
@@ -120,12 +122,10 @@ export function AppShell({
               <span>
                 Heute: {usageSummary.todayCalls} / {brand.budget_config.dailyMaxCalls} Calls
               </span>
-              {brand.openrouter_config.privacyMode && (
-                <span className="inline-flex items-center gap-1 text-[#1A1A2E]">
-                  <ShieldCheck className="w-3 h-3 text-[#0000F5]" />
-                  Privacy
-                </span>
-              )}
+              <span className="inline-flex items-center gap-1 text-[#1A1A2E]">
+                <ShieldCheck className="w-3 h-3 text-[#0000F5]" />
+                Privacy
+              </span>
             </div>
           </Link>
 
@@ -134,7 +134,7 @@ export function AppShell({
               <span className="truncate">{viewer.name}</span>
               {viewer.simulated && (
                 <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-[#F3F4F6] text-[#6B7280]">
-                  Lokal simuliert
+                  Lokal
                 </span>
               )}
             </div>
@@ -148,17 +148,15 @@ export function AppShell({
           <Link href="/">
             <LinkifyLogo />
           </Link>
-          <div className="flex items-center gap-2 text-[12px]">
-            <span
-              className={`px-2.5 py-1 rounded-full font-medium ${
-                openRouterConnected
-                  ? "bg-[#F0F3FF] text-[#0000F5]"
-                  : "bg-amber-50 text-amber-800"
-              }`}
-            >
-              {monthEur.toFixed(2)} € / {budgetEur.toFixed(0)} €
-            </span>
-          </div>
+          <span
+            className={`px-2.5 py-1 rounded-full text-[12px] font-medium ${
+              openRouterConnected
+                ? "bg-[#F0F3FF] text-[#0000F5]"
+                : "bg-amber-50 text-amber-800"
+            }`}
+          >
+            {monthEur.toFixed(2)} € / {budgetEur.toFixed(0)} €
+          </span>
         </div>
         <nav
           className="mt-3 flex gap-1.5 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"

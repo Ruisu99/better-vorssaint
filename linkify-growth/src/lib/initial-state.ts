@@ -25,6 +25,7 @@ import {
   getBrandProfile,
   hasPersistedProfile,
   listAiRuns,
+  listAllOutreachForOwner,
   listContentPosts,
   listLeads,
   listRecentOutreach,
@@ -112,11 +113,12 @@ export async function loadWorkspaceSnapshot(): Promise<WorkspaceSnapshot> {
   // Ensure any legacy demo rows from earlier builds are purged cleanly
   await clearSampleData(scopeKey).catch(() => {});
 
-  const [brand, leads, recentOutreach, contentPosts, aiRuns, usageSummary] =
+  const [brand, leads, recentOutreach, allOutreach, contentPosts, aiRuns, usageSummary] =
     await Promise.all([
       getBrandProfile(scopeKey),
       listLeads(scopeKey),
       listRecentOutreach(scopeKey),
+      listAllOutreachForOwner(scopeKey),
       listContentPosts(scopeKey),
       listAiRuns(scopeKey),
       getAiUsageSummary(scopeKey),
@@ -129,7 +131,7 @@ export async function loadWorkspaceSnapshot(): Promise<WorkspaceSnapshot> {
     openRouterConnected: isOpenRouterConfigured(),
     brand,
     leads,
-    recentOutreach,
+    recentOutreach: allOutreach.length > 0 ? allOutreach : recentOutreach,
     contentPosts,
     aiRuns,
     usageSummary,

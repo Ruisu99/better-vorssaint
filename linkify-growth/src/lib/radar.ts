@@ -1,3 +1,4 @@
+import { isHistoricalNotionLead, normalizeDomain } from "./notion-history";
 import { runAiTask } from "./openrouter";
 import type { RadarCandidate, TargetTrack } from "./types";
 import { sanitizeExternalHref } from "./url-safety";
@@ -8,42 +9,114 @@ export type RadarCategory =
   | "gesundheit"
   | "kanzlei"
   | "auto"
-  | "bau";
+  | "bau"
+  | "moebel"
+  | "industrie";
+
+export const THURINGIA_CITIES = [
+  "Erfurt",
+  "Jena",
+  "Weimar",
+  "Gera",
+  "Eisenach",
+  "Gotha",
+  "Suhl",
+  "Nordhausen",
+  "Mühlhausen",
+  "Meiningen",
+  "Saalfeld",
+  "Rudolstadt",
+  "Arnstadt",
+  "Ilmenau",
+  "Altenburg",
+  "Apolda",
+  "Sonneberg",
+  "Bad Salzungen",
+];
+
+export const GERMANY_CITIES = [
+  ...THURINGIA_CITIES.slice(0, 12),
+  "Leipzig",
+  "Dresden",
+  "Chemnitz",
+  "Halle (Saale)",
+  "Magdeburg",
+  "Kassel",
+  "Göttingen",
+  "Bamberg",
+  "Coburg",
+  "Würzburg",
+  "Nürnberg",
+  "Regensburg",
+  "Augsburg",
+  "Ulm",
+  "Hannover",
+  "Braunschweig",
+  "Münster",
+  "Bielefeld",
+  "Paderborn",
+  "Mainz",
+  "Wiesbaden",
+  "Karlsruhe",
+  "Freiburg",
+  "Potsdam",
+  "Lübeck",
+  "Rostock",
+];
 
 const CATEGORY_KEYWORDS: Record<RadarCategory, string[]> = {
+  gesundheit: [
+    "Zahnarztpraxis",
+    "Arztpraxis",
+    "Physiotherapie",
+    "Pflegedienst",
+    "Kieferorthopädie",
+  ],
+  kanzlei: [
+    "Steuerberatung",
+    "Rechtsanwaltskanzlei",
+    "Architekturbüro",
+    "Ingenieurbüro",
+    "Notariat",
+  ],
+  auto: ["Autohaus", "Autowerkstatt", "Fahrzeugtechnik"],
   handwerk: [
     "Dachdecker",
     "Tischlerei",
-    "Elektro",
-    "Sanitär",
-    "Maler",
-    "Heizung",
+    "Elektrobetrieb",
+    "Sanitär Heizung",
+    "Malerbetrieb",
+    "Metallbau",
   ],
-  gesundheit: [
-    "Zahnarzt",
-    "Physiotherapie",
-    "Arztpraxis",
-    "Pflegedienst",
-    "Ergotherapie",
+  bau: ["Bauunternehmen", "Straßenbau", "Tiefbau", "Zimmerei", "Gerüstbau"],
+  moebel: ["Möbelhaus", "Möbelstudio", "Küchenstudio", "Einrichtungshaus"],
+  industrie: [
+    "Maschinenbau",
+    "Werkzeugbau",
+    "Lufttechnik",
+    "Anlagenbau",
+    "Elektrotechnik",
   ],
-  kanzlei: [
-    "Rechtsanwalt",
-    "Steuerberater",
-    "Architekt",
-    "Notar",
-    "Ingenieurbüro",
+  alle: [
+    "Zahnarztpraxis",
+    "Dachdecker",
+    "Autohaus",
+    "Steuerberatung",
+    "Bauunternehmen",
+    "Maschinenbau",
+    "Tischlerei",
+    "Möbelhaus",
   ],
-  auto: ["Autohaus", "Autowerkstatt", "Kfz"],
-  bau: ["Bauunternehmen", "Dachdecker", "Zimmerei", "Tiefbau"],
-  alle: ["Zahnarzt", "Physiotherapie", "Dachdecker", "Autohaus", "Tischlerei"],
 };
 
 const KEYWORD_CATEGORY_ALIASES: Array<[RegExp, RadarCategory]> = [
   [/^(handwerk|handwerker|betriebe?)$/i, "handwerk"],
-  [/^(gesundheit|praxis|praxen|pflege|medizin|arzt)$/i, "gesundheit"],
+  [/^(gesundheit|praxis|praxen|pflege|medizin|arzt|zahnarzt)$/i, "gesundheit"],
   [/^(kanzlei|kanzleien|beratung|recht|steuer)$/i, "kanzlei"],
   [/^(auto|autohaus|autohäuser|kfz|werkstatt)$/i, "auto"],
-  [/^(bau|bauunternehmen|baubranche|architektur)$/i, "bau"],
+  [/^(bau|bauunternehmen|baubranche)$/i, "bau"],
+  [/^(möbel|moebel|möbelhandel|küche)$/i, "moebel"],
+  [/^(industrie|maschinenbau|metallbau)$/i, "industrie"],
   [/^(alle|allgemein|unternehmen|kmu|lokal)$/i, "alle"],
 ];
 
@@ -59,27 +132,13 @@ interface NominatimGeoItem {
   extratags?: Record<string, string>;
 }
 
-interface PhotonFeature {
-  properties?: {
-    osm_type?: string;
-    osm_id?: number;
-    osm_key?: string;
-    osm_value?: string;
-    name?: string;
-    street?: string;
-    housenumber?: string;
-    postcode?: string;
-    city?: string;
-  };
-}
-
 const TYPE_LABELS: Record<string, string> = {
   dentist: "Zahnarztpraxis",
   doctors: "Arztpraxis",
-  clinic: "Medizinische Praxis",
+  clinic: "Arztpraxis / Klinik",
   physiotherapist: "Physiotherapie",
   healthcare: "Gesundheit & Pflege",
-  lawyer: "Rechtsanwaltskanzlei",
+  lawyer: "Rechtskanzlei",
   tax_advisor: "Steuerberatung",
   notary: "Notariat",
   architect: "Architekturbüro",
@@ -91,6 +150,50 @@ const TYPE_LABELS: Record<string, string> = {
   electrician: "Elektrobetrieb",
   craft: "Handwerk",
 };
+
+const INSTITUTIONAL_OR_CHAIN_SKIP =
+  /\b(berufsgenossenschaft|handwerkskammer|ihk|industrie- und handelskammer|universität|hochschule|finanzamt|stadtverwaltung|landratsamt|jobcenter|bundesagentur|arbeitsagentur|polizei|feuerwehr|rathaus|ministerium|krankenkasse|aok|barmer|dak|techniker krankenkasse|dekra|tüv|sparkasse|volksbank|raiffeisenbank|commerzbank|deutsche bank|postbank|aldi|lidl|rewe|edeka|kaufland|penny|netto|rossmann|dm-drogerie|obi|hornbach|bauhaus|toom|ikea|xxxlutz|poco|atu|carglass|fielmann|apollo)\b/i;
+
+const DIRECTORY_BLOCKLIST = [
+  "gelbeseiten.de",
+  "11880.com",
+  "dasoertliche.de",
+  "kennstdueinen.de",
+  "linkedin.com",
+  "facebook.com",
+  "instagram.com",
+  "kununu.com",
+  "northdata.de",
+  "crunchbase.com",
+  "yelp.",
+  "jameda.de",
+  "doctolib.de",
+  "provenexpert.com",
+  "wer-zu-wem.de",
+  "wlw.de",
+  "firmendb.de",
+  "bundesanzeiger.de",
+  "wikipedia.org",
+];
+
+export function isEligibleBusinessCandidate(params: {
+  companyName: string;
+  websiteUrl: string;
+  onlyDeDomains?: boolean;
+}): boolean {
+  const name = params.companyName.trim();
+  const url = params.websiteUrl.trim();
+  if (!name || !url) return false;
+  if (INSTITUTIONAL_OR_CHAIN_SKIP.test(name)) return false;
+
+  const domain = normalizeDomain(url);
+  if (!domain) return false;
+  if (DIRECTORY_BLOCKLIST.some((d) => domain.includes(d))) return false;
+  if (params.onlyDeDomains && !domain.endsWith(".de")) return false;
+  if (isHistoricalNotionLead(name, url)) return false;
+
+  return true;
+}
 
 function formatNominatimAddress(
   addr: Record<string, string> | undefined,
@@ -110,19 +213,15 @@ function formatNominatimAddress(
 async function fetchNominatimPois(
   queryTerm: string,
   city: string,
-  viewbox?: string,
 ): Promise<NominatimGeoItem[]> {
   try {
     const url = new URL("https://nominatim.openstreetmap.org/search");
     url.searchParams.set("q", `${queryTerm} ${city}`);
+    url.searchParams.set("countrycodes", "de");
     url.searchParams.set("format", "jsonv2");
     url.searchParams.set("extratags", "1");
     url.searchParams.set("addressdetails", "1");
     url.searchParams.set("limit", "15");
-    if (viewbox) {
-      url.searchParams.set("viewbox", viewbox);
-      url.searchParams.set("bounded", "1");
-    }
 
     const res = await fetch(url.toString(), {
       method: "GET",
@@ -135,31 +234,6 @@ async function fetchNominatimPois(
     if (!res.ok) return [];
     const data = (await res.json()) as NominatimGeoItem[];
     return Array.isArray(data) ? data : [];
-  } catch {
-    return [];
-  }
-}
-
-async function fetchPhotonPois(
-  queryTerm: string,
-  city: string,
-): Promise<PhotonFeature[]> {
-  try {
-    const url = new URL("https://photon.komoot.io/api/");
-    url.searchParams.set("q", `${queryTerm} ${city}`);
-    url.searchParams.set("limit", "12");
-    url.searchParams.set("lang", "de");
-    const res = await fetch(url.toString(), {
-      method: "GET",
-      signal: AbortSignal.timeout(4_500),
-      headers: {
-        "user-agent": "LinkifyGrowthOS/1.0 (https://linkify.tech)",
-        accept: "application/json",
-      },
-    });
-    if (!res.ok) return [];
-    const data = (await res.json()) as { features?: PhotonFeature[] };
-    return Array.isArray(data.features) ? data.features : [];
   } catch {
     return [];
   }
@@ -186,6 +260,7 @@ export async function searchLocalBusinesses(params: {
   category: RadarCategory;
   keyword?: string;
   onlyWithWebsite?: boolean;
+  onlyDeDomains?: boolean;
   limit?: number;
   existingWebsites?: Set<string>;
   existingNames?: Set<string>;
@@ -199,53 +274,13 @@ export async function searchLocalBusinesses(params: {
   }
 
   const limit = Math.min(Math.max(params.limit ?? 25, 5), 40);
-
-  const geoUrl = new URL("https://nominatim.openstreetmap.org/search");
-  geoUrl.searchParams.set("q", `${city}, Deutschland`);
-  geoUrl.searchParams.set("format", "jsonv2");
-  geoUrl.searchParams.set("limit", "1");
-
-  const geoRes = await fetch(geoUrl.toString(), {
-    method: "GET",
-    signal: AbortSignal.timeout(5_000),
-    headers: {
-      "user-agent": "LinkifyGrowthOS/1.0 (https://linkify.tech)",
-      accept: "application/json",
-    },
-  });
-
-  let resolvedLocation = city;
-  let nominatimViewbox: string | undefined;
-
-  if (geoRes.ok) {
-    const geoData = (await geoRes.json()) as NominatimGeoItem[];
-    if (Array.isArray(geoData) && geoData.length > 0) {
-      resolvedLocation = geoData[0].display_name ?? city;
-      if (geoData[0].boundingbox) {
-        const [southRaw, northRaw, westRaw, eastRaw] = geoData[0].boundingbox;
-        const south = Number.parseFloat(southRaw);
-        const north = Number.parseFloat(northRaw);
-        const west = Number.parseFloat(westRaw);
-        const east = Number.parseFloat(eastRaw);
-        const latMid = (south + north) / 2;
-        const lonMid = (west + east) / 2;
-        const clampedSouth = Math.max(south, latMid - 0.18).toFixed(5);
-        const clampedNorth = Math.min(north, latMid + 0.18).toFixed(5);
-        const clampedWest = Math.max(west, lonMid - 0.25).toFixed(5);
-        const clampedEast = Math.min(east, lonMid + 0.25).toFixed(5);
-        nominatimViewbox = `${clampedWest},${clampedNorth},${clampedEast},${clampedSouth}`;
-      }
-    }
-  }
-
   const terms = expandSearchTerms(params.category, params.keyword).slice(0, 4);
 
-  // Run in two gentle pairs (200ms stagger) so OSM Nominatim never rate-limits shared cloud IPs
   const poiBatches: NominatimGeoItem[][] = [];
   for (let i = 0; i < terms.length; i += 2) {
     const slice = terms.slice(i, i + 2);
     const batch = await Promise.all(
-      slice.map((t) => fetchNominatimPois(t, city, nominatimViewbox)),
+      slice.map((t) => fetchNominatimPois(t, city)),
     );
     poiBatches.push(...batch);
     if (i + 2 < terms.length) {
@@ -253,38 +288,9 @@ export async function searchLocalBusinesses(params: {
     }
   }
 
-  const photonPois =
-    params.keyword?.trim() && terms.length === 1
-      ? await fetchPhotonPois(params.keyword.trim(), city)
-      : [];
-
+  const seenDomains = new Set<string>();
   const seenNames = new Set<string>();
   const candidates: RadarCandidate[] = [];
-
-  const INSTITUTIONAL_SKIP =
-    /\b(berufsgenossenschaft|handwerkskammer|ihk|industrie- und handelskammer|universität|hochschule|finanzamt|stadtverwaltung|landratsamt|jobcenter|bundesagentur|arbeitsagentur|polizei|feuerwehr|rathaus|ministerium|krankenkasse|aok|barmer|tk |dekra|tüv )\b/i;
-
-  const pushCandidate = (c: Omit<RadarCandidate, "alreadyInPipeline">) => {
-    const normName = c.companyName.toLowerCase();
-    if (!c.companyName || seenNames.has(normName)) return;
-    if (INSTITUTIONAL_SKIP.test(c.companyName)) return;
-    if (params.onlyWithWebsite && !c.websiteUrl) return;
-    seenNames.add(normName);
-
-    const normalizedDomain = c.websiteUrl
-      ? c.websiteUrl
-          .replace(/^https?:\/\/(www\.)?/i, "")
-          .replace(/\/.*$/, "")
-          .toLowerCase()
-      : "";
-
-    const alreadyInPipeline =
-      Boolean(params.existingNames?.has(normName)) ||
-      (normalizedDomain !== "" &&
-        Boolean(params.existingWebsites?.has(normalizedDomain)));
-
-    candidates.push({ ...c, alreadyInPipeline });
-  };
 
   for (let i = 0; i < poiBatches.length; i++) {
     const term = terms[i] ?? "Unternehmen";
@@ -294,12 +300,36 @@ export async function searchLocalBusinesses(params: {
       const tags = item.extratags ?? {};
       const rawSite = tags.website ?? tags["contact:website"] ?? tags.url ?? "";
       const safeSite = sanitizeExternalHref(rawSite) ?? "";
+
+      if (params.onlyWithWebsite && !safeSite) continue;
+      if (INSTITUTIONAL_OR_CHAIN_SKIP.test(name)) continue;
+
+      const domain = safeSite ? normalizeDomain(safeSite) : "";
+      if (params.onlyDeDomains && (!domain || !domain.endsWith(".de"))) {
+        continue;
+      }
+      if (domain && DIRECTORY_BLOCKLIST.some((d) => domain.includes(d))) {
+        continue;
+      }
+      if (isHistoricalNotionLead(name, safeSite)) continue;
+
+      const normName = name.toLowerCase();
+      if (seenNames.has(normName) || (domain && seenDomains.has(domain))) {
+        continue;
+      }
+      seenNames.add(normName);
+      if (domain) seenDomains.add(domain);
+
+      const alreadyInPipeline =
+        Boolean(params.existingNames?.has(normName)) ||
+        (domain !== "" && Boolean(params.existingWebsites?.has(domain)));
+
       const typeLabel =
         (item.type && TYPE_LABELS[item.type]) ||
         (tags.craft && TYPE_LABELS[tags.craft]) ||
         term;
 
-      pushCandidate({
+      candidates.push({
         osmId: `${item.osm_type ?? "poi"}:${item.osm_id ?? name}`,
         companyName: name,
         industry: typeLabel,
@@ -312,49 +342,28 @@ export async function searchLocalBusinesses(params: {
         websiteUrl: safeSite,
         contactEmail: (tags.email ?? tags["contact:email"] ?? "").trim(),
         contactPhone: (tags.phone ?? tags["contact:phone"] ?? "").trim(),
+        alreadyInPipeline,
       });
     }
   }
 
-  for (const feat of photonPois) {
-    const props = feat.properties;
-    const name = (props?.name ?? "").trim();
-    if (!name) continue;
-    const line1 = `${props?.street ?? ""} ${props?.housenumber ?? ""}`.trim();
-    const line2 = `${props?.postcode ?? ""} ${props?.city ?? city}`.trim();
-    const postalAddress = line1 && line2 ? `${line1}, ${line2}` : line1 || line2;
-    const label =
-      (props?.osm_value && TYPE_LABELS[props.osm_value]) ||
-      params.keyword?.trim() ||
-      "Lokales Unternehmen";
-
-    pushCandidate({
-      osmId: `ph:${props?.osm_type ?? "N"}:${props?.osm_id ?? name}`,
-      companyName: name,
-      industry: label,
-      city: props?.city ?? city,
-      postalAddress,
-      websiteUrl: "",
-      contactEmail: "",
-      contactPhone: "",
-    });
-  }
-
   return {
-    resolvedLocation,
+    resolvedLocation: city,
     candidates: candidates.slice(0, limit),
   };
 }
 
 /**
  * Live Web Discovery via OpenRouter's Perplexity Sonar ($1/$1 per 1M tokens)
- * to discover real DACH startups, SaaS teams, and local businesses.
+ * specifically targeting medium-sized German businesses (5-50 employees, .de domains).
  */
 export async function searchWebProspectsWithOpenRouter(params: {
   scopeKey: string;
   query: string;
   city: string;
   track: TargetTrack;
+  onlyDeDomains?: boolean;
+  excludeDomains?: string[];
   limit?: number;
   existingWebsites?: Set<string>;
   existingNames?: Set<string>;
@@ -363,19 +372,29 @@ export async function searchWebProspectsWithOpenRouter(params: {
   providerMode: "openrouter" | "local_fallback";
   modelUsed: string;
   limitBlockedReason?: string;
+  estimatedCostUsd: number;
 }> {
-  const count = Math.min(Math.max(params.limit ?? 8, 3), 12);
-  const region = params.city.trim() || "Deutschland / DACH";
+  const count = Math.min(Math.max(params.limit ?? 10, 4), 14);
+  const region = params.city.trim() || "Deutschland";
+  const domainRule =
+    params.onlyDeDomains !== false
+      ? "Ausschließlich eigene .de-Domains (z. B. https://www.firma.de)."
+      : "Eigene Unternehmensdomains.";
+
   const focus =
     params.track === "startup"
-      ? `junge B2B-Startups, SaaS-Produkte oder digitale Plattformen mit Sitz in ${region}`
-      : `lokale KMU, Handwerksbetriebe, Praxen, Kanzleien oder Dienstleister in ${region}`;
+      ? `kleinere bis mittlere B2B-Softwareunternehmen, SaaS-Anbieter oder digitale Produktteams (5 bis 50 Mitarbeiter) in ${region}`
+      : `inhabergeführte KMU, Arzt-/Zahnarztpraxen, Kanzleien, Autohäuser, Handwerks-/Bauunternehmen, Möbelhäuser oder kleinere Industrieunternehmen (5 bis 50 Mitarbeiter) in ${region}`;
 
-  const prompt = `Finde ${count} reale, aktuell existierende Unternehmen (${focus}) passend zu "${params.query}".
-REGELN:
-- Nur Unternehmen mit echter eigener Unternehmenswebsite (keine Verzeichnisse wie GelbeSeiten, KennstDuEinen, ProvenExpert, LinkedIn, Instagram, Northdata).
-- Erfinde NIEMALS eine Domain oder Firma.
-- Antworte ausschließlich mit einem validen JSON-Array ohne Markdown oder Erklärtext:
+  const skipList = (params.excludeDomains ?? []).slice(0, 20).join(", ");
+
+  const prompt = `Finde ${count} reale, aktuell existierende Unternehmen (${focus}) passend zum Bereich "${params.query}".
+WICHTIGE REGELN:
+- ${domainRule}
+- Keine Konzerne, keine Filialketten, keine Behörden/Kammern, keine Verzeichnisse (GelbeSeiten, KennstDuEinen, Jameda, Doctolib, Northdata, LinkedIn).
+- Bevorzuge etablierte Betriebe, deren Websites potenziell älter oder unübersichtlich wirken könnten.
+${skipList ? `- Diese Domains NICHT erneut nennen: ${skipList}\n` : ""}- Erfinde NIEMALS eine Domain oder Firma.
+- Antworte ausschließlich mit einem validen JSON-Array ohne Markdown oder Text davor/danach:
 [
   {
     "companyName": "Exakter Unternehmensname",
@@ -391,12 +410,12 @@ REGELN:
     taskType: "web_discovery",
     model: "perplexity/sonar",
     systemPrompt:
-      "Du bist ein B2B-Recherche-Assistent für Deutschland. Antworte ausschließlich mit einem JSON-Array realer Unternehmen samt eigener Website.",
+      "Du bist ein präziser B2B-Recherche-Assistent für Deutschland. Antworte ausschließlich mit einem JSON-Array realer Unternehmen samt eigener Firmenwebsite.",
     userPrompt: prompt,
-    temperature: 0.1,
-    maxTokens: 1100,
+    temperature: 0.15,
+    maxTokens: 1300,
     privacyMode: true,
-    summaryLabel: `Live-Websuche: ${params.query} (${region})`,
+    summaryLabel: `Live-Websuche (${params.query} · ${region})`,
     fallbackFn: () => "[]",
   });
 
@@ -420,38 +439,23 @@ REGELN:
     parsed = [];
   }
 
-  const DIRECTORY_BLOCKLIST = [
-    "gelbeseiten.de",
-    "11880.com",
-    "dasoertliche.de",
-    "kennstdueinen.de",
-    "linkedin.com",
-    "facebook.com",
-    "instagram.com",
-    "kununu.com",
-    "northdata.de",
-    "crunchbase.com",
-    "yelp.",
-    "jameda.de",
-    "doctolib.de",
-    "provenexpert.com",
-    "wer-zu-wem.de",
-  ];
-
   const seen = new Set<string>();
   const candidates: RadarCandidate[] = [];
 
   for (const row of parsed) {
     const name = String(row.companyName ?? "").trim().slice(0, 160);
-    const safeSite =
-      sanitizeExternalHref(String(row.websiteUrl ?? "")) ?? "";
-    if (!name || !safeSite) continue;
+    const safeSite = sanitizeExternalHref(String(row.websiteUrl ?? "")) ?? "";
+    if (
+      !isEligibleBusinessCandidate({
+        companyName: name,
+        websiteUrl: safeSite,
+        onlyDeDomains: params.onlyDeDomains !== false,
+      })
+    ) {
+      continue;
+    }
 
-    const domain = safeSite
-      .replace(/^https?:\/\/(www\.)?/i, "")
-      .replace(/\/.*$/, "")
-      .toLowerCase();
-    if (DIRECTORY_BLOCKLIST.some((blk) => domain.includes(blk))) continue;
+    const domain = normalizeDomain(safeSite);
     if (seen.has(domain)) continue;
     seen.add(domain);
 
@@ -477,5 +481,6 @@ REGELN:
     providerMode: aiRes.providerMode,
     modelUsed: aiRes.modelUsed,
     limitBlockedReason: aiRes.limitBlockedReason,
+    estimatedCostUsd: aiRes.estimatedCostUsd,
   };
 }

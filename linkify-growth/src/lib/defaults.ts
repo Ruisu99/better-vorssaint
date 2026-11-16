@@ -144,9 +144,9 @@ export const DEFAULT_WEEKLY_TARGETS: WeeklyTargets = {
 
 export const DEFAULT_BUDGET_CONFIG: BudgetConfig = {
   monthlyBudgetEur: 15,
-  dailyMaxCalls: 40,
-  maxTokensPerCall: 1200,
-  batchMaxLeads: 5,
+  dailyMaxCalls: 160,
+  maxTokensPerCall: 1600,
+  batchMaxLeads: 50,
   stopOnLimit: true,
   autoDowngradeAt75Pct: true,
   eurPerUsdRate: 0.92,
@@ -155,14 +155,14 @@ export const DEFAULT_BUDGET_CONFIG: BudgetConfig = {
 export function buildDefaultBrandProfile(ownerSub: string): BrandProfile {
   return {
     owner_sub: ownerSub,
-    brand_name: "Linkify",
+    brand_name: "Digitalagentur Linkify",
     owner_name: "Luis Schleicherdt",
     city: "Erfurt",
-    website_url: "https://linkify.tech",
+    website_url: "https://www.linkify.tech",
     contact_email: "info@linkify.tech",
-    phone_mobile: "",
+    phone_mobile: "+49 155 63477504",
     phone_landline: "",
-    postal_address: "",
+    postal_address: "Marktstraße 34C, 99084 Erfurt",
     tax_note:
       "Hinweis: Steuerliche Angaben, Pflichttexte und Angebotskonditionen vor Versand prüfen.",
     positioning_statement:
